@@ -94,17 +94,24 @@ step_saturation <- function(recipe, ...,
   .mm_require_recipes()
   type <- match.arg(type)
   ref <- match.arg(ref)
-  half_max <- .mm_check_scalar(half_max, "half_max", lower = 0, upper = 2,
-                               inclusive = c(FALSE, TRUE))
+  # Validate concrete values, but stand aside for `tune()` placeholders --
+  # both of these arguments are tunable, and forcing the check on a `tune()`
+  # marker would make them untunable.
+  if (!.mm_is_tune(half_max)) {
+    half_max <- .mm_check_scalar(half_max, "half_max", lower = 0, upper = 2,
+                                 inclusive = c(FALSE, TRUE))
+  }
   # For `type = "power"`, `shape` IS the exponent and must be in (0, 1]; the
   # other curves take any positive Hill exponent. Checking here means a bad
   # value is caught when the step is written, not part-way through a resample.
-  if (type == "power") {
-    shape <- .mm_check_scalar(shape, "shape", lower = 0, upper = 1,
-                              inclusive = c(FALSE, TRUE))
-  } else {
-    shape <- .mm_check_scalar(shape, "shape", lower = 0,
-                              inclusive = c(FALSE, TRUE))
+  if (!.mm_is_tune(shape)) {
+    if (type == "power") {
+      shape <- .mm_check_scalar(shape, "shape", lower = 0, upper = 1,
+                                inclusive = c(FALSE, TRUE))
+    } else {
+      shape <- .mm_check_scalar(shape, "shape", lower = 0,
+                                inclusive = c(FALSE, TRUE))
+    }
   }
   if (isTRUE(skip)) {
     cli::cli_abort(c(

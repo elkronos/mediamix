@@ -165,3 +165,20 @@
   }
   "<anonymous>"
 }
+
+# Is this argument a `tune()` placeholder rather than a value? Recipe steps
+# accept `tune()` in place of any tunable argument, so validation has to stand
+# aside for it -- eagerly checking the value would make the argument
+# untunable, which is the whole reason the step exists.
+#
+# `hardhat::tune()` returns a call; older tidymodels wrapped it in a quosure.
+# Both are handled, without taking a dependency on rlang.
+#' @keywords internal
+#' @noRd
+.mm_is_tune <- function(x) {
+  if (inherits(x, "quosure") || inherits(x, "formula")) {
+    if (length(x) >= 2L) x <- x[[length(x)]]
+  }
+  is.call(x) && length(x) >= 1L &&
+    identical(as.character(x[[1L]]), "tune")
+}

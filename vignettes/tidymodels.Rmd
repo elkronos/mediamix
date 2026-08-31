@@ -216,9 +216,11 @@ wf <- workflow() |> add_recipe(tune_rec) |> add_model(model)
 params <- extract_parameter_set_dials(wf)
 params
 
+# Kept deliberately small so the vignette rebuilds quickly on every check.
+# A real search would use more of both.
 set.seed(1)
 res <- tune_bayes(wf, resamples = folds, param_info = params,
-                  initial = 8, iter = 12,
+                  initial = 5, iter = 5,
                   metrics = yardstick::metric_set(yardstick::rmse))
 
 show_best(res, metric = "rmse", n = 5)

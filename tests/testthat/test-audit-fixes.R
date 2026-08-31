@@ -501,3 +501,70 @@ test_that("the tuning recipe from vignette('tidymodels') preps cleanly", {
   expect_true(all(vapply(juiced[predictors], is.numeric, logical(1))))
   expect_equal(nrow(juiced), nrow(north))
 })
+
+test_that("recipe steps accept tune() in every tunable argument", {
+  # Adding eager validation to these arguments made them reject `tune()`, which
+  # silently removes the ability to tune them -- the entire reason the steps
+  # exist. Validation must stand aside for a tune() placeholder and still fire
+  # on a concrete bad value.
+  skip_if_not_installed("recipes")
+  skip_if_not_installed("hardhat")
+  skip_if_not_installed("dials")
+  data(mm_weekly, package = "mediamix")
+  tune <- hardhat::tune
+  rec <- recipes::recipe(revenue ~ ., data = mm_weekly)
+
+  expect_no_error(step_adstock(rec, tv, index = "date", decay = tune()))
+  expect_no_error(step_adstock(rec, tv, index = "date", max_lag = tune()))
+  expect_no_error(step_saturation(rec, tv, half_max = tune()))
+  expect_no_error(step_saturation(rec, tv, shape = tune()))
+  expect_no_error(step_saturation(rec, tv, half_max = tune(), shape = tune()))
+
+  # Concrete bad values are still caught.
+  expect_error(step_adstock(rec, tv, index = "date", decay = 2), "decay")
+  expect_error(step_saturation(rec, tv, half_max = 5), "half_max")
+  expect_error(step_saturation(rec, tv, type = "power", shape = 1.5), "shape")
+
+  # And the marked parameters resolve into real dials objects with finite
+  # ranges, which is what tune_bayes() requires.
+  tunable_rec <- rec |>
+    step_adstock(tv, video, index = "date", decay = tune()) |>
+    step_saturation(tv, video, half_max = tune(), shape = tune())
+  ps <- hardhat::extract_parameter_set_dials(tunable_rec)
+  expect_setequal(ps$id, c("decay", "half_max", "shape"))
+  expect_false(any(dials::has_unknowns(ps$object)))
+  expect_no_error(dials::grid_regular(ps, levels = 2))
+})
+
+test_that("the vignette's resampling scheme preps and bakes on every split", {
+  # The joint-tuning chunk in vignette("tidymodels") only runs where the whole
+  # tidymodels stack is installed. This exercises everything up to the point
+  # tune() takes over: the splits, the recipe at sampled parameter values, and
+  # a clean bake of each assessment set.
+  skip_if_not_installed("recipes")
+  skip_if_not_installed("rsample")
+  data(mm_weekly, package = "mediamix")
+  north <- mm_weekly[mm_weekly$geo == "north", ]
+  north <- north[order(north$date), ]
+
+  folds <- rsample::rolling_origin(north, initial = 104, assess = 13,
+                                   skip = 12, cumulative = TRUE)
+  expect_gt(nrow(folds), 1L)
+
+  for (i in seq_len(nrow(folds))) {
+    sp <- folds$splits[[i]]
+    rec <- recipes::recipe(revenue ~ ., data = rsample::analysis(sp)) |>
+      recipes::update_role(date, new_role = "index") |>
+      recipes::step_rm(geo) |>
+      step_adstock(tv, video, search, social, display, index = "date",
+                   decay = 0.6) |>
+      step_saturation(tv, video, search, social, display, half_max = 0.4,
+                      shape = 1.2) |>
+      recipes::step_normalize(recipes::all_numeric_predictors())
+    prepped <- suppressWarnings(recipes::prep(rec))
+    baked <- suppressWarnings(recipes::bake(prepped,
+                                            new_data = rsample::assessment(sp)))
+    expect_equal(nrow(baked), nrow(rsample::assessment(sp)))
+    expect_false(anyNA(baked[c("tv", "video", "search", "social", "display")]))
+  }
+})

@@ -32,6 +32,7 @@ Suggests:
     dials (>= 1.0.0),
     generics,
     glmnet,
+    hardhat,
     knitr,
     parsnip,
     recipes (>= 1.0.0),

@@ -150,6 +150,15 @@ step_adstock <- function(recipe, ...,
   if (!is.null(by) && !is.character(by)) {
     cli::cli_abort("{.arg by} must be a character vector of column names.")
   }
+  # Both of these are tunable, so a `tune()` placeholder must pass straight
+  # through unchecked.
+  if (!.mm_is_tune(decay)) {
+    decay <- .mm_check_scalar(decay, "decay", lower = 0, upper = 1)
+  }
+  if (!.mm_is_tune(max_lag)) {
+    max_lag <- .mm_check_count(max_lag, "max_lag", min = 1L, allow_inf = TRUE)
+  }
+  tol <- .mm_check_scalar(tol, "tol", lower = 0, inclusive = c(FALSE, TRUE))
   recipes::add_step(recipe, .mm_step_adstock_new(
     terms = rlang::enquos(...),
     index = index, by = by, decay = decay, max_lag = max_lag,
