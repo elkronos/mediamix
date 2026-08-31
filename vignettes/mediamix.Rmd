@@ -1,0 +1,316 @@
+---
+title: "Getting started"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Getting started}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", fig.width = 7,
+                      fig.height = 4.2)
+options(digits = 4)
+```
+
+mediamix turns raw marketing data into model-ready features. It does two
+things, and deliberately not a third: it converts media spend into
+carryover- and saturation-adjusted regressors, and it converts raw event logs
+into attributed customer journeys. It does not fit models. `lm()`, `glmnet`
+and `brms` already do that better than a marketing package would.
+
+This vignette walks the whole arc on the media side: raw weekly spend, through
+diagnostics and transforms, to a fitted model, contributions and return on
+investment.
+
+```{r}
+library(mediamix)
+data(mm_weekly)
+
+north <- mm_weekly[mm_weekly$geo == "north", ]
+channels <- c("tv", "video", "search", "social", "display")
+str(north[, c("date", channels, "price", "revenue")])
+```
+
+## Look before you transform
+
+Most marketing mix projects fail for reasons visible in the data before any
+model is fitted. `diagnose_media()` runs those checks.
+
+```{r}
+diagnose_media(mm_weekly, media = channels, by = "geo")
+```
+
+Nothing structural is wrong here, which is what you would expect from
+synthetic data. On real data this is where you learn that two channels were
+planned together and their coefficients will therefore flip sign on any small
+change to the specification. The detail is in the pieces:
+
+```{r}
+d <- diagnose_media(mm_weekly, media = channels, by = "geo")
+d$variation
+```
+
+Read `zero_share` as the worst geography's dark-week rate, not an overall
+average: with `by` supplied, every column here reports the worst case across
+series, which is what you want from a diagnostic. `video` goes dark in 42% of
+weeks in its worst geography and `display` in a third. That is normal — media
+is flighted — but it means those channels carry less information than
+156 weeks per geography suggests.
+
+## Carryover
+
+Advertising does not stop working the week it runs. Adstock spreads each
+period's spend forward with geometric decay.
+
+```{r}
+spend <- c(100, 0, 0, 0, 0, 0)
+round(adstock_geometric(spend, decay = 0.5), 2)
+```
+
+Practitioners think in half-lives, not decay coefficients, so the package
+provides the translation and uses it everywhere:
+
+```{r}
+theta <- decay_from_half_life(3)   # a three-week half-life on weekly data
+theta
+half_life(theta)
+effective_window(theta, coverage = 0.90)
+```
+
+That last line says a three-week half-life still has 10% of its effect
+outstanding after 10 weeks — which is how you decide whether truncating the
+kernel costs you anything, and whether 156 weeks of data can identify a
+carryover this long at all.
+
+### Normalisation changes what your coefficient means
+
+This is the argument that most often changes an answer without anyone
+noticing, so it is explicit rather than implied.
+
+```{r}
+constant <- rep(100, 50)
+tail(adstock_geometric(constant, decay = 0.8), 1)                     # 100
+tail(adstock_geometric(constant, decay = 0.8, normalise = FALSE), 1)  # 500
+```
+
+Normalised, the kernel sums to 1: a constant spend of 100 adstocks to 100, the
+series level is preserved, and the fitted coefficient reads as the effect of
+*one unit of media*. Unnormalised — raw Koyck accumulation — the same series
+accumulates to `100 / (1 - 0.8)`, and the coefficient reads as the effect of
+one unit of *accumulated* media. Both are defensible. Comparing a coefficient
+fitted one way against a coefficient fitted the other is not.
+
+mediamix defaults to normalised. Robyn and most of the MMM literature do not,
+so if you are reconciling against either, set `normalise = FALSE`.
+
+### Dark weeks
+
+Media data is full of zero-spend weeks, and carryover has to survive them:
+
+```{r}
+flighted <- c(100, 100, 0, 0, 0, 0, 100)
+round(adstock_geometric(flighted, decay = 0.6), 2)
+```
+
+Carryover decays across the gap rather than resetting, and the new burst adds
+to what is left.
+
+### Delayed peaks
+
+A geometric kernel always peaks in the period of spend. Television and
+out-of-home routinely do not, and no decay rate fixes that. Weibull adstock
+can:
+
+```{r}
+w_geo <- adstock_weights(8, decay = 0.6)
+w_wei <- adstock_weights_weibull(8, shape = 2, scale = 3, type = "pdf")
+round(rbind(geometric = w_geo, weibull = w_wei), 3)
+which.max(w_wei)
+```
+
+## Saturation
+
+Adstock says *when* money works. Saturation says how hard it works at the
+margin.
+
+```{r}
+levels <- c(0, 25, 50, 100, 200, 400) * 1000
+round(rbind(
+  concave = saturate_hill(levels, half_max = 100000),
+  s_shape = saturate_hill(levels, half_max = 100000, shape = 3)
+), 3)
+```
+
+`half_max` is the spend at which the response reaches half its ceiling, which
+is interpretable in the units you actually budget in. `shape > 1` produces the
+threshold effect below which media barely registers.
+
+## Composing them, in the right order
+
+Saturation goes *after* adstock. Saturating first caps each period's spend in
+isolation and then lets carryover accumulate the capped values past the
+ceiling, which defeats the point of having a ceiling. `media_transform()`
+composes them correctly and refuses to do it backwards quietly.
+
+```{r}
+truth <- attr(mm_weekly, "truth")
+
+transformed <- as.data.frame(Map(
+  function(x, decay, half_max, shape) {
+    media_transform(
+      x,
+      adstock = list(decay = decay),
+      saturation = list(half_max = half_max, shape = shape)
+    )
+  },
+  north[channels], truth$decay[channels],
+  truth$half_max[channels], truth$shape[channels]
+))
+round(head(transformed, 4), 4)
+```
+
+`mm_weekly` was generated from known parameters, attached as its `"truth"`
+attribute, so here we can transform with the right ones. On real data you do
+not know them — see `vignette("carryover")` for how to choose them.
+
+## Fit whatever model you like
+
+mediamix stops here. The transformed columns are ordinary numeric vectors:
+
+```{r}
+model_data <- transformed
+model_data$week <- seq_len(nrow(model_data))
+model_data$price <- north$price
+model_data$seasonality <- north$seasonality
+model_data$holiday <- north$holiday
+
+fit <- lm(north$revenue ~ ., data = model_data)
+round(coef(fit)[channels])
+round(truth$beta[channels])
+```
+
+Close, not exact — 156 weekly observations of flighted, partly collinear media
+is a genuinely hard estimation problem, and pretending otherwise is how
+marketing mix models acquire their reputation.
+
+The controls are doing real work. Drop them and the media coefficients absorb
+the trend and the price effect instead:
+
+```{r}
+bare <- lm(north$revenue ~ ., data = transformed)
+round(rbind(true = truth$beta[channels],
+            with_controls = coef(fit)[channels],
+            without = coef(bare)[channels]))
+```
+
+Two of the five turn negative, and `search` collapses from 2621 to near zero.
+Nothing about the transform changed; the specification did.
+
+## Contributions and ROI
+
+A marketing mix deliverable is not the coefficients. It is the decomposition.
+
+```{r}
+contrib <- contributions(transformed, fit, index = north$date)
+round(tapply(contrib$contribution, contrib$channel, sum))
+```
+
+`"(baseline)"` is everything the model predicts that this decomposition does
+not attribute to the supplied media — the intercept, the trend, price,
+seasonality and the December uplift, pooled. It is *not* organic demand, and
+reporting it as such is the commonest way one of these decks overstates its
+own precision.
+
+Pooling it that way is what makes the arithmetic close exactly:
+
+```{r}
+totals <- as.numeric(tapply(contrib$contribution, contrib$period, sum))
+all.equal(totals, unname(fitted(fit)))
+```
+
+Media accounts for about a fifth of predicted revenue here, which is a
+plausible figure for a category with this much baseline:
+
+```{r}
+media_share <- 1 - sum(contrib$contribution[contrib$channel == "(baseline)"]) /
+  sum(contrib$contribution)
+round(media_share, 3)
+```
+
+```{r}
+roi(contrib, north[channels])
+```
+
+### Average and marginal return are different questions
+
+Average ROI is a scorecard. Marginal ROI is the decision variable — what the
+*next* pound returns — and it is the only one of the two that should drive a
+reallocation.
+
+Getting the marginal right needs one step of care. `mroi()` differentiates the
+saturation curve with respect to the *transformed* media that the coefficient
+multiplies, so it must be evaluated at the adstocked level, not at raw spend.
+And a pound spent this week only contributes the kernel's first weight to this
+week's adstock, so the chain rule puts a factor of that weight on the front.
+For a normalised geometric kernel that weight is `1 - decay`:
+
+```{r}
+marginal_on_spend <- function(ch) {
+  z <- adstock_geometric(north[[ch]], decay = truth$decay[[ch]])
+  kernel_weight <- 1 - truth$decay[[ch]]          # chain rule through adstock
+  mroi(spend_level = mean(z),
+       coefficient = coef(fit)[[ch]],
+       half_max = truth$half_max[[ch]],
+       shape = truth$shape[[ch]]) * kernel_weight
+}
+
+avg <- roi(contrib, north[channels])
+comparison <- t(vapply(channels, function(ch) {
+  c(average = avg$roi[avg$channel == ch], marginal = marginal_on_spend(ch))
+}, numeric(2)))
+round(comparison, 4)
+```
+
+Every channel's next pound returns less than its average pound here, and
+television's returns least of all — its long carryover means only 15% of a
+given week's spend lands in that week's adstock. Reallocating on the average
+column would send money to television; reallocating on the marginal column
+would not.
+
+That ordering is not universal, and it is worth knowing why. Under a *concave*
+curve — `shape = 1`, exponential, Michaelis–Menten — marginal is below average
+everywhere. Under an *S-shaped* curve, `shape > 1`, the response is convex
+below its inflection point, and there marginal is **above** average: the
+channel is under-funded rather than saturated, and each extra pound works
+harder than the ones already spent. Television's `shape` is 1.6, so it would
+show that pattern if its mean adstocked level sat lower on the curve.
+
+The full curve, and its inverse:
+
+```{r}
+curve <- response_curve(
+  spend = seq(0, 120000, by = 20000),
+  coefficient = coef(fit)[["tv"]],
+  half_max = truth$half_max[["tv"]], shape = truth$shape[["tv"]]
+)
+curve
+
+spend_for(target = 3000, coefficient = coef(fit)[["tv"]],
+          half_max = truth$half_max[["tv"]], shape = truth$shape[["tv"]])
+```
+
+These describe the curve the model fitted, which is not the same as what would
+happen if you actually spent that much. The curve is identified only over the
+range of spend the data contains; anything beyond it is extrapolation wearing
+a decimal point.
+
+## Where next
+
+- `vignette("carryover")` — choosing decay and lag by cross-validation against
+  your KPI rather than by eye.
+- `vignette("journeys")` — the attribution half: building customer journeys
+  from raw event logs.
+- `vignette("tidymodels")` — tuning carryover, saturation and model penalty
+  jointly.
+- `vignette("spine")` — why carryover and credit are the same idea.

@@ -1,0 +1,248 @@
+---
+title: "Choosing carryover parameters"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Choosing carryover parameters}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+options(digits = 4)
+```
+
+Decay and lag have to come from somewhere. Priors and vendor benchmarks are one
+answer. Cross-validation is another, and it has the advantage of being
+checkable: if the procedure works, it should recover a decay you planted in
+simulated data.
+
+This vignette is about doing that correctly, because there is a tempting way to
+do it that does not work.
+
+```{r}
+library(mediamix)
+```
+
+## The objective that does not work
+
+Here is a plausible-sounding procedure. Adstock the media series, fit a linear
+trend to the transformed series, extrapolate it one period ahead, and score it
+against the raw series. Grid-search decay and lag; take the best.
+
+It sounds reasonable and it is broken, for a reason that is easy to miss:
+**there is no dependent variable anywhere in that loop.** The criterion never
+sees the KPI. It scores how *smooth and trend-like* the transformed media
+series is, which is a property of the filter, not evidence about the media.
+
+Watch what it does on data where the true decay is 0.7:
+
+```{r}
+set.seed(42)
+n <- 156
+spend <- pmax(0, rnorm(n, 500, 250))
+truth <- 0.7
+kpi <- 200 + 0.5 * adstock_geometric(spend, decay = truth) + rnorm(n, sd = 5)
+
+no_kpi_objective <- function(x, max_lag, decay) {
+  z <- adstock_geometric(x, decay, max_lag = max_lag)
+  errs <- vapply(78:(n - 1), function(e) {
+    m <- lm(z[1:e] ~ seq_len(e))
+    (x[e + 1] - (coef(m)[1] + coef(m)[2] * (e + 1)))^2
+  }, numeric(1))
+  sqrt(mean(errs))
+}
+
+g <- expand.grid(max_lag = c(2, 5, 10, 20), decay = c(0.1, 0.5, 0.9))
+g$error <- mapply(function(l, d) no_kpi_objective(spend, l, d),
+                  g$max_lag, g$decay)
+g[order(g$error), ]
+```
+
+Two things are wrong here. The chosen decay is 0.1 against a truth of 0.7. And
+look at how little separates the contenders:
+
+```{r}
+c(spread_across_whole_grid = max(g$error) / min(g$error) - 1,
+  spread_across_best_four = sort(g$error)[4] / min(g$error) - 1)
+```
+
+The four best cells differ in the fifth significant figure, and the whole grid
+spans under 4%. There is almost no signal to select on, and what signal there
+is runs in a single direction: error rises monotonically with decay, because a
+harder-smoothed series is a worse predictor of a noisy raw one. The criterion
+is ranking filters by how much they smooth. It never sees the KPI, so it
+cannot rank them by anything else.
+
+## Putting the KPI in the loop
+
+`tune_carryover()` scores each candidate `(max_lag, decay)` by how well a model
+fitted on the adstocked media predicts *held-out KPI*:
+
+```{r}
+tuned <- tune_carryover(
+  spend, kpi,
+  max_lags = Inf,
+  decays = seq(0.05, 0.95, by = 0.05)
+)
+tuned
+```
+
+Recovered exactly. And it is not a fluke of one decay value:
+
+```{r}
+recover <- function(true_decay, seed = 1) {
+  set.seed(seed)
+  x <- pmax(0, rnorm(n, 500, 250))
+  y <- 200 + 0.5 * adstock_geometric(x, decay = true_decay) + rnorm(n, sd = 5)
+  t <- suppressWarnings(tune_carryover(
+    x, y, max_lags = Inf, decays = seq(0.05, 0.95, by = 0.05)))
+  c(true = true_decay, recovered = t$best$decay,
+    true_hl = half_life(true_decay), recovered_hl = t$best$half_life)
+}
+
+round(t(vapply(c(0.2, 0.35, 0.5, 0.7, 0.85), recover, numeric(4))), 3)
+```
+
+This recovery test lives in the package's own test suite. It is the check that
+the objective is measuring what it claims to.
+
+## Why slicing a fully adstocked series is legitimate
+
+`tune_carryover()` adstocks the whole series once per grid point and then cuts
+it into folds, rather than re-adstocking inside each fold. That looks like
+leakage and is not, because the filter is strictly causal:
+
+```{r}
+z <- adstock_geometric(spend, decay = 0.7)
+all.equal(z[1:40], adstock_geometric(spend[1:40], decay = 0.7))
+all.equal(z[1:100], adstock_geometric(spend[1:100], decay = 0.7))
+```
+
+The adstock value at time *t* depends only on media at times ≤ *t*. So an
+assessment period's regressor draws on training-period *media* — information
+genuinely available at prediction time — and never on future media. No KPI
+information crosses the boundary at any point. The package tests this
+invariant explicitly, precisely because the shortcut depends on it.
+
+## A correct objective is not the same as an easy problem
+
+Everything above uses a single channel with no confounders. Real data is not
+like that, and it is worth seeing how much harder it gets before trusting a
+number.
+
+`mm_weekly` has five correlated, flighted channels, a price term, a trend and
+seasonality, and 156 weekly observations. Tune each channel's decay one at a
+time against raw revenue, and:
+
+```{r}
+data(mm_weekly)
+north <- mm_weekly[mm_weekly$geo == "north", ]
+truth_params <- attr(mm_weekly, "truth")
+grid <- seq(0.1, 0.9, by = 0.05)
+
+channels <- names(truth_params$decay)
+
+one_at_a_time <- vapply(channels, function(ch) {
+  suppressWarnings(tune_carryover(north[[ch]], north$revenue,
+                                  max_lags = Inf, decays = grid))$best$decay
+}, numeric(1))
+
+rbind(true = truth_params$decay[channels], recovered = one_at_a_time)
+```
+
+Some are close, some are badly off. Nothing is wrong with the objective — it
+recovered five out of five true decays a moment ago. The problem is the
+*model* it is being evaluated against: a univariate regression of revenue on
+one adstocked channel, with no controls and no saturation. That model attributes
+the trend, the price effect, seasonality and the other four channels' work to
+whichever channel it is currently looking at, and the carryover that best
+predicts under those conditions is not the true one.
+
+Residualising the KPI against the controls first helps, but not enough:
+
+```{r}
+base <- lm(revenue ~ seq_len(nrow(north)) + price + seasonality + holiday,
+           data = north)
+
+residualised <- vapply(channels, function(ch) {
+  suppressWarnings(tune_carryover(north[[ch]], residuals(base),
+                                  max_lags = Inf, decays = grid))$best$decay
+}, numeric(1))
+
+rbind(true = truth_params$decay[channels],
+      raw_kpi = one_at_a_time,
+      residualised = residualised)
+```
+
+The lesson is not that cross-validation fails. It is that **carryover is not
+separable from the rest of the specification**, so tuning it one channel at a
+time against a model you do not intend to fit answers a question you did not
+ask. Two ways forward:
+
+- Pass the model you actually mean, via `fit_fn` and `predict_fn`. Note that
+  these receive only the adstocked media vector and `y`, so controls have to
+  reach them another way — a closure over pre-residualised `y`, as above, or
+  variables captured from the enclosing environment.
+- Better, tune all the channels' carryover and saturation *jointly*, inside the
+  same resampling as the model itself. That is what the recipes layer is for;
+  see `vignette("tidymodels")`.
+
+Either way, `tune_carryover()` on a single channel is a diagnostic and a
+starting point, not a deliverable.
+
+## Reading the result
+
+```{r}
+head(tuned$results, 5)
+```
+
+The `results` grid is worth looking at rather than just taking `best`. If the
+metric is nearly flat across a wide band of decay, the data does not identify
+carryover tightly and a confident point estimate would be overstating things.
+
+`tune_carryover()` warns when the winner is pinned to the edge of the grid:
+
+```{r}
+narrow <- tune_carryover(spend, kpi, max_lags = Inf,
+                         decays = seq(0.1, 0.5, by = 0.1))
+narrow$best$decay
+```
+
+Here the truth is 0.7 and the grid stops at 0.5, so the optimum is outside it.
+The warning is the signal to widen the grid rather than to believe the answer.
+
+## Sanity-check the answer against the data you have
+
+```{r}
+window <- effective_window(tuned$best$decay, coverage = 0.90)
+window
+```
+
+The selected decay of `r round(tuned$best$decay, 2)` implies `r window` periods
+before 90% of a burst's effect has played out. Compare that against the series
+length: if the effective window approaches a large fraction of it, the
+parameter is not identified by the data no matter how confident the
+cross-validation looks. Here `r window` periods against `r n` is comfortable.
+
+## Resampling schemes
+
+Both schemes are forward-only; neither ever trains on data that follows what it
+assesses.
+
+```{r}
+rolling <- tune_carryover(spend, kpi, max_lags = Inf,
+                          decays = seq(0.5, 0.9, by = 0.1),
+                          scheme = "rolling_origin")
+kfold <- tune_carryover(spend, kpi, max_lags = Inf,
+                        decays = seq(0.5, 0.9, by = 0.1),
+                        scheme = "k_fold_forward", k = 5)
+c(rolling = rolling$best$decay, k_fold = kfold$best$decay)
+```
+
+`"rolling_origin"` grows the training window one period at a time and gives
+many splits; `"k_fold_forward"` uses a handful of contiguous forward blocks and
+is cheaper on long series.
+
+For tuning carryover jointly with saturation and a model's own penalty, see
+`vignette("tidymodels")`.

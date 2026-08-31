@@ -1,0 +1,308 @@
+---
+title: "Building journeys from event logs"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Building journeys from event logs}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+options(digits = 4)
+```
+
+Attribution packages consume journeys — `"display > social > paid_search"`
+strings with conversion counts attached. Almost none of them produce those
+strings. `ChannelAttribution` has consumed them for eleven years and has never
+shipped the step that builds them, on the reasonable grounds that its job is
+Markov removal effects and it does that in C++.
+
+So the step gets done in analysis code, usually as a `group_by()` and a
+`paste(collapse = " > ")`. This vignette is about what that loses, because the
+answer is not small and it feeds the transition matrix directly.
+
+```{r}
+library(mediamix)
+data(mm_events)
+
+nrow(mm_events)
+head(mm_events)
+```
+
+`mm_events` is a synthetic log of about 21,000 touchpoint events across 5,400
+customers. It contains, on purpose, everything a real export contains: repeat
+converters, consecutive duplicate channels, direct and blank and missing
+channel labels, customers who never convert, timestamp ties, and rows in no
+particular order.
+
+## The naive approach
+
+One path per customer, in timestamp order:
+
+```{r}
+ordered <- mm_events[order(mm_events$customer_id, mm_events$timestamp), ]
+naive <- split(ordered$channel, ordered$customer_id)
+
+c(journeys = length(naive), mean_length = mean(lengths(naive)))
+```
+
+5,400 journeys at a mean length of 3.85. Now the same log through
+`build_paths()`:
+
+```{r}
+paths <- build_paths(
+  mm_events,
+  id = "customer_id",
+  channel = "channel",
+  timestamp = "timestamp",
+  conversion = "conversion",
+  value = "value"
+)
+path_summary(paths)
+```
+
+6,137 journeys — 14% more — at a mean length of 2.82, down 27%. Journey counts
+and lengths feed a Markov transition matrix directly, so a 14% error in the
+count and a 27% error in the length is not a rounding difference in the final
+numbers.
+
+Here is where the difference comes from, one concern at a time.
+
+```{r}
+step <- function(...) {
+  s <- path_summary(build_paths(
+    mm_events, id = "customer_id", channel = "channel",
+    timestamp = "timestamp", conversion = "conversion", ...))
+  c(journeys = s$journeys, mean_length = round(s$mean_length, 2))
+}
+
+rbind(
+  `naive`                       = c(length(naive), round(mean(lengths(naive)), 2)),
+  `split on conversion`         = step(split_on = "conversion",
+                                       collapse_repeats = FALSE),
+  `+ 30-day inactivity gap`     = step(split_on = c("conversion", "gap"),
+                                       gap = 30, collapse_repeats = FALSE),
+  `+ collapse duplicates`       = step(split_on = c("conversion", "gap"),
+                                       gap = 30, collapse_repeats = TRUE)
+)
+```
+
+## The seven things that go wrong
+
+### 1. Journey splitting
+
+A customer who converts in March and again in September is two journeys. Treat
+them as one and March's touchpoints take credit for September's sale, while
+the journey count falls by every repeat conversion in the file.
+
+```{r}
+repeat_buyers <- table(mm_events$customer_id[mm_events$conversion == 1])
+table(as.integer(repeat_buyers))
+```
+
+`split_on` also accepts `"gap"`, so a customer who disappears for four months
+and comes back starts a new journey rather than extending an eleven-month one.
+
+### 2. Lookback windows
+
+A touch two years before a conversion did not cause it. Thirty, sixty and
+ninety days are the standard choices, and they are standard because everybody
+copied each other.
+
+`conversion_lag()` lets you read the window off your own data instead:
+
+```{r}
+conversion_lag(paths)
+```
+
+Ninety per cent of journeys in this log complete within about fourteen days, so
+a 30-day window truncates almost nothing and a 90-day window is pure
+decoration. The long tail is real, though — the slowest journey takes 135 days
+— so a window is a decision about which tail to discard, not a free
+simplification. On a considered-purchase category the same table will tell you
+the opposite. No other package offers this, and it takes one line.
+
+### 3. Non-converting journeys
+
+These are kept by default, and you should think hard before changing that.
+
+```{r}
+with_nulls <- as_channel_paths(paths)
+head(with_nulls, 4)
+c(converting = sum(with_nulls$total_conversions),
+  null = sum(with_nulls$total_null))
+```
+
+Markov removal effects are computed *against* the null paths: the transition
+matrix needs an absorbing failure state to compare the conversion state with.
+Drop them and every channel's estimated effect is biased upward, silently.
+
+### 4. Direct, none and missing channels
+
+Every real log has them, and every tutorial handles them differently.
+
+```{r}
+table(build_paths(mm_events, id = "customer_id", channel = "channel",
+                  timestamp = "timestamp", conversion = "conversion",
+                  direct = "label")$channel)
+```
+
+`"keep"` leaves the labels alone (naming the unnamed ones so they can be
+referred to at all), `"label"` folds them into one `"(direct)"` channel, and
+`"drop"` removes those touches entirely. The choice moves the numbers, so it
+is an argument rather than a default buried in the source.
+
+### 5. Accounting for what gets dropped
+
+Dropping direct traffic can strip a converting journey of every touchpoint it
+had — including, sometimes, the touch that recorded the conversion. mediamix
+fixes the conversion facts before any filtering, so the conversion is never
+erased; it is counted and reported as unattributable.
+
+```{r}
+dropped <- build_paths(
+  mm_events, id = "customer_id", channel = "channel",
+  timestamp = "timestamp", conversion = "conversion",
+  lookback = 1, direct = "drop"
+)
+path_summary(dropped)[, c("conversions_observed", "converting_journeys",
+                          "conversions_unattributable")]
+```
+
+Those conversions happened. They just cannot be credited to any channel under
+these settings, and a pipeline that quietly reports a smaller denominator is
+lying by omission.
+
+### 6. Consecutive duplicates
+
+Three page views on the same channel are usually one exposure recorded three
+times. Collapsing them is what takes the mean journey length from 3.38 to
+2.81 in the table above. `collapse_repeats = TRUE` keeps the *first* touch of each run,
+preserving when the channel entered the journey — if you are using
+`credit_time_decay()`, consider `FALSE`, since keeping the first of a run
+pushes each channel's apparent recency backward.
+
+### 7. Deterministic ordering
+
+Logs written at second resolution are full of ties. `build_paths()` breaks
+them by original row order, so the same input always gives the same journeys —
+which matters because first-touch and last-touch results are otherwise not
+reproducible.
+
+## Assigning credit
+
+Five rules, plus a hook for your own. Each returns the journey table with a
+`credit` column, so they compose and compare.
+
+```{r}
+lin <- credit_linear(paths)
+head(lin[, c("path_id", "channel", "touch_rank", "touch_n", "credit")])
+```
+
+Credit sums to 1 within every converting journey, and total credit equals the
+number of attributable conversions — the invariant that catches journeys
+silently dropped in construction:
+
+```{r}
+c(total_credit = sum(lin$credit),
+  attributable = path_summary(paths)$converting_journeys)
+```
+
+`attribute()` runs several rules at once, which is the point:
+
+```{r}
+res <- attribute(paths)
+head(res, 8)
+```
+
+## The spread is the finding
+
+Any single rule gives you a number. Several rules give you the range that
+number could have been, which is more honest and usually more useful:
+
+```{r}
+attribution_spread(res)
+```
+
+Display's share runs from 7% to 29% depending only on the convention chosen.
+That channel has not been measured; it has been assigned a number. Paid search
+and email move the other way. `channel_positions()` says why:
+
+```{r}
+channel_positions(paths)
+```
+
+Display opens journeys — it appears first six times for every once it appears
+last — while paid search and email close them. First-touch and last-touch
+attribution therefore disagree about them by construction, and reporting either
+one alone is choosing a side of that disagreement without saying so.
+
+Note that both tables carry a column called `first_last_ratio` and they are not
+the same quantity. Here it is a ratio of touchpoint *counts* (6.10 for
+display); in `attribution_spread()` above it is a ratio of credited *shares*
+(4.06). Both say display opens journeys; they are measured in different
+currencies and will not agree numerically.
+
+The assist matrix is the other half of the picture:
+
+```{r}
+real <- c("display", "social", "organic_search", "paid_search", "email")
+round(assisted_conversions(paths, normalise = TRUE)[real, real], 3)
+```
+
+Read a row as "this channel assisted these channels". Display precedes paid
+search in 42% of the converting journeys display appears in; paid search
+precedes display in only 10% of its own. That asymmetry is the same finding as
+the first-versus-last ratio, seen pairwise rather than in aggregate.
+
+## Time decay, and the connection to the other half
+
+`credit_time_decay()` spreads a conversion's credit backward across prior
+touchpoints with geometric decay — the same kernel `adstock_geometric()` uses
+to spread spend forward, and the same `decay` vocabulary:
+
+```{r}
+td <- credit_time_decay(paths, decay = decay_from_half_life(3))
+example <- td[td$path_id == td$path_id[td$converted & td$touch_n >= 4][1], ]
+example[, c("channel", "touch_rank", "time_to_conversion", "credit")]
+```
+
+That symmetry is not a coincidence. See `vignette("spine")`.
+
+## Handing off to ChannelAttribution
+
+mediamix does not compute Markov removal effects, because `ChannelAttribution`
+does it properly in C++. `as_channel_paths()` exports the journeys in exactly
+the format it expects:
+
+```{r}
+ca <- as_channel_paths(paths)
+head(ca, 4)
+```
+
+```{r ca, eval = requireNamespace("ChannelAttribution", quietly = TRUE)}
+ChannelAttribution::markov_model(
+  ca, var_path = "path",
+  var_conv = "total_conversions", var_null = "total_null"
+)
+```
+
+```{r eval = !requireNamespace("ChannelAttribution", quietly = TRUE), echo = FALSE, comment = NA}
+cat("ChannelAttribution is not installed, so the chunk above was not run.\n")
+```
+
+That is twenty lines of interop and it makes mediamix the front end to a good
+package rather than a worse competitor to it.
+
+## One caveat, stated plainly
+
+Rule-based attribution is a bookkeeping convention, not a causal estimate. It
+divides observed conversions among observed touchpoints according to a rule you
+chose. It cannot tell you what would have happened if a channel had not run,
+because that outcome is not in the log — no rule, however sophisticated,
+recovers a counterfactual from data that does not contain one. Only an
+experiment does.
+
+Well-built journeys make the bookkeeping honest, comparable across rules, and
+reproducible. That is worth a great deal. It is not incrementality.

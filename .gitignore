@@ -1,0 +1,25 @@
+# R session leftovers
+.Rhistory
+.RData
+.Rproj.user/
+.Ruserdata
+
+# Build and check artefacts
+*.tar.gz
+*.tgz
+*.Rcheck/
+..Rcheck/
+CRAN-SUBMISSION
+
+# Vignettes built into the package tree
+inst/doc/
+/doc/
+/Meta/
+
+# Compiled objects (none today, but a src/ may appear)
+src/*.o
+src/*.so
+src/*.dll
+
+# macOS
+.DS_Store

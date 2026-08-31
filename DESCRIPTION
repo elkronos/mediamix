@@ -1,0 +1,50 @@
+Package: mediamix
+Title: Media Transforms and Attribution Path Construction
+Version: 0.4.0
+Authors@R: 
+    person("Justin", "Chase", , "jchase.msu@gmail.com", role = c("aut", "cre"))
+Description: Feature engineering for marketing mix modelling and multi-touch
+    attribution. Converts raw media spend into carryover- and
+    saturation-adjusted regressors using geometric and Weibull adstock
+    kernels and four saturation curves, and converts raw event logs into
+    model-ready customer journeys with rule-based credit assignment.
+    Carryover parameters are selected by cross-validation against an actual
+    key performance indicator using a user-supplied model, rather than by a
+    heuristic. The core transforms depend only on base R and 'stats';
+    optional 'recipes' steps and 'dials' parameter objects support joint
+    tuning of carryover, saturation and model hyperparameters. Adstock
+    methods follow Broadbent (1979, Journal of the Market Research Society,
+    21(3), 139-166); saturation curves follow Hill (1910, The Journal of
+    Physiology, 40, iv-vii).
+License: MIT + file LICENSE
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+Depends: 
+    R (>= 4.1)
+Imports: 
+    cli,
+    data.table,
+    parallel,
+    stats,
+    utils
+Suggests: 
+    ChannelAttribution,
+    dials (>= 1.0.0),
+    generics,
+    glmnet,
+    knitr,
+    parsnip,
+    recipes (>= 1.0.0),
+    rlang,
+    rmarkdown,
+    rsample,
+    testthat (>= 3.0.0),
+    tune,
+    workflows,
+    yardstick
+VignetteBuilder: knitr
+Config/testthat/edition: 3
+LazyData: true
+RoxygenNote: 7.3.1
+URL: https://github.com/elkronos/mediamix
+BugReports: https://github.com/elkronos/mediamix/issues
