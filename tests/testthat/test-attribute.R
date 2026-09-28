@@ -10,7 +10,7 @@ test_that("attribute() returns one row per rule x channel and share sums to 1 wi
   expect_s3_class(res, "data.frame")
   expect_identical(names(res)[1:4], c("rule", "channel", "conversions", "share"))
 
-  rules <- c("linear", "first", "last", "position", "time_decay")
+  rules <- c("linear", "first", "last", "position", "time_decay", "markov")
   n_channels <- length(unique(paths$channel))
   expect_identical(nrow(res), length(rules) * n_channels)
 

@@ -1,0 +1,244 @@
+---
+title: "Walkthrough: from weekly spend to a budget recommendation"
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+options(digits = 4)
+```
+
+This article follows one question from raw data to an answer: **if the
+marketing budget stays the same, should any of it move between channels?**
+It uses the north geography of `mm_weekly`, 156 weeks of five channels,
+generated from known parameters so that every step can be checked against the
+truth.
+
+The getting-started vignette introduces each function. This article is about
+using them together, and about where the answer is solid and where it is not.
+
+```{r}
+library(mediamix)
+data(mm_weekly)
+
+channels <- c("tv", "video", "search", "social", "display")
+truth <- attr(mm_weekly, "truth")
+north <- mm_weekly[mm_weekly$geo == "north", ]
+north <- north[order(north$date), ]
+north$week <- seq_len(nrow(north))
+```
+
+## 1. Check the data can answer the question
+
+```{r}
+d <- diagnose_media(north, media = channels)
+d
+d$collinearity[, c("channel", "vif", "most_correlated_with", "correlation")]
+```
+
+No channel is collinear enough to make its coefficient meaningless, and every
+one varies. Video and display are dark in a third or more of weeks, so they
+carry less information than their row count suggests — worth remembering when
+their numbers come out.
+
+## 2. Carryover: how well does the data identify it?
+
+Before fitting anything, ask what the data says about each channel's carryover
+on its own. The KPI is residualised against the controls first, so the tuning
+does not credit trend and seasonality to media:
+
+```{r}
+controls <- lm(revenue ~ week + price + seasonality + holiday, data = north)
+grid <- seq(0.05, 0.95, by = 0.05)
+
+tuned <- lapply(channels, function(ch) {
+  suppressWarnings(tune_carryover(north[[ch]], residuals(controls),
+                                  decays = grid))
+})
+names(tuned) <- channels
+
+rbind(
+  truth  = truth$decay[channels],
+  best   = vapply(tuned, function(t) t$best$decay, numeric(1)),
+  one_se = vapply(tuned, function(t) t$best_1se$decay, numeric(1))
+)
+```
+
+Television's long carryover is found. For the others, the one-channel-at-a-time
+search cannot separate their carryover from zero — `one_se` says the data is
+consistent with almost no carryover at all — and `best` lands on values that
+are wrong in both directions. That is the expected result of tuning channels
+one at a time, as `vignette("carryover")` explains; the remedy is to tune them
+jointly inside the model you intend to fit, as `vignette("tidymodels")` shows.
+
+To keep this walkthrough about the *decision* rather than the estimation, the
+rest of it uses the generating parameters — the answer a well-specified joint
+search is trying to reach. Section 6 comes back to what happens when
+television's carryover is uncertain.
+
+## 3. Fit the model
+
+```{r}
+spec <- lapply(channels, function(ch) list(
+  adstock = list(decay = truth$decay[[ch]]),
+  saturation = list(half_max = truth$half_max[[ch]],
+                    shape = truth$shape[[ch]])
+))
+names(spec) <- channels
+
+transform_plan <- function(plan, spec) {
+  as.data.frame(lapply(stats::setNames(channels, channels), function(ch) {
+    media_transform(plan[[ch]], adstock = spec[[ch]]$adstock,
+                    saturation = spec[[ch]]$saturation)
+  }))
+}
+
+media <- transform_plan(north, spec)
+model_data <- cbind(media, north[c("week", "price", "seasonality", "holiday")])
+fit <- lm(north$revenue ~ ., data = model_data)
+round(rbind(estimate = coef(fit)[channels], truth = truth$beta[channels]))
+```
+
+## 4. Where did the revenue come from?
+
+```{r}
+contrib <- contributions(media, fit, index = north$date)
+avg <- roi(contrib, north[channels])
+avg
+```
+
+Every channel returns more than it costs on average. On this table alone the
+tempting move is to take money from television, the lowest average ROI, and
+give it to social, the highest.
+
+## 5. What would the next pound do?
+
+Average ROI describes the budget that was spent. The reallocation question is
+about the *margin*, and `marginal_roi()` answers it by re-running the whole
+transform on a slightly larger budget:
+
+```{r}
+marginal <- do.call(rbind, lapply(channels, function(ch) {
+  cbind(channel = ch, marginal_roi(
+    north[[ch]], coefficient = coef(fit)[[ch]],
+    adstock = spec[[ch]]$adstock, saturation = spec[[ch]]$saturation
+  ))
+}))
+marginal <- merge(marginal[, c("channel", "mroi")],
+                  avg[, c("channel", "roi", "spend")], by = "channel")
+marginal[order(-marginal$mroi), ]
+```
+
+The ranking changes. Social still has the highest marginal return, but
+television is no longer at the bottom: its S-shaped response means its next
+pound works nearly as hard as its average one. Display is now last, and its
+marginal return is below 1 — the last pounds spent on it did not pay for
+themselves.
+
+So the candidate move is *display to social*, not *television to social*.
+
+## 6. Test the move before recommending it
+
+A marginal return is a derivative. A real reallocation is a finite change, and
+the response curves bend along the way, so simulate the new plan through the
+model rather than multiplying by a marginal rate. Everything except the two
+channels is held fixed, and the controls do not change, so the difference in
+predicted revenue is the difference in media response:
+
+```{r}
+media_revenue <- function(plan, spec) {
+  m <- transform_plan(plan, spec)
+  sum(vapply(channels, function(ch) coef(fit)[[ch]] * sum(m[[ch]]),
+             numeric(1)))
+}
+
+# Move an amount of budget from one channel to another. Each channel's
+# flighting pattern is kept: the change is spread over its weeks in
+# proportion to its existing spend.
+move <- function(from, to, amount, spec) {
+  plan <- north
+  plan[[from]] <- plan[[from]] * (1 - amount / sum(plan[[from]]))
+  plan[[to]] <- plan[[to]] + amount * plan[[to]] / sum(plan[[to]])
+  gain <- media_revenue(plan, spec) - media_revenue(north, spec)
+  c(moved = amount, revenue_change = gain, per_pound_moved = gain / amount)
+}
+
+tenth <- 0.10 * sum(north$display)
+rbind(
+  `display -> social` = move("display", "social", tenth, spec),
+  `tv -> social`      = move("tv", "social", tenth, spec),
+  `display -> social, 2.5x` = move("display", "social", 2.5 * tenth, spec)
+)
+```
+
+Moving a tenth of display's budget into social raises predicted revenue at no
+extra cost. Moving the *same amount* out of television instead — the move the
+average-ROI table suggested — gains less, because it gives up television's
+still-steep response. Moving two and a half times as much out of display
+gains more in total but less per pound, as social climbs its own curve.
+
+Two checks before this goes in a deck. First, is the new plan inside the data?
+
+```{r}
+peak <- function(amount) max(north$social + amount * north$social /
+                               sum(north$social))
+c(observed = max(north$social), smaller_move = peak(tenth),
+  larger_move = peak(2.5 * tenth))
+```
+
+Both moves push social's busiest week above anything in the data: the smaller
+by about 7%, the larger by about 18%. A little beyond the observed range is the
+unavoidable price of asking what *more* would do, but the further out a plan
+goes, the more of its predicted gain is the fitted curve's shape rather than
+evidence. The smaller move stays close enough to the data to be worth
+testing; the larger one should wait for that test.
+
+Second, how sensitive is the answer to carryover it could not pin down? In
+section 2 the data was consistent with a television decay as low as the
+one-SE value. Refit with that and ask again:
+
+```{r}
+tv_alt <- tuned$tv$best_1se$decay
+spec_alt <- spec
+spec_alt$tv$adstock$decay <- tv_alt
+
+media_alt <- transform_plan(north, spec_alt)
+fit_alt <- lm(north$revenue ~ .,
+              data = cbind(media_alt,
+                           north[c("week", "price", "seasonality", "holiday")]))
+
+c(tv_decay = tv_alt,
+  tv_mroi_truth = marginal$mroi[marginal$channel == "tv"],
+  tv_mroi_alt = marginal_roi(
+    north$tv, coefficient = coef(fit_alt)[["tv"]],
+    adstock = spec_alt$tv$adstock, saturation = spec_alt$tv$saturation
+  )$mroi)
+```
+
+Television's marginal return depends heavily on a carryover the data only
+loosely identifies: at the shorter decay its next pound no longer pays for
+itself. The display-to-social move does not involve television, which is one
+more reason to prefer it — it is the recommendation that survives the
+uncertainty. Whether television is over- or under-funded is a question this
+data cannot settle, and saying so is part of the answer.
+
+## 7. What to say, and what not to
+
+The recommendation this analysis supports is modest and specific: *move
+around a tenth of display's budget into social, leave television alone until
+its carryover is better measured, and test the move before scaling it.* The last part matters most. Every number
+here rests on a model fitted to observational data; a geo experiment — run the
+new allocation in one region and compare — turns the model's prediction into
+a measurement, and its result can then be used to calibrate the model's
+priors or constraints.
+
+What this analysis does not support: a precise revenue forecast for the new
+plan, any move that takes a channel far outside the spend it has historically
+run at, or a ranking of channels by average ROI.
+
+## Where next
+
+- `vignette("tidymodels")` to tune every channel's carryover and saturation
+  jointly rather than one at a time.
+- `vignette("carryover")` for why one-at-a-time tuning goes wrong.
+- [Methods and references](methodology.html) for the research behind each
+  step.

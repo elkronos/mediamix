@@ -34,8 +34,11 @@
 #'     \item{`correlations`}{Pairwise correlation matrix. With `by` supplied,
 #'       each cell is the group value with the largest magnitude, sign
 #'       preserved.}
-#'     \item{`cpm`}{Implied cost per mille per period, with outlier flags, when
-#'       `spend` and `impressions` are supplied. `NULL` otherwise.}
+#'     \item{`cpm`}{Implied cost per mille for each row of `data` (`row` is
+#'       the row number), with the series median and an outlier flag, when
+#'       `spend` and `impressions` are supplied; with `by`, the median and
+#'       outlier rule are computed within each series and a `group` column is
+#'       added. `NULL` otherwise.}
 #'     \item{`flags`}{Character vector of the problems found, in the order they
 #'       should be dealt with. Empty when nothing was found.}
 #'     \item{`n_obs`, `n_groups`, `grouped`}{Rows examined, series examined,
@@ -163,7 +166,8 @@ diagnose_media <- function(data, media, spend = NULL, impressions = NULL,
   cors <- .mm_worst_cor(per_group_stats, media)
   collinearity <- .mm_collinearity_table(per_group_stats, media, cors,
                                          vif_threshold)
-  cpm <- .mm_cpm_table(data, spend, impressions)
+  cpm <- .mm_cpm_table(data, spend, impressions, grp,
+                       grouped = !is.null(by) && length(by) > 0L)
 
   flags <- character(0)
   if (length(dead) > 0L) {
@@ -316,24 +320,38 @@ print.mm_diagnosis <- function(x, ...) {
 
 #' @keywords internal
 #' @noRd
-.mm_cpm_table <- function(data, spend, impressions) {
+.mm_cpm_table <- function(data, spend, impressions, grp = NULL,
+                          grouped = FALSE) {
   if (is.null(spend) || is.null(impressions)) return(NULL)
   if (length(spend) != length(impressions)) {
     cli::cli_abort("{.arg spend} and {.arg impressions} must name the same \\
                     number of columns, in matching order.",
                    call = parent.frame(2))
   }
+  if (is.null(grp)) grp <- list(".all" = seq_len(nrow(data)))
+  # The median and MAD are computed within each series. Pooled across
+  # geographies, a region that simply buys media at a different price would
+  # be flagged as a stream of join errors.
   rows <- lapply(seq_along(spend), function(i) {
     s <- as.numeric(data[[spend[i]]])
     imp <- as.numeric(data[[impressions[i]]])
-    cpm <- ifelse(imp > 0, s / imp * 1000, NA_real_)
-    med <- stats::median(cpm, na.rm = TRUE)
-    madv <- stats::mad(cpm, na.rm = TRUE)
-    outlier <- !is.na(cpm) & madv > 0 & abs(cpm - med) > 5 * madv
-    data.frame(channel = spend[i], period = seq_along(cpm), cpm = cpm,
-               median_cpm = med, outlier = outlier, stringsAsFactors = FALSE)
+    cpm_all <- ifelse(imp > 0, s / imp * 1000, NA_real_)
+    do.call(rbind, lapply(names(grp), function(g) {
+      r <- grp[[g]]
+      cpm <- cpm_all[r]
+      med <- stats::median(cpm, na.rm = TRUE)
+      madv <- stats::mad(cpm, na.rm = TRUE)
+      outlier <- !is.na(cpm) & is.finite(madv) & madv > 0 &
+        abs(cpm - med) > 5 * madv
+      out <- data.frame(channel = spend[i], row = r, cpm = cpm,
+                        median_cpm = med, outlier = outlier,
+                        stringsAsFactors = FALSE)
+      if (grouped) out$group <- .mm_show_key(g)
+      out
+    }))
   })
   out <- do.call(rbind, rows)
+  out <- out[order(out$channel, out$row), , drop = FALSE]
   rownames(out) <- NULL
   out
 }

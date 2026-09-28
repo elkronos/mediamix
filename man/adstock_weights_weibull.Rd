@@ -45,13 +45,19 @@ decay rate.
 The two forms answer different questions.
 
 The \code{"cdf"} form builds the kernel as a cumulative product of Weibull
-survival probabilities. Numbering lags from 1 so that \eqn{w_1} is the
-period of spend, \eqn{w_i = \prod_{j<i} (1 - F(j))}, so \eqn{w_1 = 1} and
-each later weight is the previous one times the probability of surviving
-another period. This is a
-\emph{generalisation of the geometric kernel}: it is always monotonically
-decreasing, but the rate of decay can itself change over time, which the
-single-parameter geometric kernel cannot do.
+survival values. Numbering lags from 1 so that \eqn{w_1} is the period of
+spend, \eqn{w_i = \prod_{j<i} (1 - F(j))}, where \eqn{F} is the Weibull
+distribution function, so \eqn{w_1 = 1} and each later weight is the
+previous one times \eqn{1 - F(j)}. Read \eqn{1 - F(j)} as a time-varying
+retention rate: it plays the role that the constant \eqn{\theta} plays in
+the geometric kernel, which is the sense in which this form \emph{generalises}
+geometric decay. It is always monotonically decreasing, but the rate of
+decay can itself change over time. Note that the kernel is the running
+product of these values, not the Weibull survival function itself, so it
+falls faster than \eqn{1 - F(i)}. The construction is the one Robyn calls
+\code{"weibull_cdf"}; Robyn, however, expresses \code{scale} as a quantile of the
+window length rather than in periods, so its fitted scale values are not
+directly comparable with this function's.
 
 The \code{"pdf"} form uses the Weibull density directly, \eqn{w_i \propto f(i)}.
 This is the form that permits a delayed peak, and it is the reason to reach

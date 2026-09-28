@@ -101,8 +101,9 @@ accumulates to `100 / (1 - 0.8)`, and the coefficient reads as the effect of
 one unit of *accumulated* media. Both are defensible. Comparing a coefficient
 fitted one way against a coefficient fitted the other is not.
 
-mediamix defaults to normalised. Robyn and most of the MMM literature do not,
-so if you are reconciling against either, set `normalise = FALSE`.
+mediamix defaults to normalised, as does the Bayesian MMM of Jin et al.
+(2017). Robyn's geometric adstock does not, so if you are reconciling against
+Robyn, set `normalise = FALSE`.
 
 ### Dark weeks
 
@@ -204,7 +205,8 @@ round(rbind(true = truth$beta[channels],
             without = coef(bare)[channels]))
 ```
 
-Two of the five turn negative, and `search` collapses from 2621 to near zero.
+Two of the five turn negative, and `search` collapses from
+`r round(coef(fit)[["search"]])` to `r round(coef(bare)[["search"]])`.
 Nothing about the transform changed; the specification did.
 
 ## Contributions and ROI
@@ -248,49 +250,63 @@ Average ROI is a scorecard. Marginal ROI is the decision variable — what the
 *next* pound returns — and it is the only one of the two that should drive a
 reallocation.
 
-Getting the marginal right needs one step of care. `mroi()` differentiates the
-saturation curve with respect to the *transformed* media that the coefficient
-multiplies, so it must be evaluated at the adstocked level, not at raw spend.
-And a pound spent this week only contributes the kernel's first weight to this
-week's adstock, so the chain rule puts a factor of that weight on the front.
-For a normalised geometric kernel that weight is `1 - decay`:
+The tempting shortcut is to differentiate the saturation curve at the mean
+adstocked level and multiply by the kernel's first weight, `1 - decay`, on the
+grounds that a pound spent this week only adds that much to this week's
+adstock. It does — but it also adds to every later week's adstock, and under a
+normalised kernel those contributions sum to the whole pound. The shortcut
+measures the return *inside the week of spend* and ignores the rest, which for
+a slow channel is most of it.
+
+`marginal_roi()` avoids the calculus altogether. It re-runs the full transform
+on a budget 1% larger in every week and divides the extra response by the
+extra spend — the definition used by Jin et al. (2017) and by Meridian —
+so carryover and flighting are both handled by construction, and the result is
+a total over the same weeks as the average:
 
 ```{r}
-marginal_on_spend <- function(ch) {
-  z <- adstock_geometric(north[[ch]], decay = truth$decay[[ch]])
-  kernel_weight <- 1 - truth$decay[[ch]]          # chain rule through adstock
-  mroi(spend_level = mean(z),
-       coefficient = coef(fit)[[ch]],
-       half_max = truth$half_max[[ch]],
-       shape = truth$shape[[ch]]) * kernel_weight
-}
-
-avg <- roi(contrib, north[channels])
-comparison <- t(vapply(channels, function(ch) {
-  c(average = avg$roi[avg$channel == ch], marginal = marginal_on_spend(ch))
-}, numeric(2)))
-round(comparison, 4)
+marginal <- do.call(rbind, lapply(channels, function(ch) {
+  cbind(channel = ch, marginal_roi(
+    north[[ch]], coefficient = coef(fit)[[ch]],
+    adstock = list(decay = truth$decay[[ch]]),
+    saturation = list(half_max = truth$half_max[[ch]],
+                      shape = truth$shape[[ch]])
+  ))
+}))
+marginal[, c("channel", "roi", "mroi")]
 ```
 
-Every channel's next pound returns less than its average pound here, and
-television's returns least of all — its long carryover means only 15% of a
-given week's spend lands in that week's adstock. Reallocating on the average
-column would send money to television; reallocating on the marginal column
-would not.
+Compare the shortcut for television, whose decay of 0.85 means only 15% of a
+week's spend lands in that week's adstock:
 
-That ordering is not universal, and it is worth knowing why. Under a *concave*
-curve — `shape = 1`, exponential, Michaelis–Menten — marginal is below average
-everywhere. Under an *S-shaped* curve, `shape > 1`, the response is convex
-below its inflection point, and there marginal is **above** average: the
-channel is under-funded rather than saturated, and each extra pound works
-harder than the ones already spent. Television's `shape` is 1.6, so it would
-show that pattern if its mean adstocked level sat lower on the curve.
+```{r}
+z_tv <- adstock_geometric(north$tv, decay = truth$decay[["tv"]])
+shortcut <- mroi(mean(z_tv), coefficient = coef(fit)[["tv"]],
+                 half_max = truth$half_max[["tv"]],
+                 shape = truth$shape[["tv"]]) * (1 - truth$decay[["tv"]])
+c(shortcut = shortcut, simulated = marginal$mroi[marginal$channel == "tv"])
+```
+
+The shortcut understates television's marginal return about six-fold, and a
+reallocation built on it would strip budget from exactly the channel whose
+effect arrives late.
+
+Read the simulated column instead. Display's average pound returns about 1.5,
+but its *next* pound returns less than it costs: it is over-funded, and the
+average-ROI table hides that completely. Search and social have average
+returns roughly double their marginal ones — concave curves, well up the
+slope. Television is the odd one out: its marginal return is close to its
+average, because its S-shaped curve (`shape = 1.6`) is still near its steepest
+section at this budget. Under a concave curve marginal is below average
+everywhere; under an S-curve it can be close to or even above it below the
+inflection point, and assuming otherwise is how a threshold channel stays
+starved.
 
 The full curve, and its inverse:
 
 ```{r}
 curve <- response_curve(
-  spend = seq(0, 120000, by = 20000),
+  spend = seq(0, 6000, by = 1000),
   coefficient = coef(fit)[["tv"]],
   half_max = truth$half_max[["tv"]], shape = truth$shape[["tv"]]
 )
@@ -314,3 +330,8 @@ a decimal point.
 - `vignette("tidymodels")` — tuning carryover, saturation and model penalty
   jointly.
 - `vignette("spine")` — why carryover and credit are the same idea.
+
+## References
+
+Jin, Y., Wang, Y., Sun, Y., Chan, D. and Koehler, J. (2017). *Bayesian
+methods for media mix modeling with carryover and shape effects.* Google Inc.

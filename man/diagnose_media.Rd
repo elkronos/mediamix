@@ -51,8 +51,11 @@ all. \code{NA} is not \code{TRUE}.}
 \item{\code{correlations}}{Pairwise correlation matrix. With \code{by} supplied,
 each cell is the group value with the largest magnitude, sign
 preserved.}
-\item{\code{cpm}}{Implied cost per mille per period, with outlier flags, when
-\code{spend} and \code{impressions} are supplied. \code{NULL} otherwise.}
+\item{\code{cpm}}{Implied cost per mille for each row of \code{data} (\code{row} is
+the row number), with the series median and an outlier flag, when
+\code{spend} and \code{impressions} are supplied; with \code{by}, the median and
+outlier rule are computed within each series and a \code{group} column is
+added. \code{NULL} otherwise.}
 \item{\code{flags}}{Character vector of the problems found, in the order they
 should be dealt with. Empty when nothing was found.}
 \item{\code{n_obs}, \code{n_groups}, \code{grouped}}{Rows examined, series examined,

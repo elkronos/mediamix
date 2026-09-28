@@ -13,9 +13,9 @@ options(digits = 4)
 ```
 
 Attribution packages consume journeys — `"display > social > paid_search"`
-strings with conversion counts attached. Almost none of them produce those
-strings. `ChannelAttribution` has consumed them for eleven years and has never
-shipped the step that builds them, on the reasonable grounds that its job is
+strings with conversion counts attached. Producing those strings from a raw
+event log is usually left to the analyst: `ChannelAttribution`, for instance,
+starts from the aggregated paths, on the reasonable grounds that its job is
 Markov removal effects and it does that in C++.
 
 So the step gets done in analysis code, usually as a `group_by()` and a
@@ -121,7 +121,7 @@ a 30-day window truncates almost nothing and a 90-day window is pure
 decoration. The long tail is real, though — the slowest journey takes 135 days
 — so a window is a decision about which tail to discard, not a free
 simplification. On a considered-purchase category the same table will tell you
-the opposite. No other package offers this, and it takes one line.
+the opposite, and reading it takes one line.
 
 ### 3. Non-converting journeys
 
@@ -270,11 +270,42 @@ example[, c("channel", "touch_rank", "time_to_conversion", "credit")]
 
 That symmetry is not a coincidence. See `vignette("spine")`.
 
+## Data-driven attribution: Markov removal effects
+
+The five rules above are conventions chosen in advance. The Markov model of
+Anderl et al. (2016) lets the journeys choose instead: it fits a transition
+matrix from start, through channels, to conversion or null, and credits each
+channel by its *removal effect* — how much the probability of converting
+falls when every transition into that channel is sent to null instead.
+
+`markov_removal()` fits the order-1 model exactly, from the absorbing-chain
+fundamental matrix, in base R:
+
+```{r}
+mk <- markov_removal(paths)
+mk
+attr(mk, "p_conversion")
+```
+
+The null paths are what make this work — they are how the model learns how
+often a journey ends in nothing, which is why `build_paths()` keeps them by
+default. `attribute()` includes it as the `"markov"` rule, so the spread
+table above already had it in:
+
+```{r}
+res[res$rule == "markov", c("channel", "conversions", "share")]
+```
+
+It is still not incrementality. Removing a state from a chain assumes every
+customer who would have passed through it is lost and none finds another
+route to the same purchase. It is a more data-driven convention than
+first-touch, and a convention nonetheless.
+
 ## Handing off to ChannelAttribution
 
-mediamix does not compute Markov removal effects, because `ChannelAttribution`
-does it properly in C++. `as_channel_paths()` exports the journeys in exactly
-the format it expects:
+For higher-order chains, or path tables too large for a dense matrix,
+`ChannelAttribution` does the same computation in C++. `as_channel_paths()`
+exports the journeys in exactly the format it expects:
 
 ```{r}
 ca <- as_channel_paths(paths)
@@ -292,8 +323,8 @@ ChannelAttribution::markov_model(
 cat("ChannelAttribution is not installed, so the chunk above was not run.\n")
 ```
 
-That is twenty lines of interop and it makes mediamix the front end to a good
-package rather than a worse competitor to it.
+For `order = 1` the two should agree up to ChannelAttribution's simulation
+error.
 
 ## One caveat, stated plainly
 
@@ -306,3 +337,9 @@ experiment does.
 
 Well-built journeys make the bookkeeping honest, comparable across rules, and
 reproducible. That is worth a great deal. It is not incrementality.
+
+## References
+
+Anderl, E., Becker, I., von Wangenheim, F. and Schumann, J. H. (2016). Mapping
+the customer journey: Lessons learned from graph-based online attribution
+modeling. *International Journal of Research in Marketing*, 33(3), 457–474.

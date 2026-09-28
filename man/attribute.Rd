@@ -6,7 +6,7 @@
 \usage{
 attribute(
   paths,
-  rules = c("linear", "first", "last", "position", "time_decay"),
+  rules = c("linear", "first", "last", "position", "time_decay", "markov"),
   first_weight = 0.4,
   last_weight = 0.4,
   decay = decay_from_half_life(7),
@@ -17,7 +17,9 @@ attribute(
 \item{paths}{An \code{mm_paths} object from \code{\link[=build_paths]{build_paths()}}.}
 
 \item{rules}{Character vector of rules to apply: any of \code{"linear"},
-\code{"first"}, \code{"last"}, \code{"position"} and \code{"time_decay"}.}
+\code{"first"}, \code{"last"}, \code{"position"}, \code{"time_decay"} and \code{"markov"}. The
+first five are heuristic conventions; \code{"markov"} is the data-driven
+removal-effect model of \code{\link[=markov_removal]{markov_removal()}}. All six are run by default.}
 
 \item{first_weight, last_weight}{Passed to \code{\link[=credit_position]{credit_position()}}.}
 
@@ -61,5 +63,6 @@ tapply(res$conversions, res$rule, sum)
 attribution_spread(res)
 }
 \seealso{
-\code{\link[=credit_linear]{credit_linear()}} and friends, \code{\link[=attribution_spread]{attribution_spread()}}
+\code{\link[=credit_linear]{credit_linear()}} and friends, \code{\link[=markov_removal]{markov_removal()}},
+\code{\link[=attribution_spread]{attribution_spread()}}
 }

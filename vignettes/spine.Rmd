@@ -103,11 +103,17 @@ round(credit_time_decay(paths, decay = theta)$credit, 4)
 ```
 
 `decay_from_half_life()`, `half_life()` and `effective_window()` serve both
-halves of the package because there is only one kernel to describe. A media
-planner who has decided television's half-life is three weeks has, without
-doing anything else, also specified a defensible time-decay attribution window
-— and `effective_window()` will tell them it covers ten periods, which is a far
-better basis for a lookback window than reaching for thirty days.
+halves of the package because there is only one kernel to describe, so a
+half-life means the same thing wherever it appears, and `effective_window()`
+converts either kind into a window length.
+
+Sharing the vocabulary is not the same as sharing the *value*, though. A
+three-week television half-life estimated from weekly sales describes how
+aggregate demand responds to aggregate spend. A time-decay half-life on a
+journey describes how a convention weights one customer's clicks against each
+other, usually over days. There is no reason for the two numbers to agree, and
+an MMM half-life is not by itself a defensible attribution lookback — read
+that off the journeys with `conversion_lag()` instead.
 
 ## What the symmetry does not give you
 

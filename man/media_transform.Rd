@@ -16,9 +16,9 @@ media_transform(
 \item{x}{Numeric vector of media spend in time order.}
 
 \item{adstock}{A named list of arguments for the carryover step, including a
-\code{kernel} element of \code{"geometric"} (the default), \code{"weibull"} or \code{"none"}.
-Remaining elements are passed to \code{\link[=adstock_geometric]{adstock_geometric()}} or
-\code{\link[=adstock_weibull]{adstock_weibull()}}.}
+\code{kernel} element of \code{"geometric"} (the default), \code{"weibull"},
+\code{"delayed"} or \code{"none"}. Remaining elements are passed to
+\code{\link[=adstock_geometric]{adstock_geometric()}}, \code{\link[=adstock_weibull]{adstock_weibull()}} or \code{\link[=adstock_delayed]{adstock_delayed()}}.}
 
 \item{saturation}{A named list of arguments for the saturation step,
 including a \code{type} element of \code{"hill"}, \code{"exponential"},

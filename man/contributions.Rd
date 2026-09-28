@@ -55,16 +55,12 @@ Contributions inherit whatever the model's identification is worth. If two
 channels are collinear the split between them is arbitrary even when the
 total is well estimated, and if the model dropped a coefficient outright
 this function refuses rather than reporting \code{NA} contributions that would
-quietly propagate into an ROI table.
+quietly propagate into an ROI table. Run \code{\link[=diagnose_media]{diagnose_media()}} before
+presenting any of this.
 
 On panel data, pass one geography at a time or supply \code{by}. \code{index} is used
 as a label, not a key: with \code{by} supplied and one date per geography, a
 \code{tapply()} over \code{period} alone silently adds the geographies together.
-
-Contributions inherit whatever the model's identification is worth. If two
-channels are collinear, the split between them is arbitrary even when the
-total is well estimated -- run \code{\link[=diagnose_media]{diagnose_media()}} before presenting any of
-this.
 }
 \examples{
 data(mm_weekly)

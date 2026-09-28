@@ -7,32 +7,57 @@
 
 Composable media transforms and attribution path construction for R.
 
+**Documentation, walkthroughs and worked examples:
+<https://elkronos.github.io/mediamix/>**
+
 mediamix turns raw marketing data into model-ready features: media spend into
 carryover- and saturation-adjusted regressors, and raw event logs into
 attributed customer journeys.
 
-It is a preprocessing and feature-engineering package. It is not a marketing
-mix modelling framework, not a modelling engine, and not an attribution
-methodology. `lm()`, `glmnet` and `brms` fit models better than a marketing
-package would; `ChannelAttribution` computes Markov removal effects in C++;
-`tune` does hyperparameter search properly. mediamix does the step in front of
-all of them.
+It is a preprocessing, feature-engineering and reporting package, not a
+modelling engine. `lm()`, `glmnet` and `brms` fit models better than a
+marketing package would, and `tune` does hyperparameter search properly.
+mediamix does the steps in front of the model — and the decomposition after
+it — with the methodological details that usually get skipped written into the
+API.
 
 ## Installation
 
-```r
-install.packages("mediamix")
+mediamix is not yet on CRAN. Install the development version from GitHub:
 
-# Development version
+```r
 # install.packages("pak")
 pak::pak("elkronos/mediamix")
 ```
 
-## A light dependency footprint
+## What it offers that the alternatives do not
 
-The only adstock on CRAN today lives inside Robyn, which is not itself a CRAN
-package and which imports `reticulate` — a Python runtime — for what is five
-lines of arithmetic.
+The full MMM frameworks — Robyn in R; Meridian and PyMC-Marketing in Python —
+bundle transforms, a model, an optimiser and reporting into one pipeline. That
+is convenient until you want the transforms without the pipeline: inside your
+own `lm()`, `brms` or `glmnet` model, a `tidymodels` workflow, or a Stan
+model. Robyn in particular reaches its optimiser, `nevergrad`, through
+`reticulate` and a Python installation. mediamix is the transform layer on its
+own:
+
+- **Adstock that survives resampling.** `step_adstock()` carries filter state
+  across the train/test boundary, so carryover, saturation and a model penalty
+  can be tuned jointly in one `tune_bayes()` call with no rows lost.
+- **Marginal ROI done by counterfactual.** `marginal_roi()` re-runs the whole
+  transform on a 1% larger budget — the definition used in Google's MMM
+  research and Meridian — instead of differentiating a curve at one point,
+  which understates slow channels several-fold.
+- **Carryover selection with honest uncertainty.** `tune_carryover()` scores
+  candidates on held-out KPI with forward-only resampling and reports the
+  one-standard-error choice alongside the minimum.
+- **Journeys as a first-class step.** `build_paths()` turns a raw event log
+  into journeys with every construction choice an argument, and accounts for
+  the conversions that filtering leaves unattributable.
+- **Heuristic and data-driven attribution side by side.** Five rule-based
+  credit schemes and an order-1 Markov removal-effect model, with
+  `attribution_spread()` reporting how much the answer depends on the choice.
+
+## A light dependency footprint
 
 mediamix imports `cli` for its error messages and `data.table` for the
 attribution half, where event logs get large. Nothing else, and no compiled
@@ -63,11 +88,12 @@ That last line is how you decide whether your data can identify a carryover
 this long: a decay implying a 40-week effective window on 104 weeks of data
 cannot be estimated, however confident the cross-validation looks.
 
-## Journey construction, which nothing else does
+## Journey construction as a first-class step
 
-`ChannelAttribution` has consumed `"a > b > c"` strings for eleven years and
-has never shipped the step that produces them. That step usually ends up as a
-`group_by()` and a `paste(collapse = " > ")`, and that loses a great deal.
+Attribution tools such as `ChannelAttribution` consume `"a > b > c"` strings
+with conversion counts attached; producing those strings is left to the
+analyst. That step usually ends up as a `group_by()` and a
+`paste(collapse = " > ")`, and that loses a great deal.
 
 On the package's 20,799-event synthetic log:
 
@@ -109,7 +135,8 @@ facts before any filtering, so those conversions are counted and reported as
 ## The spread is the finding
 
 Any single credit rule gives you a number. Several give you the range that
-number could have been:
+number could have been. `attribute()` runs five heuristic rules and an order-1
+Markov removal-effect model (Anderl et al., 2016):
 
 ```r
 attribution_spread(attribute(paths))
@@ -121,7 +148,9 @@ attribution_spread(attribute(paths))
 ```
 
 Display's share runs from 7% to 29% depending only on the convention chosen.
-That channel has not been measured; it has been assigned a number.
+That channel has not been measured; it has been assigned a number. The Markov
+model lands inside the heuristic range here, which is typical: a data-driven
+convention narrows the argument but does not end it.
 
 ## The conceptual spine
 
@@ -163,13 +192,17 @@ filters by how hard they smooth rather than by anything about the outcome.
 predicts *held-out KPI*:
 
 ```r
-tune_carryover(spend, kpi, fit_fn = my_fit, predict_fn = my_predict,
-               max_lags = Inf, decays = seq(0.05, 0.95, by = 0.05),
-               scheme = "rolling_origin")
+tuned <- tune_carryover(spend, kpi, fit_fn = my_fit, predict_fn = my_predict,
+                        max_lags = Inf, decays = seq(0.05, 0.95, by = 0.05),
+                        scheme = "rolling_origin")
+tuned$best      # the minimum of the cross-validation curve
+tuned$best_1se  # the shortest carryover within one standard error of it
 ```
 
 The test suite generates data from a known decay and requires it to be
-recovered — exactly, at every value tested. See `vignette("carryover")`, which
+recovered to within one grid step at every value tested. Carryover is weakly
+identified in most real data, which is why the one-standard-error rule
+(Hastie, Tibshirani and Friedman, 2009) is reported alongside. See `vignette("carryover")`, which
 also shows how much harder this gets with five correlated channels and 156
 weeks, and why that is a fact about the model rather than about the objective.
 
@@ -193,7 +226,29 @@ recipe(revenue ~ ., data = train) |>
 overlapping, gapped, an unseen group, or an unknown period — and warm-starts
 only when that is correct, warning loudly otherwise. This is what makes joint
 tuning of carryover, saturation and model penalty possible in one
-`tune_bayes()` call.
+`tune_bayes()` call. Each step takes one `decay`, so add one step per channel
+to give every channel its own tunable carryover.
+
+## Marginal return on spend
+
+Average ROI is a scorecard; marginal ROI is the decision variable.
+`marginal_roi()` computes it the way the Bayesian MMM literature defines it —
+extra response from a 1% larger budget, divided by the extra spend — by
+re-running carryover and saturation rather than differentiating a curve:
+
+```r
+data(mm_weekly)
+north <- mm_weekly[mm_weekly$geo == "north", ]
+marginal_roi(north$tv, coefficient = 6013,
+             adstock = list(decay = 0.85),
+             saturation = list(half_max = 2250, shape = 1.6))
+#>    spend contribution    roi     mroi
+#> 1 266978     349634.4 1.3096 1.253432
+```
+
+The tempting shortcut — the curve's slope times the kernel's first weight —
+gives 0.21 for this channel: it counts only the week of spend and discards
+the 85% of the effect that arrives later.
 
 ## Scope
 
@@ -201,13 +256,13 @@ tuning of carryover, saturation and model penalty possible in one
 |---|---|---|
 | Adstock and saturation transforms | Model fitting | `lm`, `glmnet`, `brms` already exist |
 | Carryover selection by cross-validation | Bespoke optimisers | `tune` does this properly |
-| Journey construction from event logs | Markov removal effects | `ChannelAttribution` owns it, in C++ |
-| Rule-based attribution credit | Causal incrementality | Requires experiments, not logs |
-| Contribution and ROI decomposition | Budget optimisation | Deserves its own design pass |
+| Journey construction from event logs | Higher-order Markov chains | `ChannelAttribution` does them in C++ |
+| Rule-based credit and order-1 Markov removal effects | Causal incrementality | Requires experiments, not logs |
+| Contribution, ROI and counterfactual marginal ROI | Budget optimisation | Deserves its own design pass |
 | Media data diagnostics | Generic regression diagnostics | `broom`, `performance` |
 
 `as_channel_paths()` exports journeys straight into `ChannelAttribution`'s
-format. Interop, not competition.
+format, for higher-order models and very large path tables.
 
 ## A caveat worth stating
 
@@ -224,11 +279,25 @@ outcome is not in the log. Only an experiment answers that.
 - `vignette("tidymodels")` — joint tuning of transform and model parameters
 - `vignette("spine")` — carryover and credit are the same idea
 
+The website adds articles that are not shipped with the package: an
+end-to-end budget walkthrough, the methods behind each function with their
+references, and a comparison with other MMM and attribution tools.
+
 ## References
+
+Anderl, E., Becker, I., von Wangenheim, F. and Schumann, J. H. (2016). Mapping
+the customer journey: Lessons learned from graph-based online attribution
+modeling. *International Journal of Research in Marketing*, 33(3), 457–474.
 
 Broadbent, S. (1979). One way TV advertisements work. *Journal of the Market
 Research Society*, 21(3), 139–166.
 
+Hastie, T., Tibshirani, R. and Friedman, J. (2009). *The Elements of
+Statistical Learning* (2nd ed.). Springer.
+
 Hill, A. V. (1910). The possible effects of the aggregation of the molecules of
 haemoglobin on its dissociation curves. *The Journal of Physiology*, 40,
 iv–vii.
+
+Jin, Y., Wang, Y., Sun, Y., Chan, D. and Koehler, J. (2017). *Bayesian methods
+for media mix modeling with carryover and shape effects.* Google Inc.

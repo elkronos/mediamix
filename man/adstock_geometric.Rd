@@ -80,10 +80,11 @@ coefficient reads as the effect of one unit of \emph{accumulated} media. Both ar
 defensible; comparing a coefficient fitted one way against a coefficient
 fitted the other is not.
 
-Robyn and most of the MMM literature use the unnormalised form. This package
-defaults to normalised because it keeps the coefficient interpretable and
-keeps decay and coefficient magnitude from trading off against each other
-during fitting.
+Both conventions are in use. Robyn's geometric adstock is the unnormalised
+recursion; the Bayesian MMM of Jin et al. (2017) normalises its kernel
+weights to sum to 1. This package defaults to normalised because it keeps
+the coefficient interpretable and keeps decay and coefficient magnitude
+from trading off against each other during fitting.
 }
 
 \section{Infinite versus truncated kernels}{
@@ -139,6 +140,9 @@ round(adstock_geometric(spend_panel, decay = 0.5, by = geo), 2)
 \references{
 Broadbent, S. (1979). One way TV advertisements work.
 \emph{Journal of the Market Research Society}, 21(3), 139--166.
+
+Jin, Y., Wang, Y., Sun, Y., Chan, D. and Koehler, J. (2017). Bayesian
+methods for media mix modeling with carryover and shape effects. Google Inc.
 }
 \seealso{
 \code{\link[=adstock_weibull]{adstock_weibull()}} for delayed peaks, \code{\link[=adstock_state]{adstock_state()}} for

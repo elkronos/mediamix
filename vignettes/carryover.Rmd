@@ -201,6 +201,29 @@ The `results` grid is worth looking at rather than just taking `best`. If the
 metric is nearly flat across a wide band of decay, the data does not identify
 carryover tightly and a confident point estimate would be overstating things.
 
+Two things in the output help with that. `std_err` is the standard error of
+the per-split errors, which says how far apart two candidates need to be before
+the difference means anything. And `best_1se` applies the
+one-standard-error rule (Breiman et al., 1984; Hastie, Tibshirani and
+Friedman, 2009): the *shortest* carryover whose error is within one standard
+error of the minimum.
+
+```{r}
+rbind(best = tuned$best, one_se = tuned$best_1se)
+```
+
+When the two agree, the data has spoken clearly. When they do not, the data
+cannot tell them apart, and the shorter carryover is the more conservative
+claim to put in front of a client — a long carryover flatters a channel by
+crediting it with sales weeks after it ran.
+
+By default the metric is *pooled*: every out-of-sample forecast across all
+splits is collected and `metric_fn` is evaluated once, so `rmse` is the root
+mean squared forecast error. `aggregate = "mean"` averages a per-split metric
+instead, which is the `tune` convention; with one-period assessment sets that
+turns any RMSE into a mean absolute error, because the RMSE of a single point
+is its absolute error.
+
 `tune_carryover()` warns when the winner is pinned to the edge of the grid:
 
 ```{r}
@@ -246,3 +269,14 @@ is cheaper on long series.
 
 For tuning carryover jointly with saturation and a model's own penalty, see
 `vignette("tidymodels")`.
+
+## References
+
+Bergmeir, C. and Benítez, J. M. (2012). On the use of cross-validation for
+time series predictor evaluation. *Information Sciences*, 191, 192–213.
+
+Breiman, L., Friedman, J., Olshen, R. and Stone, C. (1984). *Classification and
+Regression Trees*. Wadsworth.
+
+Hastie, T., Tibshirani, R. and Friedman, J. (2009). *The Elements of
+Statistical Learning* (2nd ed.). Springer.

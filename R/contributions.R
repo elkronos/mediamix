@@ -42,16 +42,12 @@
 #' channels are collinear the split between them is arbitrary even when the
 #' total is well estimated, and if the model dropped a coefficient outright
 #' this function refuses rather than reporting `NA` contributions that would
-#' quietly propagate into an ROI table.
+#' quietly propagate into an ROI table. Run [diagnose_media()] before
+#' presenting any of this.
 #'
 #' On panel data, pass one geography at a time or supply `by`. `index` is used
 #' as a label, not a key: with `by` supplied and one date per geography, a
 #' `tapply()` over `period` alone silently adds the geographies together.
-#'
-#' Contributions inherit whatever the model's identification is worth. If two
-#' channels are collinear, the split between them is arbitrary even when the
-#' total is well estimated -- run [diagnose_media()] before presenting any of
-#' this.
 #'
 #' @seealso [roi()], [response_curve()], [diagnose_media()]
 #'
@@ -232,28 +228,28 @@ contributions <- function(media, model, intercept = NULL, index = NULL,
 #' `spend_level = 0`.
 #'
 #' @section Marginal return when the regressor was adstocked:
-#' `mroi()` differentiates the saturation curve with respect to the quantity the
-#' coefficient multiplies -- the *transformed* media. Two consequences follow,
-#' and missing either of them produces a number that looks right and is not.
+#' `mroi()` is the slope of the saturation curve with respect to the quantity
+#' the coefficient multiplies -- the *transformed* media -- at a single level.
+#' It is a property of the curve, not yet a return on spend, and two things
+#' separate the two.
 #'
-#' Evaluate it at the adstocked level, not at raw spend. `mean(spend)` and
-#' `mean(adstock_geometric(spend, decay))` are different numbers and sit at
-#' different points on the curve.
+#' Carryover spreads a unit of spend over many periods. Under a normalised
+#' kernel the weights sum to one, so the *total* extra response to one more
+#' unit of spend is roughly the curve's slope, arriving over the kernel's
+#' length. Multiplying by the kernel's first weight (`1 - decay`) gives only
+#' the response inside the period of spend; comparing that with an average ROI
+#' that counts every period's carryover compares a part with a whole, and
+#' understates slow channels several-fold.
 #'
-#' Then apply the chain rule. A unit of spend in the current period contributes
-#' only the kernel's first weight to the current period's adstock, so the
-#' marginal return on *this period's spend* is `mroi()` multiplied by that
-#' weight. For a normalised geometric kernel it is `1 - decay`; for any other
-#' kernel it is `adstock_weights(...)[1]`. A channel with a long carryover
-#' therefore has a much smaller immediate marginal return than its saturation
-#' curve alone suggests -- the rest of the effect arrives in later periods.
+#' And the slope at the *mean* adstocked level is not the mean of the slope
+#' across periods, which matters for flighted media and S-shaped curves.
 #'
-#' ```
-#' z <- adstock_geometric(spend, decay = 0.85)
-#' mroi(mean(z), coefficient = beta, half_max = h, shape = s) * (1 - 0.85)
-#' ```
+#' [marginal_roi()] handles both by re-running the whole transform on a
+#' slightly larger budget. Use it for anything that feeds a budget decision,
+#' and use `mroi()` to read the shape of a curve.
 #'
-#' @seealso [contributions()], [response_curve()], [spend_for()]
+#' @seealso [marginal_roi()] for marginal return on spend through the full
+#'   transform, [contributions()], [response_curve()], [spend_for()]
 #'
 #' @examples
 #' data(mm_weekly)
@@ -280,18 +276,18 @@ contributions <- function(media, model, intercept = NULL, index = NULL,
 #'
 #' roi(contrib, north[channels])
 #'
-#' # Average and marginal return are different questions. Television here has
-#' # shape = 1.6, an S-curve, and sits *below* its inflection point, so its
-#' # marginal return is HIGHER than its average -- the channel is under-funded,
-#' # not saturated. Search has shape = 1, a concave curve, where marginal is
-#' # always the lower of the two.
+#' # Average and marginal return are different questions. marginal_roi()
+#' # re-runs the whole transform on a 1% larger budget, so carryover and
+#' # flighting are both accounted for. Display's average pound returns about
+#' # 1.5, but its next pound returns less than it costs.
 #' avg <- roi(contrib, north[channels])
-#' for (ch in c("tv", "search")) {
-#'   m <- mroi(spend_level = mean(north[[ch]]),
-#'             coefficient = stats::coef(fit)[[ch]],
-#'             half_max = truth$half_max[[ch]], shape = truth$shape[[ch]])
-#'   cat(sprintf("%-7s shape %.1f  average %.4f  marginal %.4f\n",
-#'               ch, truth$shape[[ch]], avg$roi[avg$channel == ch], m))
+#' for (ch in channels) {
+#'   m <- marginal_roi(north[[ch]], coefficient = stats::coef(fit)[[ch]],
+#'                     adstock = list(decay = truth$decay[[ch]]),
+#'                     saturation = list(half_max = truth$half_max[[ch]],
+#'                                       shape = truth$shape[[ch]]))
+#'   cat(sprintf("%-8s average %.2f  marginal %.2f\n",
+#'               ch, avg$roi[avg$channel == ch], m$mroi))
 #' }
 #' @export
 roi <- function(contributions, spend) {

@@ -63,13 +63,19 @@ adstock_weights <- function(max_lag, decay, normalise = TRUE) {
 #' The two forms answer different questions.
 #'
 #' The `"cdf"` form builds the kernel as a cumulative product of Weibull
-#' survival probabilities. Numbering lags from 1 so that \eqn{w_1} is the
-#' period of spend, \eqn{w_i = \prod_{j<i} (1 - F(j))}, so \eqn{w_1 = 1} and
-#' each later weight is the previous one times the probability of surviving
-#' another period. This is a
-#' *generalisation of the geometric kernel*: it is always monotonically
-#' decreasing, but the rate of decay can itself change over time, which the
-#' single-parameter geometric kernel cannot do.
+#' survival values. Numbering lags from 1 so that \eqn{w_1} is the period of
+#' spend, \eqn{w_i = \prod_{j<i} (1 - F(j))}, where \eqn{F} is the Weibull
+#' distribution function, so \eqn{w_1 = 1} and each later weight is the
+#' previous one times \eqn{1 - F(j)}. Read \eqn{1 - F(j)} as a time-varying
+#' retention rate: it plays the role that the constant \eqn{\theta} plays in
+#' the geometric kernel, which is the sense in which this form *generalises*
+#' geometric decay. It is always monotonically decreasing, but the rate of
+#' decay can itself change over time. Note that the kernel is the running
+#' product of these values, not the Weibull survival function itself, so it
+#' falls faster than \eqn{1 - F(i)}. The construction is the one Robyn calls
+#' `"weibull_cdf"`; Robyn, however, expresses `scale` as a quantile of the
+#' window length rather than in periods, so its fitted scale values are not
+#' directly comparable with this function's.
 #'
 #' The `"pdf"` form uses the Weibull density directly, \eqn{w_i \propto f(i)}.
 #' This is the form that permits a delayed peak, and it is the reason to reach
@@ -186,10 +192,11 @@ adstock_weights_weibull <- function(max_lag, shape, scale,
 #' defensible; comparing a coefficient fitted one way against a coefficient
 #' fitted the other is not.
 #'
-#' Robyn and most of the MMM literature use the unnormalised form. This package
-#' defaults to normalised because it keeps the coefficient interpretable and
-#' keeps decay and coefficient magnitude from trading off against each other
-#' during fitting.
+#' Both conventions are in use. Robyn's geometric adstock is the unnormalised
+#' recursion; the Bayesian MMM of Jin et al. (2017) normalises its kernel
+#' weights to sum to 1. This package defaults to normalised because it keeps
+#' the coefficient interpretable and keeps decay and coefficient magnitude
+#' from trading off against each other during fitting.
 #'
 #' @section Infinite versus truncated kernels:
 #' `max_lag = Inf` runs the recursive filter, an infinite impulse response. Its
@@ -219,6 +226,9 @@ adstock_weights_weibull <- function(max_lag, shape, scale,
 #' @references
 #' Broadbent, S. (1979). One way TV advertisements work.
 #' *Journal of the Market Research Society*, 21(3), 139--166.
+#'
+#' Jin, Y., Wang, Y., Sun, Y., Chan, D. and Koehler, J. (2017). Bayesian
+#' methods for media mix modeling with carryover and shape effects. Google Inc.
 #'
 #' @examples
 #' spend <- c(100, 0, 0, 0, 0, 0)
@@ -329,6 +339,90 @@ adstock_weibull <- function(x, shape, scale, max_lag,
   w <- adstock_weights_weibull(max_lag, shape = shape, scale = scale,
                                type = type, normalise = normalise)
   state <- .mm_resolve_state(state, by, max_lag)
+  fun <- function(xi, si) .mm_fir_filter(xi, w, si)
+  .mm_apply_stateful(x, by, state, fun)
+}
+
+#' Delayed adstock
+#'
+#' The delayed-peak geometric kernel of Jin et al. (2017),
+#' \eqn{w_l = \theta^{(l - \delta)^2}} for lags \eqn{l = 0, \ldots, L-1},
+#' where \eqn{\theta} is the retention rate and \eqn{\delta} the lag at which
+#' the effect peaks. With `peak = 0` the weights fall off as
+#' \eqn{\theta^{l^2}}, faster than geometric; with `peak > 0` the response
+#' builds for `peak` periods before it decays, the shape television and
+#' out-of-home often show. It is the delayed form used in Google's Bayesian
+#' MMM work, and a one-parameter-per-idea alternative to the Weibull kernel:
+#' `peak` is read directly in periods.
+#'
+#' @inheritParams adstock_geometric
+#' @param decay Retention rate \eqn{\theta} in `(0, 1)`.
+#' @param peak Lag of the peak effect, in periods, in `[0, max_lag - 1]`. Need
+#'   not be a whole number.
+#' @param max_lag Number of periods the kernel spans, including the current
+#'   period. Required and finite: the kernel has no recursive form. Jin et al.
+#'   use 13 weeks for weekly data.
+#' @param normalise Should the weights sum to 1? When `FALSE` the weights are
+#'   left as \eqn{\theta^{(l - \delta)^2}}, whose largest value is 1 when the
+#'   peak falls on a whole period.
+#' @param state The preceding `max_lag - 1` values of `x`, oldest first, or
+#'   `0` for a cold start; a named list of them when `by` is supplied.
+#'
+#' @return `adstock_weights_delayed()` returns the kernel, ordered from the
+#'   current period outward. `adstock_delayed()` returns a numeric vector the
+#'   same length as `x`, in the same order.
+#'
+#' @references
+#' Jin, Y., Wang, Y., Sun, Y., Chan, D. and Koehler, J. (2017). Bayesian
+#' methods for media mix modeling with carryover and shape effects. Google
+#' Inc. <https://research.google/pubs/pub46001/>
+#'
+#' @seealso [adstock_geometric()], [adstock_weibull()], [media_transform()]
+#'
+#' @examples
+#' # Peak two weeks after the spend
+#' round(adstock_weights_delayed(8, decay = 0.6, peak = 2), 3)
+#'
+#' spend <- c(100, 0, 0, 0, 0, 0, 0, 0)
+#' round(adstock_delayed(spend, decay = 0.6, peak = 2, max_lag = 8), 2)
+#'
+#' # Through media_transform()
+#' media_transform(spend, adstock = list(kernel = "delayed", decay = 0.6,
+#'                                       peak = 2, max_lag = 8))
+#' @name adstock_delayed
+NULL
+
+#' @rdname adstock_delayed
+#' @export
+adstock_weights_delayed <- function(max_lag, decay, peak = 0, normalise = TRUE) {
+  max_lag <- .mm_check_count(max_lag, "max_lag", min = 1L)
+  decay <- .mm_check_scalar(decay, "decay", lower = 0, upper = 1,
+                            inclusive = c(FALSE, FALSE))
+  peak <- .mm_check_scalar(peak, "peak", lower = 0, upper = max_lag - 1)
+  .mm_check_flag(normalise, "normalise")
+  w <- decay^((seq_len(max_lag) - 1L - peak)^2)
+  if (normalise) w / sum(w) else w
+}
+
+#' @rdname adstock_delayed
+#' @export
+adstock_delayed <- function(x, decay, peak = 0, max_lag, normalise = TRUE,
+                            state = 0, by = NULL,
+                            na_action = c("error", "zero", "keep")) {
+  na_action <- match.arg(na_action)
+  x <- .mm_check_numeric(x, "x")
+  if (missing(max_lag)) {
+    cli::cli_abort(c(
+      "{.arg max_lag} is required for delayed adstock.",
+      i = "The kernel has no recursive form. Jin et al. (2017) use 13 periods \\
+           for weekly data."
+    ))
+  }
+  w <- adstock_weights_delayed(max_lag, decay = decay, peak = peak,
+                               normalise = normalise)
+  by <- .mm_check_by(by, length(x))
+  x <- .mm_handle_na(x, na_action)
+  state <- .mm_resolve_state(state, by, length(w))
   fun <- function(xi, si) .mm_fir_filter(xi, w, si)
   .mm_apply_stateful(x, by, state, fun)
 }

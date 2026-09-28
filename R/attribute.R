@@ -8,7 +8,9 @@
 #'
 #' @param paths An `mm_paths` object from [build_paths()].
 #' @param rules Character vector of rules to apply: any of `"linear"`,
-#'   `"first"`, `"last"`, `"position"` and `"time_decay"`.
+#'   `"first"`, `"last"`, `"position"`, `"time_decay"` and `"markov"`. The
+#'   first five are heuristic conventions; `"markov"` is the data-driven
+#'   removal-effect model of [markov_removal()]. All six are run by default.
 #' @param first_weight,last_weight Passed to [credit_position()].
 #' @param decay,period Passed to [credit_time_decay()].
 #'
@@ -26,7 +28,8 @@
 #'   }
 #'   Rows are ordered by rule, then by descending conversions.
 #'
-#' @seealso [credit_linear()] and friends, [attribution_spread()]
+#' @seealso [credit_linear()] and friends, [markov_removal()],
+#'   [attribution_spread()]
 #'
 #' @examples
 #' data(mm_events)
@@ -45,12 +48,12 @@
 #' @export
 attribute <- function(paths,
                       rules = c("linear", "first", "last", "position",
-                                "time_decay"),
+                                "time_decay", "markov"),
                       first_weight = 0.4, last_weight = 0.4,
                       decay = decay_from_half_life(7), period = 1) {
   .mm_check_paths(paths)
   rules <- match.arg(rules, c("linear", "first", "last", "position",
-                              "time_decay"), several.ok = TRUE)
+                              "time_decay", "markov"), several.ok = TRUE)
 
   if (nrow(paths) == 0L) {
     return(data.frame(rule = character(0), channel = character(0),
@@ -63,6 +66,15 @@ attribute <- function(paths,
   has_value <- !all(is.na(paths$conversion_value))
 
   out <- lapply(rules, function(r) {
+    if (r == "markov") {
+      mk <- markov_removal(paths)
+      agg <- data.frame(channel = mk$channel, conversions = mk$conversions,
+                        share = mk$share, stringsAsFactors = FALSE)
+      if (has_value) agg$value <- if (is.null(mk$value)) 0 else mk$value
+      agg$touches <- as.integer(touch_tab[match(agg$channel, touch_lab)])
+      agg$rule <- r
+      return(agg[order(-agg$conversions), , drop = FALSE])
+    }
     scored <- switch(
       r,
       linear = credit_linear(paths),

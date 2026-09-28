@@ -129,9 +129,8 @@ nothing downstream ever sees a reordered table.
 
 ## Grouping is an argument, not an inherited state
 
-`recipes` has no group awareness — the feature request was closed — and a
-`grouped_df` may not survive into `bake()`. So grouping is named explicitly,
-following `modeltime`'s precedent:
+`recipes` steps have no built-in notion of groups, and a `grouped_df` may not
+survive into `bake()`. So grouping is named explicitly:
 
 ```{r}
 setequal(train$geo, as.character(baked$geo))
@@ -144,7 +143,7 @@ rather than the vectors.)
 
 ## Saturation on a comparable scale
 
-Television spend runs to five figures a week here and display to four. An
+Television spend runs to thousands a week here and display to hundreds. An
 absolute half-saturation point is therefore a different parameter for every
 channel, which makes a single tunable parameter meaningless.
 
@@ -162,6 +161,32 @@ tidy(rec2, number = 2)
 
 `half_max = 0.4` reads the same way for every channel: half the ceiling is
 reached at 40% of that channel's peak spend. One parameter now covers all five.
+
+## One carryover per channel
+
+A step applies one `decay` to every column it selects, and the joint search
+below tunes that single shared value for brevity. Channels rarely share a
+carryover — in `mm_weekly` the truth runs from 0.15 for search to 0.85 for
+television — so for a real model give each channel its own step. `tune()`
+(from `hardhat`, re-exported by `tune`) takes an identifier, which
+keeps the parameters apart in the search:
+
+```{r}
+per_channel <- recipe(revenue ~ ., data = train)
+for (ch in channels) {
+  per_channel <- step_adstock(per_channel, all_of(ch), index = "date",
+                              by = "geo",
+                              decay = hardhat::tune(paste0("decay_", ch)))
+}
+per_channel <- step_saturation(per_channel, all_of(channels),
+                               half_max = hardhat::tune(),
+                               shape = hardhat::tune())
+vapply(per_channel$steps[1:5], function(s) as.character(s$decay[[2]]),
+       character(1))
+```
+
+Swap `per_channel` for `tune_rec` in the workflow below and the search covers
+five decays instead of one; give it a larger `initial` and `iter` to match.
 
 ## The tuning parameters
 

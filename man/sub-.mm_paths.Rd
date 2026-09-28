@@ -22,6 +22,14 @@ table, the \code{mm_paths} class is dropped and a plain data frame is returned.
 This stops a column subset from producing an object that claims to be an
 \code{mm_paths} but cannot answer any question about journeys.
 }
+\details{
+When a row subset removes part of a journey -- dropping one channel, say --
+\code{touch_rank} and \code{touch_n} are recomputed from the touches that remain, so
+the result is a valid journey table in its own right and every credit rule
+sums to 1 per converting journey. The first remaining touch becomes rank 1.
+Convert with \code{as.data.frame()} first if you want to inspect the original
+ranks of a partial selection.
+}
 \examples{
 data(mm_events)
 paths <- build_paths(mm_events, id = "customer_id", channel = "channel",
