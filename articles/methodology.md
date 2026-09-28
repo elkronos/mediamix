@@ -1,0 +1,279 @@
+# Methods and references
+
+Each function in mediamix implements a published method or a documented
+convention. This page says which one, where it comes from, and what
+choices the implementation makes, so a result can be reproduced, cited
+or challenged.
+
+| Function | Method | Source |
+|----|----|----|
+| [`adstock_geometric()`](https://elkronos.github.io/mediamix/reference/adstock_geometric.md) | Geometric (Koyck) carryover | Broadbent (1979); Koyck (1954) |
+| [`adstock_delayed()`](https://elkronos.github.io/mediamix/reference/adstock_delayed.md) | Delayed-peak geometric carryover | Jin et al. (2017) |
+| [`adstock_weibull()`](https://elkronos.github.io/mediamix/reference/adstock_weibull.md) | Weibull CDF / PDF carryover | As implemented in Robyn |
+| [`saturate_hill()`](https://elkronos.github.io/mediamix/reference/saturation.md) | Hill saturation | Hill (1910); Jin et al. (2017) |
+| [`saturate_michaelis_menten()`](https://elkronos.github.io/mediamix/reference/saturation.md), [`saturate_exponential()`](https://elkronos.github.io/mediamix/reference/saturation.md), [`saturate_power()`](https://elkronos.github.io/mediamix/reference/saturation.md) | Alternative concave response curves | Standard |
+| [`tune_carryover()`](https://elkronos.github.io/mediamix/reference/tune_carryover.md) | Forward-only cross-validation, one-SE rule | Bergmeir & Benítez (2012); Hastie et al. (2009) |
+| [`tune_carryover_joint()`](https://elkronos.github.io/mediamix/reference/tune_carryover_joint.md) | Coordinate descent over per-channel carryover in one model | Standard |
+| [`adstock_steady_state()`](https://elkronos.github.io/mediamix/reference/adstock_steady_state.md) | Steady-state filter initialisation | Standard |
+| [`block_bootstrap()`](https://elkronos.github.io/mediamix/reference/block_bootstrap.md) | Moving block bootstrap | Künsch (1989); Lahiri (2003) |
+| [`step_adstock()`](https://elkronos.github.io/mediamix/reference/step_adstock.md) | Stateful IIR filter across resampling boundaries | This package |
+| [`contributions()`](https://elkronos.github.io/mediamix/reference/contributions.md) | Additive decomposition, baseline as residual | Standard |
+| [`marginal_roi()`](https://elkronos.github.io/mediamix/reference/marginal_roi.md) | Counterfactual marginal ROI | Jin et al. (2017); Meridian |
+| [`diagnose_media()`](https://elkronos.github.io/mediamix/reference/diagnose_media.md) | Variance inflation factors, CV, CPM outliers | Standard |
+| [`build_paths()`](https://elkronos.github.io/mediamix/reference/build_paths.md) | Journey construction | This package |
+| `credit_*()` | Rule-based attribution | Industry conventions |
+| [`markov_removal()`](https://elkronos.github.io/mediamix/reference/markov_removal.md) | First-order Markov removal effects | Anderl et al. (2016) |
+
+## Carryover
+
+**Geometric.** The effect of spend decays by a constant factor
+$`\theta`$ each period, $`a_t = x_t + \theta a_{t-1}`$ — the Koyck
+distributed lag, introduced to advertising as “adstock” by Broadbent
+(1979). mediamix defaults to the *normalised* kernel, weights
+$`(1-\theta)\theta^l`$ summing to one, as in Jin et al. (2017); Robyn
+uses the unnormalised recursion. The two differ only in the scale of the
+regressor, and so of its coefficient.
+
+**Delayed.** Jin et al. (2017) generalise the geometric kernel to
+$`w_l = \theta^{(l-\delta)^2}`$, whose peak falls $`\delta`$ periods
+after the spend. This is the kernel to use when the response builds
+before it decays, and `peak` is read directly in periods:
+
+``` r
+
+round(rbind(
+  geometric = adstock_weights(8, decay = 0.6),
+  delayed   = adstock_weights_delayed(8, decay = 0.6, peak = 2)
+), 3)
+#>            [,1]  [,2]  [,3]  [,4]  [,5]  [,6]  [,7]  [,8]
+#> geometric 0.407 0.244 0.146 0.088 0.053 0.032 0.019 0.011
+#> delayed   0.052 0.243 0.405 0.243 0.052 0.004 0.000 0.000
+```
+
+**Weibull.** Two parameterisations, both following Robyn’s construction:
+the `"cdf"` form is a running product of $`1 - F(l)`$, always decreasing
+but with a time-varying rate; the `"pdf"` form uses the density itself
+and can peak late. Robyn expresses the scale as a quantile of the
+window, so its fitted scale values do not transfer directly.
+
+**Start-up bias.** Every filter here is cold-started at zero unless
+given a `state`. For a slow channel that understates the first weeks of
+the series: at $`\theta = 0.85`$ a constant spend reaches 15% of its
+steady-state adstock in week one and 90% only after
+`effective_window(0.85)` weeks. Pass real pre-period spend through
+[`adstock_state()`](https://elkronos.github.io/mediamix/reference/adstock_state.md)
+when you have it.
+
+## Saturation
+
+The Hill curve $`x^s / (x^s + K^s)`$ comes from Hill (1910) and is the
+saturation curve of Jin et al. (2017) and of most current MMM software.
+mediamix parameterises it by `half_max` ($`K`$, the spend at half the
+ceiling) and `shape` ($`s`$; above 1 gives an S-curve). It is evaluated
+as $`1 / (1 + (K/x)^s)`$, which is algebraically identical but cannot
+overflow. Saturation is applied *after* adstock, as in Jin et al.;
+[`media_transform()`](https://elkronos.github.io/mediamix/reference/media_transform.md)
+enforces that order and warns if asked to reverse it.
+
+## Choosing carryover by cross-validation
+
+[`tune_carryover()`](https://elkronos.github.io/mediamix/reference/tune_carryover.md)
+scores each candidate decay by out-of-sample prediction of the KPI, on
+forward-only splits — rolling-origin evaluation, which Bergmeir and
+Benítez (2012) recommend for time series because it never trains on the
+future. Because adstock is causal, the series is transformed once and
+then split; the package’s tests enforce the causality this relies on.
+
+The score is pooled across splits by default: every out-of-sample
+forecast is collected and the metric computed once, so RMSE is a true
+root mean squared forecast error.
+
+Carryover is usually weakly identified, so a single minimum overstates
+what the data knows. `best_1se` applies the one-standard-error rule
+(Breiman et al., 1984; Hastie et al., 2009, §7.10), choosing the
+shortest carryover the resampling cannot distinguish from the best.
+mediamix uses the *paired* form: candidates are scored on the same
+splits, so a candidate is compared with the best by the standard error
+of their per-split difference, not of either one’s mean. The unpaired
+form is dominated by how hard each period is to forecast, which is
+shared by every candidate, and admits almost the whole grid.
+
+**Several channels.** Tuned one at a time, a channel’s carryover absorbs
+the other channels’ effects and the controls’.
+[`tune_carryover_joint()`](https://elkronos.github.io/mediamix/reference/tune_carryover_joint.md)
+puts every channel and the controls into one model and chooses each
+channel’s `(max_lag, decay)` by coordinate descent: each channel in turn
+is set to its best grid point with the rest held fixed, repeating until
+a sweep changes nothing. Every accepted step lowers the cross-validated
+error, so it terminates, at a local optimum of the grid; the cost is a
+few sweeps of the one-channel grid rather than the full product grid. It
+reports each channel’s final profile, so a flat one — carryover the data
+does not identify — is visible rather than hidden behind a point
+estimate.
+
+**Start-up bias.**
+[`adstock_steady_state()`](https://elkronos.github.io/mediamix/reference/adstock_steady_state.md)
+returns the filter state that constant spend at the early-period mean
+would have left, $`m/(1-\theta)`$ for the recursive kernel, so a series
+does not begin at zero adstock. `warm_start = TRUE` applies it inside
+both tuners. It uses media only, never the KPI, so it cannot leak
+outcome information into a cross-validation.
+
+## Uncertainty
+
+[`block_bootstrap()`](https://elkronos.github.io/mediamix/reference/block_bootstrap.md)
+implements the moving block bootstrap of Künsch (1989): resample
+overlapping blocks of consecutive rows, concatenate them to the original
+length, recompute the statistic, and report percentile intervals. Blocks
+preserve the autocorrelation that carryover creates, which resampling
+single weeks would destroy and so understate uncertainty. The default
+block length $`\lceil n^{1/3} \rceil`$ is the usual rate-optimal order
+(Lahiri, 2003); for media data a block at least as long as the
+carryover’s effective window is a sensible floor. With `by`, blocks are
+drawn within each group.
+
+The transform should be computed once, on the original series, before
+bootstrapping: re-adstocking resampled rows would carry spend across the
+joins between blocks. The resulting intervals describe sampling
+uncertainty given the transform parameters, not the uncertainty in
+choosing them.
+
+## Joint tuning with tidymodels
+
+[`step_adstock()`](https://elkronos.github.io/mediamix/reference/step_adstock.md)
+stores the geometric filter’s single-number state at
+[`prep()`](https://recipes.tidymodels.org/reference/prep.html) and
+warm-starts
+[`bake()`](https://recipes.tidymodels.org/reference/bake.html) from it
+when the new data continues the training series. That is what lets
+carryover, saturation and a model penalty be tuned jointly by `tune`’s
+resampling, with no rows lost at the boundary. The contiguity check
+classifies new data as contiguous, overlapping, gapped or unseen, and
+only warm-starts in the first case.
+
+## Contributions and return on investment
+
+[`contributions()`](https://elkronos.github.io/mediamix/reference/contributions.md)
+computes $`\beta_j z_{jt}`$ for each channel and takes the baseline as
+the fitted value minus total media, so the decomposition sums exactly to
+the model’s prediction. For an additive model this is also each
+channel’s removal effect — what the model predicts would be lost with
+that channel at zero.
+
+[`marginal_roi()`](https://elkronos.github.io/mediamix/reference/marginal_roi.md)
+follows the counterfactual definition used by Jin et al. (2017) and by
+Google’s Meridian: increase spend by a small proportion, re-run
+carryover and saturation, and divide the extra response by the extra
+spend. Differentiating the saturation curve at the mean adstocked level
+instead is a common shortcut and has two problems. Multiplying by the
+kernel’s first weight to get back to spend counts only the period of
+spend and drops every later period’s carryover, and the slope at the
+mean is not the mean of the slope. The simulation has neither problem.
+
+``` r
+
+set.seed(3)
+x <- pmax(0, rnorm(200, 1000, 300))
+z <- adstock_geometric(x, decay = 0.85)
+c(shortcut  = mroi(mean(z), 1000, half_max = 1000) * (1 - 0.85),
+  simulated = marginal_roi(x, 1000, adstock = list(decay = 0.85),
+                           saturation = list(half_max = 1000))$mroi)
+#>  shortcut simulated 
+#>   0.03835   0.24495
+```
+
+## Diagnostics
+
+[`diagnose_media()`](https://elkronos.github.io/mediamix/reference/diagnose_media.md)
+reports variance inflation factors (regressing each channel on the
+others), the coefficient of variation, the share of dark periods and
+implied cost-per-mille outliers (a median-absolute-deviation rule). With
+`decay`, collinearity is measured on adstocked media, which is what the
+model actually sees. With `by`, each is computed within series and the
+worst case reported, since pooling geographies that differ in scale
+manufactures correlation.
+
+## Journeys and attribution
+
+[`build_paths()`](https://elkronos.github.io/mediamix/reference/build_paths.md)
+has no single literature source; it encodes the construction choices —
+splitting on conversion and inactivity, lookback, null paths, direct
+traffic, repeats, tie-breaking — that the attribution literature assumes
+have already been made. The rule-based credits
+([`credit_first()`](https://elkronos.github.io/mediamix/reference/credit.md),
+[`credit_last()`](https://elkronos.github.io/mediamix/reference/credit.md),
+[`credit_linear()`](https://elkronos.github.io/mediamix/reference/credit.md),
+[`credit_position()`](https://elkronos.github.io/mediamix/reference/credit.md),
+[`credit_time_decay()`](https://elkronos.github.io/mediamix/reference/credit.md))
+are industry conventions and make no causal claim.
+
+[`markov_removal()`](https://elkronos.github.io/mediamix/reference/markov_removal.md)
+implements the first-order Markov model of Anderl et al. (2016).
+Journeys are walks from a start state through channels to one of two
+absorbing states. The conversion probability comes from the fundamental
+matrix, $`(I - Q)^{-1} R`$, so it is exact for the fitted chain rather
+than simulated. A channel’s removal effect is the proportional drop in
+that probability when every transition into the channel is redirected to
+the null state, and conversions are divided in proportion to removal
+effects.
+
+``` r
+
+ev <- data.frame(id = c("j1", "j1", "j2", "j3"), ch = c("a", "b", "a", "b"),
+                 ts = c(1, 2, 1, 1), conv = c(0, 1, 0, 1))
+markov_removal(build_paths(ev, id = "id", channel = "ch", timestamp = "ts",
+                           conversion = "conv"))
+#>   channel removal_effect conversions  share
+#> 1       b            1.0      1.3333 0.6667
+#> 2       a            0.5      0.6667 0.3333
+```
+
+Here the conversion probability is 2/3. Removing `a` halves it and
+removing `b` makes conversion impossible, so `b` gets twice `a`’s
+credit.
+
+## What none of this is
+
+None of these methods estimates incrementality from observational data
+alone. Regression-based MMM is identified only as well as its
+specification and the variation in the data allow, and attribution rules
+— including Markov removal effects — divide observed conversions by a
+convention. Randomised experiments (geo experiments for media, holdouts
+for digital channels) measure what these methods estimate, and are the
+standard way to calibrate them.
+
+## References
+
+Anderl, E., Becker, I., von Wangenheim, F. and Schumann, J. H. (2016).
+Mapping the customer journey: Lessons learned from graph-based online
+attribution modeling. *International Journal of Research in Marketing*,
+33(3), 457–474. <https://doi.org/10.1016/j.ijresmar.2016.03.001>
+
+Bergmeir, C. and Benítez, J. M. (2012). On the use of cross-validation
+for time series predictor evaluation. *Information Sciences*, 191,
+192–213.
+
+Breiman, L., Friedman, J., Olshen, R. and Stone, C. (1984).
+*Classification and Regression Trees*. Wadsworth.
+
+Broadbent, S. (1979). One way TV advertisements work. *Journal of the
+Market Research Society*, 21(3), 139–166.
+
+Hastie, T., Tibshirani, R. and Friedman, J. (2009). *The Elements of
+Statistical Learning* (2nd ed.). Springer.
+
+Hill, A. V. (1910). The possible effects of the aggregation of the
+molecules of haemoglobin on its dissociation curves. *The Journal of
+Physiology*, 40, iv–vii.
+
+Jin, Y., Wang, Y., Sun, Y., Chan, D. and Koehler, J. (2017). *Bayesian
+methods for media mix modeling with carryover and shape effects.* Google
+Inc. <https://research.google/pubs/pub46001/>
+
+Koyck, L. M. (1954). *Distributed Lags and Investment Analysis.*
+North-Holland.
+
+Künsch, H. R. (1989). The jackknife and the bootstrap for general
+stationary observations. *The Annals of Statistics*, 17(3), 1217–1241.
+
+Lahiri, S. N. (2003). *Resampling Methods for Dependent Data.* Springer.

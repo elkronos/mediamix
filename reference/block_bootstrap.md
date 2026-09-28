@@ -1,0 +1,134 @@
+# Moving block bootstrap for time-series statistics
+
+Puts uncertainty intervals on anything computed from a weekly panel –
+coefficients, contributions, average or marginal ROI – by resampling
+*blocks* of consecutive rows, refitting, and recomputing. Resampling
+single rows would destroy the autocorrelation that carryover creates and
+make the intervals too narrow; resampling blocks keeps it within each
+block (Kunsch, 1989).
+
+## Usage
+
+``` r
+block_bootstrap(
+  data,
+  statistic,
+  times = 200L,
+  block_length = NULL,
+  by = NULL,
+  level = 0.9,
+  seed = NULL
+)
+```
+
+## Arguments
+
+- data:
+
+  A data frame, rows in time order (within each group when `by` is
+  supplied). It should hold everything `statistic` needs: typically the
+  KPI, the *transformed* media, the controls and the raw spend.
+
+- statistic:
+
+  A function of one data frame returning a named numeric vector. It is
+  called once on `data` for the point estimate and once per replicate on
+  a resampled copy.
+
+- times:
+
+  Number of bootstrap replicates.
+
+- block_length:
+
+  Rows per block. The default, `ceiling(n^(1/3))`, is the usual
+  rate-optimal order for the moving block bootstrap; for weekly media
+  data a block of at least the carryover's effective window is a
+  sensible floor.
+
+- by:
+
+  Optional character vector of grouping columns. Blocks are then drawn
+  within each group, and each group keeps its own size, so a panel of
+  geographies is resampled as a panel.
+
+- level:
+
+  Confidence level of the percentile intervals.
+
+- seed:
+
+  Optional random seed, for reproducible intervals.
+
+## Value
+
+An object of class `mm_bootstrap`: a data frame with one row per element
+of the statistic – `term`, `estimate` (on the original data), `lower`,
+`upper` (percentile interval) and `std_error` – with the replicate
+matrix attached as the attribute `"replicates"` (one row per replicate,
+one column per term). Replicates in which `statistic` failed are dropped
+and counted in a message.
+
+## Details
+
+Transform the media *before* bootstrapping and put the transformed
+columns in `data`. Resampled blocks are glued end to end, so re-running
+the adstock filter on resampled rows would carry spend across block
+boundaries that were never adjacent in time; the transformed columns
+already hold each week's correct carryover.
+
+The interval reflects sampling variation given the model specification,
+including the transform parameters. It does not include the uncertainty
+in choosing those parameters unless `statistic` re-tunes them, which is
+possible but slow.
+
+## References
+
+Kunsch, H. R. (1989). The jackknife and the bootstrap for general
+stationary observations. *The Annals of Statistics*, 17(3), 1217–1241.
+
+Lahiri, S. N. (2003). *Resampling Methods for Dependent Data*. Springer.
+
+## See also
+
+[`contributions()`](https://elkronos.github.io/mediamix/reference/contributions.md),
+[`roi()`](https://elkronos.github.io/mediamix/reference/roi.md),
+[`marginal_roi()`](https://elkronos.github.io/mediamix/reference/marginal_roi.md)
+
+## Examples
+
+``` r
+data(mm_weekly)
+north <- mm_weekly[mm_weekly$geo == "north", ]
+channels <- c("tv", "video", "search", "social", "display")
+truth <- attr(mm_weekly, "truth")
+
+# Transform once, on the full series, then bootstrap the model on top.
+media <- as.data.frame(Map(function(x, d, h, s) media_transform(
+  x, adstock = list(decay = d), saturation = list(half_max = h, shape = s)),
+  north[channels], truth$decay[channels], truth$half_max[channels],
+  truth$shape[channels]))
+names(media) <- paste0(channels, "_t")
+d <- cbind(north, media, week = seq_len(nrow(north)))
+
+average_roi <- function(d) {
+  fit <- lm(revenue ~ tv_t + video_t + search_t + social_t + display_t +
+              week + price + seasonality + holiday, data = d)
+  contrib <- colSums(sweep(as.matrix(d[paste0(channels, "_t")]), 2,
+                           coef(fit)[paste0(channels, "_t")], `*`))
+  stats::setNames(contrib / colSums(d[channels]), channels)
+}
+
+boot <- block_bootstrap(d, average_roi, times = 50, block_length = 13,
+                        seed = 1)
+boot
+#> 
+#> ── Block bootstrap 
+#> 50 replicates, blocks of 13 rows, 90% percentile intervals
+#>     term estimate    lower upper std_error
+#>       tv    1.310  1.10874 1.882    0.2579
+#>    video    1.924  0.01862 3.495    1.1227
+#>   search    2.794  1.58295 4.258    0.8991
+#>   social    3.614  0.51808 5.213    1.4353
+#>  display    1.517 -0.03334 5.217    1.6852
+```
