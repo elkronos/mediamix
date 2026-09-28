@@ -289,6 +289,22 @@ build_paths <- function(events,
   }, by = "path_id"]
   dt[, "converted" := !is.na(conv_t)]
 
+  # Under split_on = "none" or "gap" one journey can hold several conversion
+  # events. The journey is then credited as ONE conversion (with the summed
+  # value), so rule-based totals fall short of the conversion count. That is a
+  # consequence of the split, not an error, but it should not be silent.
+  multi <- dt[conversion == 1L, .N, by = "path_id"][N > 1L]
+  if (nrow(multi) > 0L) {
+    extra <- sum(multi$N) - nrow(multi)
+    cli::cli_inform(c(
+      "{nrow(multi)} journey{?s} contain{?s/} more than one conversion event.",
+      i = "Each is credited as a single conversion, so {extra} conversion \\
+           event{?s} will not appear in credited totals.",
+      i = 'Add {.val conversion} to {.arg split_on} to give each conversion \\
+           its own journey.'
+    ))
+  }
+
   # The lookback anchor is fixed here, alongside the conversion facts and
   # before any filtering. Computing a non-converting journey's anchor after
   # direct touches were dropped would let `direct = "drop"` slide the window
@@ -614,6 +630,13 @@ print.mm_paths <- function(x, ...) {
 #' This stops a column subset from producing an object that claims to be an
 #' `mm_paths` but cannot answer any question about journeys.
 #'
+#' When a row subset removes part of a journey -- dropping one channel, say --
+#' `touch_rank` and `touch_n` are recomputed from the touches that remain, so
+#' the result is a valid journey table in its own right and every credit rule
+#' sums to 1 per converting journey. The first remaining touch becomes rank 1.
+#' Convert with `as.data.frame()` first if you want to inspect the original
+#' ranks of a partial selection.
+#'
 #' @param x An `mm_paths` object.
 #' @param ... Passed to the data frame method.
 #'
@@ -648,9 +671,38 @@ print.mm_paths <- function(x, ...) {
   # are removed they no longer describe this object, and carrying them would
   # make `path_summary()` mix parent counts with subset statistics. Strip them
   # explicitly: `[.data.frame` propagates unknown attributes by itself.
-  if (!identical(nrow(out), n_before)) attr(out, "mm_counts") <- NULL
+  if (!identical(nrow(out), n_before)) {
+    attr(out, "mm_counts") <- NULL
+    out <- .mm_rerank(out)
+  }
   class(out) <- c("mm_paths", "data.frame")
   out
+}
+
+# Re-derive `touch_rank` and `touch_n` from the rows actually present. Every
+# credit rule and journey diagnostic reads these two columns, so after a row
+# subset that removes part of a journey -- dropping one channel, say -- the
+# stored values would describe touches that are no longer there: first-touch
+# credit would go to nobody, and a two-touch remnant of a five-touch journey
+# would be scored as a middle. Original order within a journey is kept.
+#' @keywords internal
+#' @noRd
+.mm_rerank <- function(x) {
+  n <- nrow(x)
+  if (n == 0L) return(x)
+  o <- order(x$path_id, x$touch_rank)
+  pid <- x$path_id[o]
+  starts <- c(TRUE, pid[-1L] != pid[-n])
+  run <- cumsum(starts)
+  first_pos <- which(starts)
+  rank <- integer(n)
+  rank[o] <- seq_len(n) - first_pos[run] + 1L
+  len <- tabulate(run)
+  total <- integer(n)
+  total[o] <- len[run]
+  x[["touch_rank"]] <- rank
+  x[["touch_n"]] <- total
+  x
 }
 
 #' @keywords internal

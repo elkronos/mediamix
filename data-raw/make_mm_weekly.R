@@ -7,7 +7,10 @@ channels <- c("tv", "video", "search", "social", "display")
 
 truth <- list(
   decay      = c(tv = 0.85, video = 0.70, search = 0.15, social = 0.45, display = 0.55),
-  half_max   = c(tv = 45000, video = 12000, search = 9000, social = 7000, display = 6000),
+  # Spend is in the same currency as revenue, and the scales are chosen so
+  # that average revenue ROIs land between roughly 1 and 4, which is where
+  # real channels usually sit.
+  half_max   = c(tv = 2250, video = 600, search = 450, social = 350, display = 300),
   shape      = c(tv = 1.6, video = 1.0, search = 1.0, social = 1.0, display = 1.0),
   beta       = c(tv = 5200, video = 2400, search = 4100, social = 1800, display = 900),
   baseline   = 18000,
@@ -39,11 +42,11 @@ rows <- lapply(geos, function(g) {
   holiday <- as.integer(format(dates, "%m") == "12")
 
   spend <- data.frame(
-    tv      = flight(n_weeks, 0.45, 38000 * s, 12000 * s, burst = TRUE),
-    video   = flight(n_weeks, 0.60, 11000 * s,  4000 * s),
-    search  = round(pmax(0, stats::rnorm(n_weeks,  9500 * s, 2200 * s))),
-    social  = flight(n_weeks, 0.80,  6500 * s,  2400 * s),
-    display = flight(n_weeks, 0.70,  5200 * s,  1900 * s)
+    tv      = flight(n_weeks, 0.45, 1900 * s, 600 * s, burst = TRUE),
+    video   = flight(n_weeks, 0.60,  550 * s, 200 * s),
+    search  = round(pmax(0, stats::rnorm(n_weeks, 475 * s, 110 * s))),
+    social  = flight(n_weeks, 0.80,  325 * s, 120 * s),
+    display = flight(n_weeks, 0.70,  260 * s,  95 * s)
   )
 
   price <- round(stats::rnorm(n_weeks, 24.5, 1.4) -

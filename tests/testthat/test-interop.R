@@ -71,3 +71,27 @@ test_that("as_channel_paths() returns a zero-row table without error on empty pa
 test_that("as_channel_paths() errors on a non-mm_paths input", {
   expect_error(as_channel_paths(data.frame(x = 1)), "mm_paths")
 })
+
+test_that("markov_removal() agrees with ChannelAttribution::markov_model() at order 1", {
+  skip_if_not_installed("ChannelAttribution")
+  skip_on_cran()
+  data(mm_events, envir = environment())
+  paths <- build_paths(mm_events, id = "customer_id", channel = "channel",
+                       timestamp = "timestamp", conversion = "conversion",
+                       direct = "label")
+  ours <- markov_removal(paths)
+  ca_in <- as_channel_paths(paths, sep = ">")
+  theirs <- suppressWarnings(suppressMessages(utils::capture.output(
+    res <- ChannelAttribution::markov_model(
+      ca_in, var_path = "path", var_conv = "total_conversions",
+      var_null = "total_null", order = 1, sep = ">", verbose = 0)
+  )))
+  if (is.list(res) && !is.data.frame(res)) res <- res[[1L]]
+  ca_share <- res$total_conversions / sum(res$total_conversions)
+  names(ca_share) <- trimws(res$channel_name)
+  common <- intersect(ours$channel, names(ca_share))
+  expect_setequal(common, ours$channel)
+  # ChannelAttribution estimates by simulation; allow for its error.
+  expect_equal(unname(ours$share[match(common, ours$channel)]),
+               unname(ca_share[common]), tolerance = 0.05)
+})

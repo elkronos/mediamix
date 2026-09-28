@@ -1,0 +1,116 @@
+url: https://elkronos.github.io/mediamix/
+
+template:
+  bootstrap: 5
+  math-rendering: mathml
+  bslib:
+    primary: "#1f5f8b"
+
+home:
+  title: "mediamix: media transforms and attribution path construction"
+
+navbar:
+  structure:
+    left: [intro, walkthrough, reference, articles, news]
+    right: [search, github]
+  components:
+    walkthrough:
+      text: Walkthrough
+      href: articles/budget-walkthrough.html
+
+articles:
+- title: Start here
+  navbar: ~
+  contents:
+  - mediamix
+  - articles/budget-walkthrough
+- title: Media mix modelling
+  navbar: Media mix modelling
+  contents:
+  - carryover
+  - tidymodels
+- title: Attribution
+  navbar: Attribution
+  contents:
+  - journeys
+  - spine
+- title: Background
+  navbar: Background
+  contents:
+  - articles/methodology
+  - articles/comparison
+
+reference:
+- title: Carryover (adstock)
+  desc: Spread each period's media forward in time.
+  contents:
+  - adstock_geometric
+  - adstock_weibull
+  - adstock_delayed
+  - adstock_filter
+  - adstock_weights
+  - adstock_weights_weibull
+  - adstock_state
+  - adstock_steady_state
+  - decay_vocabulary
+- title: Saturation
+  desc: Diminishing returns, and composing it with carryover.
+  contents:
+  - saturation
+  - media_transform
+- title: Choosing carryover parameters
+  contents:
+  - tune_carryover
+  - tune_carryover_joint
+  - fit_ols
+  - metrics
+- title: Diagnostics and reporting
+  desc: Check the data first; turn a fitted model into a deliverable after.
+  contents:
+  - diagnose_media
+  - contributions
+  - roi
+  - marginal_roi
+  - response_curve
+  - block_bootstrap
+- title: Plots
+  desc: A `plot()` method for each result, in one consistent style.
+  contents:
+  - plot_carryover
+  - plot.mm_bootstrap
+  - plot.mm_contributions
+  - plot.mm_response_curve
+  - plot.mm_attribution
+  - mm_palette
+- title: tidymodels integration
+  contents:
+  - step_adstock
+  - step_saturation
+  - mediamix_params
+- title: Journey construction
+  contents:
+  - build_paths
+  - '`[.mm_paths`'
+  - as_channel_paths
+- title: Attribution
+  contents:
+  - credit
+  - markov_removal
+  - attribute
+  - attribution_spread
+- title: Journey diagnostics
+  contents:
+  - path_summary
+  - path_lengths
+  - channel_positions
+  - assisted_conversions
+  - top_paths
+  - conversion_lag
+  - path_diagnostics
+- title: Data
+  contents:
+  - mm_weekly
+  - mm_events
+- title: Package
+  contents:
+  - mediamix-package

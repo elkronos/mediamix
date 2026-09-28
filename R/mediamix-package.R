@@ -5,10 +5,13 @@
 #' carryover- and saturation-adjusted regressors, and raw event logs into
 #' attributed customer journeys.
 #'
-#' It is a preprocessing package. It does not fit models, and it does not
-#' compute Markov removal effects -- `lm()`, `glmnet` and `brms` do the first
-#' better than a marketing package would, and \pkg{ChannelAttribution} does the
-#' second in C++. [as_channel_paths()] hands your journeys straight to it.
+#' It is a preprocessing and reporting package. It does not fit models --
+#' `lm()`, `glmnet` and `brms` do that better than a marketing package would.
+#' It computes order-1 Markov removal effects natively; for higher-order chains
+#' [as_channel_paths()] hands your journeys to \pkg{ChannelAttribution}.
+#'
+#' Full documentation, an end-to-end walkthrough and the methods behind each
+#' function are at <https://elkronos.github.io/mediamix/>.
 #'
 #' @section Where to start:
 #' Five vignettes, in the order most people need them:
@@ -28,7 +31,8 @@
 #' @section The media half:
 #' \describe{
 #'   \item{Carryover}{[adstock_geometric()] for the standard geometric kernel,
-#'     [adstock_weibull()] when the response peaks after the spend,
+#'     [adstock_weibull()] and [adstock_delayed()] when the response peaks
+#'     after the spend,
 #'     [adstock_filter()] for a kernel of your own. [adstock_weights()] and
 #'     [adstock_weights_weibull()] expose the kernels themselves, and
 #'     [adstock_state()] carries a filter across a boundary.}
@@ -39,8 +43,9 @@
 #'     saturation, in that order, and will not do it backwards quietly.}
 #'   \item{Choosing parameters}{[decay_from_half_life()], [half_life()] and
 #'     [effective_window()] translate between half-lives and decay
-#'     coefficients. [tune_carryover()] selects them by cross-validation
-#'     against an actual KPI.}
+#'     coefficients. [tune_carryover()] and [tune_carryover_joint()] select
+#'     them by cross-validation against an actual KPI;
+#'     [adstock_steady_state()] removes start-up bias.}
 #' }
 #'
 #' @section The attribution half:
@@ -48,8 +53,8 @@
 #'   \item{Journeys}{[build_paths()] turns an event log into journeys,
 #'     handling the seven things that go wrong on the way.}
 #'   \item{Credit}{[credit_linear()], [credit_first()], [credit_last()],
-#'     [credit_position()], [credit_time_decay()] and [credit_custom()].
-#'     [attribute()] runs several at once and [attribution_spread()] reports
+#'     [credit_position()], [credit_time_decay()] and [credit_custom()], and
+#'     the data-driven [markov_removal()]. [attribute()] runs several at once and [attribution_spread()] reports
 #'     how much the answer depends on which you picked.}
 #'   \item{Diagnostics}{[path_summary()], [path_lengths()],
 #'     [channel_positions()], [assisted_conversions()], [top_paths()] and
@@ -60,8 +65,10 @@
 #'
 #' @section Reporting, diagnostics and tidymodels:
 #' [diagnose_media()] checks whether the data can support a model at all --
-#' run it first. [contributions()], [roi()], [mroi()], [response_curve()] and
-#' [spend_for()] turn a fitted model into a deliverable. [step_adstock()] and
+#' run it first. [contributions()], [roi()], [marginal_roi()], [mroi()],
+#' [response_curve()] and [spend_for()] turn a fitted model into a
+#' deliverable, and [block_bootstrap()] puts intervals on it. Each result has
+#' a `plot()` method; [mm_palette()] exposes their colours. [step_adstock()] and
 #' [step_saturation()] are \pkg{recipes} steps that carry filter state across
 #' the train/test boundary, with [carryover_decay()] and friends as their
 #' \pkg{dials} parameters.
@@ -109,5 +116,5 @@ utils::globalVariables(c(
   "conversion_value", "timestamp", "credit", "conv_time", "journey",
   "gap_flag", "new_journey", "rank_in_path", "id", "conversion",
   "time_to_conversion", "prev_channel", "n_touch", "value", "keep_row",
-  ".is_direct", ".t", "conv_t", "anchor"
+  ".is_direct", ".t", "conv_t", "anchor", "N"
 ))

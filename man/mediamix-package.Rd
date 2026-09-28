@@ -12,10 +12,13 @@ carryover- and saturation-adjusted regressors, and raw event logs into
 attributed customer journeys.
 }
 \details{
-It is a preprocessing package. It does not fit models, and it does not
-compute Markov removal effects -- \code{lm()}, \code{glmnet} and \code{brms} do the first
-better than a marketing package would, and \pkg{ChannelAttribution} does the
-second in C++. \code{\link[=as_channel_paths]{as_channel_paths()}} hands your journeys straight to it.
+It is a preprocessing and reporting package. It does not fit models --
+\code{lm()}, \code{glmnet} and \code{brms} do that better than a marketing package would.
+It computes order-1 Markov removal effects natively; for higher-order chains
+\code{\link[=as_channel_paths]{as_channel_paths()}} hands your journeys to \pkg{ChannelAttribution}.
+
+Full documentation, an end-to-end walkthrough and the methods behind each
+function are at \url{https://elkronos.github.io/mediamix/}.
 }
 \section{Where to start}{
 
@@ -38,7 +41,8 @@ penalty jointly in one search.}
 
 \describe{
 \item{Carryover}{\code{\link[=adstock_geometric]{adstock_geometric()}} for the standard geometric kernel,
-\code{\link[=adstock_weibull]{adstock_weibull()}} when the response peaks after the spend,
+\code{\link[=adstock_weibull]{adstock_weibull()}} and \code{\link[=adstock_delayed]{adstock_delayed()}} when the response peaks
+after the spend,
 \code{\link[=adstock_filter]{adstock_filter()}} for a kernel of your own. \code{\link[=adstock_weights]{adstock_weights()}} and
 \code{\link[=adstock_weights_weibull]{adstock_weights_weibull()}} expose the kernels themselves, and
 \code{\link[=adstock_state]{adstock_state()}} carries a filter across a boundary.}
@@ -49,8 +53,9 @@ penalty jointly in one search.}
 saturation, in that order, and will not do it backwards quietly.}
 \item{Choosing parameters}{\code{\link[=decay_from_half_life]{decay_from_half_life()}}, \code{\link[=half_life]{half_life()}} and
 \code{\link[=effective_window]{effective_window()}} translate between half-lives and decay
-coefficients. \code{\link[=tune_carryover]{tune_carryover()}} selects them by cross-validation
-against an actual KPI.}
+coefficients. \code{\link[=tune_carryover]{tune_carryover()}} and \code{\link[=tune_carryover_joint]{tune_carryover_joint()}} select
+them by cross-validation against an actual KPI;
+\code{\link[=adstock_steady_state]{adstock_steady_state()}} removes start-up bias.}
 }
 }
 
@@ -60,8 +65,8 @@ against an actual KPI.}
 \item{Journeys}{\code{\link[=build_paths]{build_paths()}} turns an event log into journeys,
 handling the seven things that go wrong on the way.}
 \item{Credit}{\code{\link[=credit_linear]{credit_linear()}}, \code{\link[=credit_first]{credit_first()}}, \code{\link[=credit_last]{credit_last()}},
-\code{\link[=credit_position]{credit_position()}}, \code{\link[=credit_time_decay]{credit_time_decay()}} and \code{\link[=credit_custom]{credit_custom()}}.
-\code{\link[=attribute]{attribute()}} runs several at once and \code{\link[=attribution_spread]{attribution_spread()}} reports
+\code{\link[=credit_position]{credit_position()}}, \code{\link[=credit_time_decay]{credit_time_decay()}} and \code{\link[=credit_custom]{credit_custom()}}, and
+the data-driven \code{\link[=markov_removal]{markov_removal()}}. \code{\link[=attribute]{attribute()}} runs several at once and \code{\link[=attribution_spread]{attribution_spread()}} reports
 how much the answer depends on which you picked.}
 \item{Diagnostics}{\code{\link[=path_summary]{path_summary()}}, \code{\link[=path_lengths]{path_lengths()}},
 \code{\link[=channel_positions]{channel_positions()}}, \code{\link[=assisted_conversions]{assisted_conversions()}}, \code{\link[=top_paths]{top_paths()}} and
@@ -74,8 +79,10 @@ how much the answer depends on which you picked.}
 \section{Reporting, diagnostics and tidymodels}{
 
 \code{\link[=diagnose_media]{diagnose_media()}} checks whether the data can support a model at all --
-run it first. \code{\link[=contributions]{contributions()}}, \code{\link[=roi]{roi()}}, \code{\link[=mroi]{mroi()}}, \code{\link[=response_curve]{response_curve()}} and
-\code{\link[=spend_for]{spend_for()}} turn a fitted model into a deliverable. \code{\link[=step_adstock]{step_adstock()}} and
+run it first. \code{\link[=contributions]{contributions()}}, \code{\link[=roi]{roi()}}, \code{\link[=marginal_roi]{marginal_roi()}}, \code{\link[=mroi]{mroi()}},
+\code{\link[=response_curve]{response_curve()}} and \code{\link[=spend_for]{spend_for()}} turn a fitted model into a
+deliverable, and \code{\link[=block_bootstrap]{block_bootstrap()}} puts intervals on it. Each result has
+a \code{plot()} method; \code{\link[=mm_palette]{mm_palette()}} exposes their colours. \code{\link[=step_adstock]{step_adstock()}} and
 \code{\link[=step_saturation]{step_saturation()}} are \pkg{recipes} steps that carry filter state across
 the train/test boundary, with \code{\link[=carryover_decay]{carryover_decay()}} and friends as their
 \pkg{dials} parameters.
@@ -117,6 +124,7 @@ path_summary(paths)
 \seealso{
 Useful links:
 \itemize{
+  \item \url{https://elkronos.github.io/mediamix/}
   \item \url{https://github.com/elkronos/mediamix}
   \item Report bugs at \url{https://github.com/elkronos/mediamix/issues}
 }

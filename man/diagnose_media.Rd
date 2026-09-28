@@ -11,7 +11,8 @@ diagnose_media(
   impressions = NULL,
   by = NULL,
   vif_threshold = 5,
-  cv_threshold = 0.15
+  cv_threshold = 0.15,
+  decay = NULL
 )
 }
 \arguments{
@@ -36,6 +37,14 @@ flagged.}
 
 \item{cv_threshold}{Coefficient of variation below which a channel is flagged
 as insufficiently varying.}
+
+\item{decay}{Optional geometric decay for computing collinearity on
+\emph{adstocked} media: a single number for every channel, or a named vector
+with one per channel (unnamed channels are left raw). Adstock smooths each
+series, and smoothed series are usually more correlated than the raw
+spend, so this is the collinearity the model will actually face. Rows
+must be in time order within each group. Variation and flighting are
+always reported on the raw spend.}
 }
 \value{
 An object of class \code{mm_diagnosis}: a named list with elements
@@ -51,12 +60,16 @@ all. \code{NA} is not \code{TRUE}.}
 \item{\code{correlations}}{Pairwise correlation matrix. With \code{by} supplied,
 each cell is the group value with the largest magnitude, sign
 preserved.}
-\item{\code{cpm}}{Implied cost per mille per period, with outlier flags, when
-\code{spend} and \code{impressions} are supplied. \code{NULL} otherwise.}
+\item{\code{cpm}}{Implied cost per mille for each row of \code{data} (\code{row} is
+the row number), with the series median and an outlier flag, when
+\code{spend} and \code{impressions} are supplied; with \code{by}, the median and
+outlier rule are computed within each series and a \code{group} column is
+added. \code{NULL} otherwise.}
 \item{\code{flags}}{Character vector of the problems found, in the order they
 should be dealt with. Empty when nothing was found.}
-\item{\code{n_obs}, \code{n_groups}, \code{grouped}}{Rows examined, series examined,
-and whether \code{by} was supplied.}
+\item{\code{n_obs}, \code{n_groups}, \code{grouped}, \code{adstocked}}{Rows examined,
+series examined, whether \code{by} was supplied, and whether collinearity
+was measured on adstocked media.}
 }
 }
 \description{
@@ -101,6 +114,10 @@ d
 
 d$variation
 d$collinearity
+
+# Collinearity after adstocking is what the model actually sees
+diagnose_media(mm_weekly, media = channels, by = "geo",
+               decay = attr(mm_weekly, "truth")$decay)$collinearity
 
 # A deliberately collinear pair is caught
 fake <- mm_weekly[mm_weekly$geo == "north", ]

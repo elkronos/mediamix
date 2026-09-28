@@ -41,7 +41,8 @@ test_that("tune_carryover() results are sorted with the best (lowest metric) row
   expect_equal(tuned$best$metric, min(tuned$results$metric), tolerance = 1e-12)
   expect_equal(tuned$best$decay, tuned$results$decay[1])
   expect_setequal(names(tuned$best),
-                  c("max_lag", "decay", "half_life", "metric", "n_splits"))
+                  c("max_lag", "decay", "half_life", "metric", "std_err",
+                    "n_splits"))
 })
 
 # ---- fast OLS path vs the general path ---------------------------------------

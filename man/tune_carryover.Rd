@@ -18,7 +18,10 @@ tune_carryover(
   assess = 1L,
   skip = 0L,
   k = 5L,
-  cores = 1L
+  cores = 1L,
+  aggregate = c("pooled", "mean"),
+  controls = NULL,
+  warm_start = FALSE
 )
 }
 \arguments{
@@ -27,12 +30,10 @@ tune_carryover(
 \item{y}{Numeric vector of the KPI, the same length as \code{x}.}
 
 \item{fit_fn}{A function of \verb{(x_adstocked, y)} returning a fitted model.
-Defaults to \code{\link[=fit_ols]{fit_ols()}}. It receives only the adstocked media and the
-response, so control variables must reach it another way: residualise \code{y}
-against the controls before calling, or capture them from the enclosing
-environment. To tune carryover jointly with controls and with the model's
-own hyperparameters, use \code{\link[=step_adstock]{step_adstock()}} inside a \pkg{recipes} pipeline
-instead.}
+Defaults to \code{\link[=fit_ols]{fit_ols()}}. When \code{controls} are supplied it receives a data
+frame instead -- the adstocked media as column \code{media}, then the
+controls -- and the default becomes least squares on all of them. For
+several channels at once, see \code{\link[=tune_carryover_joint]{tune_carryover_joint()}}.}
 
 \item{predict_fn}{A function of \verb{(model, newdata)} returning predictions,
 where \code{newdata} is the adstocked media for the assessment rows. Defaults to
@@ -72,15 +73,36 @@ Ignored otherwise.}
 
 \item{cores}{Number of cores. Values above 1 use \code{\link[parallel:mclapply]{parallel::mclapply()}} on
 Unix-alikes and a socket cluster elsewhere.}
+
+\item{aggregate}{How to turn the assessment sets into one score.
+\code{"pooled"} (the default) collects every out-of-sample prediction across
+splits and evaluates \code{metric_fn} once on the lot, so \code{rmse} really is the
+root mean squared forecast error. \code{"mean"} evaluates \code{metric_fn} on each
+split and averages, which is the \pkg{tune} convention; note that with
+\code{assess = 1} a per-split RMSE is an absolute error, so the mean of them is
+a mean absolute error whatever \code{metric_fn} is called.}
+
+\item{controls}{Optional data frame of control variables (trend, price,
+seasonality, ...) entered into the model untransformed, so carryover is
+judged with them accounted for. The rows are kept aligned with every split
+automatically.}
+
+\item{warm_start}{Seed the adstock with \code{\link[=adstock_steady_state]{adstock_steady_state()}} rather
+than zero, removing the start-up bias of a long carryover.}
 }
 \value{
 An object of class \code{mm_carryover}: a list with elements
 \describe{
 \item{\code{best}}{One-row data frame with the selected \code{max_lag} and \code{decay},
-plus the corresponding \code{half_life}, \code{metric} and \code{n_splits}.}
+plus the corresponding \code{half_life}, \code{metric}, \code{std_err} and
+\code{n_splits}.}
+\item{\code{best_1se}}{The same, for the candidate chosen by the
+one-standard-error rule. See \emph{Choosing among near-ties}.}
 \item{\code{results}}{Data frame of the full grid: \code{max_lag}, \code{decay},
-\code{half_life}, \code{metric} and \code{n_splits}.}
+\code{half_life}, \code{metric}, \code{std_err} and \code{n_splits}. \code{std_err} is the
+standard error of the per-split metric, \code{sd / sqrt(n_splits)}.}
 \item{\code{metric}}{Name of the metric function used.}
+\item{\code{aggregate}}{How the splits were combined.}
 \item{\code{scheme}}{The resampling scheme used.}
 \item{\code{n_splits}}{Number of resampling splits evaluated.}
 \item{\code{normalise}}{Whether the adstock kernel was normalised, carried
@@ -123,6 +145,41 @@ point. The \code{adstock(x)[1:m] == adstock(x[1:m])} invariant is enforced by th
 test suite precisely because this shortcut depends on it.
 }
 
+\section{Choosing among near-ties}{
+
+Carryover is weakly identified in most media data: the cross-validation
+curve is often nearly flat across a wide band of decay, and the minimum
+moves around from sample to sample. \code{best} reports the minimum; \code{best_1se}
+applies the one-standard-error rule (Breiman et al., 1984; Hastie,
+Tibshirani and Friedman, 2009, section 7.10), choosing the \emph{shortest}
+carryover -- lowest half-life, then shortest kernel -- that the
+resampling cannot distinguish from the best candidate. When the two
+disagree, the shorter carryover is the more conservative claim.
+
+The comparison is \emph{paired}: every candidate is scored on the same splits,
+so a candidate qualifies when its mean per-split error exceeds the best
+candidate's by no more than one standard error of the per-split
+\emph{difference}. The textbook unpaired version compares against the standard
+error of the best candidate's own mean error, which on time-series splits
+is dominated by how hard each period is to forecast -- common to every
+candidate -- and so admits nearly the whole grid. The \code{std_err} column
+reports that unpaired standard error, as a measure of forecast noise. The
+rule is computed on per-split errors whatever \code{aggregate} is, because that
+is where a standard error comes from.
+}
+
+\section{Start-up bias}{
+
+Adstock is cold-started at zero, so the first few periods of a
+long-carryover channel are understated: with \code{decay = 0.85} a constant spend
+reaches only 15\% of its steady-state level in week one and 90\% after
+\code{effective_window(0.85)} = 15 weeks. With \code{initial} at half the series this
+rarely decides the answer, but it biases the fit towards short carryover on
+short series. \code{warm_start = TRUE} seeds every candidate with
+\code{\link[=adstock_steady_state]{adstock_steady_state()}}; better still, pass real pre-period spend through
+\code{\link[=adstock_state]{adstock_state()}} and your own \code{fit_fn} when you have it.
+}
+
 \examples{
 # Recover a known decay from data generated with it
 set.seed(42)
@@ -138,6 +195,9 @@ tuned <- tune_carryover(
 )
 tuned
 tuned$best$decay
+
+# The shortest carryover the data cannot distinguish from the best
+tuned$best_1se$decay
 
 # Tune against a model with controls rather than the bare default. The
 # cleanest way is to residualise the KPI first, which needs no row
@@ -160,6 +220,17 @@ residualised <- suppressWarnings(tune_carryover(
 # The truth is 0.7. Ignoring the trend and seasonality moves the answer.
 c(truth = 0.7, bare = bare$best$decay, residualised = residualised$best$decay)
 }
+\references{
+Breiman, L., Friedman, J., Olshen, R. and Stone, C. (1984).
+\emph{Classification and Regression Trees}. Wadsworth.
+
+Hastie, T., Tibshirani, R. and Friedman, J. (2009). \emph{The Elements of
+Statistical Learning} (2nd ed.). Springer.
+
+Bergmeir, C. and Benitez, J. M. (2012). On the use of cross-validation for
+time series predictor evaluation. \emph{Information Sciences}, 191, 192--213.
+}
 \seealso{
+\code{\link[=tune_carryover_joint]{tune_carryover_joint()}} for several channels at once,
 \code{\link[=adstock_geometric]{adstock_geometric()}}, \code{\link[=fit_ols]{fit_ols()}}, \code{\link[=effective_window]{effective_window()}}
 }

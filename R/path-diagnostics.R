@@ -191,17 +191,20 @@ assisted_conversions <- function(paths, normalise = FALSE) {
   # contained -- and matrix name-indexing throws on "" even when it is a real
   # dimname.
   code <- match(p$channel, chans)
-  idx <- split(seq_len(nrow(p)), p$path_id)
+  dt <- data.table::data.table(pid = p$path_id, rank = p$touch_rank,
+                               code = code)
+  present_tab <- unique(dt[, c("pid", "code"), with = FALSE])[, .N, by = "code"]
   present <- numeric(length(chans))
-  for (i in idx) {
-    seqc <- code[i][order(p$touch_rank[i])]
-    u <- unique(seqc)
-    present[u] <- present[u] + 1
-    if (length(seqc) < 2L) next
-    pairs <- unique(do.call(rbind, lapply(seq_len(length(seqc) - 1L), function(j) {
-      cbind(seqc[j], seqc[(j + 1L):length(seqc)])
-    })))
-    m[pairs] <- m[pairs] + 1
+  present[present_tab$code] <- present_tab$N
+  # Every ordered (earlier, later) pair within a journey, counted once per
+  # journey. A self-join on journey id is O(sum of squared journey lengths),
+  # which is small because journeys are short.
+  pairs <- dt[dt, on = "pid", allow.cartesian = TRUE, nomatch = NULL]
+  pairs <- pairs[pairs$rank < pairs$i.rank, ]
+  if (nrow(pairs) > 0L) {
+    pairs <- unique(pairs[, c("pid", "code", "i.code"), with = FALSE])
+    tab <- pairs[, .N, by = c("code", "i.code")]
+    m[cbind(tab$code, tab[["i.code"]])] <- tab$N
   }
   if (normalise) {
     denom <- present
@@ -337,19 +340,13 @@ path_diagnostics <- function(paths, n = 10) {
 #' @keywords internal
 #' @noRd
 .mm_path_strings <- function(p, sep) {
-  ord <- order(p$path_id, p$touch_rank)
-  p <- p[ord, , drop = FALSE]
-  idx <- split(seq_len(nrow(p)), p$path_id)
-  data.frame(
-    path_id = names(idx),
-    path = vapply(idx, function(i) paste(p$channel[i], collapse = sep),
-                  character(1), USE.NAMES = FALSE),
-    converted = vapply(idx, function(i) p$converted[i[1L]], logical(1),
-                       USE.NAMES = FALSE),
-    value = vapply(idx, function(i) {
-      v <- p$conversion_value[i[1L]]
-      if (is.na(v)) 0 else v
-    }, numeric(1), USE.NAMES = FALSE),
-    stringsAsFactors = FALSE
-  )
+  dt <- data.table::data.table(path_id = p$path_id, rank = p$touch_rank,
+                               channel = p$channel, converted = p$converted,
+                               value = p$conversion_value)
+  data.table::setorderv(dt, c("path_id", "rank"))
+  out <- dt[, list(path = paste(channel, collapse = sep),
+                   converted = converted[1L],
+                   value = if (is.na(value[1L])) 0 else value[1L]),
+            by = "path_id"]
+  as.data.frame(out, stringsAsFactors = FALSE)
 }

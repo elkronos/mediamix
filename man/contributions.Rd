@@ -55,16 +55,15 @@ Contributions inherit whatever the model's identification is worth. If two
 channels are collinear the split between them is arbitrary even when the
 total is well estimated, and if the model dropped a coefficient outright
 this function refuses rather than reporting \code{NA} contributions that would
-quietly propagate into an ROI table.
+quietly propagate into an ROI table. Run \code{\link[=diagnose_media]{diagnose_media()}} before
+presenting any of this.
 
 On panel data, pass one geography at a time or supply \code{by}. \code{index} is used
 as a label, not a key: with \code{by} supplied and one date per geography, a
 \code{tapply()} over \code{period} alone silently adds the geographies together.
 
-Contributions inherit whatever the model's identification is worth. If two
-channels are collinear, the split between them is arbitrary even when the
-total is well estimated -- run \code{\link[=diagnose_media]{diagnose_media()}} before presenting any of
-this.
+The result has class \code{mm_contributions}, with a \link[=plot.mm_contributions]{plot()}
+method.
 }
 \examples{
 data(mm_weekly)
@@ -104,5 +103,6 @@ all.equal(totals, unname(stats::fitted(fit)))
 round(tapply(contrib$contribution, contrib$channel, sum))
 }
 \seealso{
-\code{\link[=roi]{roi()}}, \code{\link[=response_curve]{response_curve()}}, \code{\link[=diagnose_media]{diagnose_media()}}
+\code{\link[=roi]{roi()}}, \code{\link[=response_curve]{response_curve()}}, \code{\link[=diagnose_media]{diagnose_media()}},
+\code{\link[=plot.mm_contributions]{plot.mm_contributions()}}
 }

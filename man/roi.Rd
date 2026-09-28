@@ -70,25 +70,25 @@ for any curve \code{\link[=saturate]{saturate()}} supports, and it is finite and
 }
 \section{Marginal return when the regressor was adstocked}{
 
-\code{mroi()} differentiates the saturation curve with respect to the quantity the
-coefficient multiplies -- the \emph{transformed} media. Two consequences follow,
-and missing either of them produces a number that looks right and is not.
+\code{mroi()} is the slope of the saturation curve with respect to the quantity
+the coefficient multiplies -- the \emph{transformed} media -- at a single level.
+It is a property of the curve, not yet a return on spend, and two things
+separate the two.
 
-Evaluate it at the adstocked level, not at raw spend. \code{mean(spend)} and
-\code{mean(adstock_geometric(spend, decay))} are different numbers and sit at
-different points on the curve.
+Carryover spreads a unit of spend over many periods. Under a normalised
+kernel the weights sum to one, so the \emph{total} extra response to one more
+unit of spend is roughly the curve's slope, arriving over the kernel's
+length. Multiplying by the kernel's first weight (\code{1 - decay}) gives only
+the response inside the period of spend; comparing that with an average ROI
+that counts every period's carryover compares a part with a whole, and
+understates slow channels several-fold.
 
-Then apply the chain rule. A unit of spend in the current period contributes
-only the kernel's first weight to the current period's adstock, so the
-marginal return on \emph{this period's spend} is \code{mroi()} multiplied by that
-weight. For a normalised geometric kernel it is \code{1 - decay}; for any other
-kernel it is \code{adstock_weights(...)[1]}. A channel with a long carryover
-therefore has a much smaller immediate marginal return than its saturation
-curve alone suggests -- the rest of the effect arrives in later periods.
+And the slope at the \emph{mean} adstocked level is not the mean of the slope
+across periods, which matters for flighted media and S-shaped curves.
 
-\if{html}{\out{<div class="sourceCode">}}\preformatted{z <- adstock_geometric(spend, decay = 0.85)
-mroi(mean(z), coefficient = beta, half_max = h, shape = s) * (1 - 0.85)
-}\if{html}{\out{</div>}}
+\code{\link[=marginal_roi]{marginal_roi()}} handles both by re-running the whole transform on a
+slightly larger budget. Use it for anything that feeds a budget decision,
+and use \code{mroi()} to read the shape of a curve.
 }
 
 \examples{
@@ -116,20 +116,21 @@ contrib <- contributions(transformed, fit, index = north$date)
 
 roi(contrib, north[channels])
 
-# Average and marginal return are different questions. Television here has
-# shape = 1.6, an S-curve, and sits *below* its inflection point, so its
-# marginal return is HIGHER than its average -- the channel is under-funded,
-# not saturated. Search has shape = 1, a concave curve, where marginal is
-# always the lower of the two.
+# Average and marginal return are different questions. marginal_roi()
+# re-runs the whole transform on a 1\% larger budget, so carryover and
+# flighting are both accounted for. Display's average pound returns about
+# 1.5, but its next pound returns less than it costs.
 avg <- roi(contrib, north[channels])
-for (ch in c("tv", "search")) {
-  m <- mroi(spend_level = mean(north[[ch]]),
-            coefficient = stats::coef(fit)[[ch]],
-            half_max = truth$half_max[[ch]], shape = truth$shape[[ch]])
-  cat(sprintf("\%-7s shape \%.1f  average \%.4f  marginal \%.4f\n",
-              ch, truth$shape[[ch]], avg$roi[avg$channel == ch], m))
+for (ch in channels) {
+  m <- marginal_roi(north[[ch]], coefficient = stats::coef(fit)[[ch]],
+                    adstock = list(decay = truth$decay[[ch]]),
+                    saturation = list(half_max = truth$half_max[[ch]],
+                                      shape = truth$shape[[ch]]))
+  cat(sprintf("\%-8s average \%.2f  marginal \%.2f\n",
+              ch, avg$roi[avg$channel == ch], m$mroi))
 }
 }
 \seealso{
-\code{\link[=contributions]{contributions()}}, \code{\link[=response_curve]{response_curve()}}, \code{\link[=spend_for]{spend_for()}}
+\code{\link[=marginal_roi]{marginal_roi()}} for marginal return on spend through the full
+transform, \code{\link[=contributions]{contributions()}}, \code{\link[=response_curve]{response_curve()}}, \code{\link[=spend_for]{spend_for()}}
 }

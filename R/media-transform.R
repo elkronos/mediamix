@@ -6,9 +6,9 @@
 #'
 #' @param x Numeric vector of media spend in time order.
 #' @param adstock A named list of arguments for the carryover step, including a
-#'   `kernel` element of `"geometric"` (the default), `"weibull"` or `"none"`.
-#'   Remaining elements are passed to [adstock_geometric()] or
-#'   [adstock_weibull()].
+#'   `kernel` element of `"geometric"` (the default), `"weibull"`,
+#'   `"delayed"` or `"none"`. Remaining elements are passed to
+#'   [adstock_geometric()], [adstock_weibull()] or [adstock_delayed()].
 #' @param saturation A named list of arguments for the saturation step,
 #'   including a `type` element of `"hill"`, `"exponential"`,
 #'   `"michaelis_menten"`, `"power"` or `"none"`. Remaining elements are passed
@@ -100,17 +100,20 @@ media_transform <- function(x,
 #' @noRd
 .mm_do_adstock <- function(x, args, by) {
   kernel <- if (is.null(args$kernel)) "geometric" else args$kernel
-  if (!.mm_is_string(kernel) || !kernel %in% c("geometric", "weibull", "none")) {
+  if (!.mm_is_string(kernel) ||
+      !kernel %in% c("geometric", "weibull", "delayed", "none")) {
     cli::cli_abort(
-      '{.arg adstock$kernel} must be one of "geometric", "weibull" or "none".'
+      '{.arg adstock$kernel} must be one of "geometric", "weibull", \\
+       "delayed" or "none".'
     )
   }
   if (kernel == "none") return(x)
   args$kernel <- NULL
   args$x <- x
   args$by <- by
-  do.call(if (kernel == "geometric") "adstock_geometric" else "adstock_weibull",
-          args, envir = parent.frame())
+  fn <- switch(kernel, geometric = adstock_geometric,
+               weibull = adstock_weibull, delayed = adstock_delayed)
+  do.call(fn, args)
 }
 
 #' @keywords internal

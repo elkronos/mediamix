@@ -42,18 +42,18 @@
 #' channels are collinear the split between them is arbitrary even when the
 #' total is well estimated, and if the model dropped a coefficient outright
 #' this function refuses rather than reporting `NA` contributions that would
-#' quietly propagate into an ROI table.
+#' quietly propagate into an ROI table. Run [diagnose_media()] before
+#' presenting any of this.
 #'
 #' On panel data, pass one geography at a time or supply `by`. `index` is used
 #' as a label, not a key: with `by` supplied and one date per geography, a
 #' `tapply()` over `period` alone silently adds the geographies together.
 #'
-#' Contributions inherit whatever the model's identification is worth. If two
-#' channels are collinear, the split between them is arbitrary even when the
-#' total is well estimated -- run [diagnose_media()] before presenting any of
-#' this.
+#'   The result has class `mm_contributions`, with a [plot()][plot.mm_contributions]
+#'   method.
 #'
-#' @seealso [roi()], [response_curve()], [diagnose_media()]
+#' @seealso [roi()], [response_curve()], [diagnose_media()],
+#'   [plot.mm_contributions()]
 #'
 #' @examples
 #' data(mm_weekly)
@@ -176,6 +176,7 @@ contributions <- function(media, model, intercept = NULL, index = NULL,
   front <- c("period", if (!is.null(by)) "group", "channel", "contribution")
   out <- out[, c(front, setdiff(names(out), front)), drop = FALSE]
   rownames(out) <- NULL
+  class(out) <- c("mm_contributions", "data.frame")
   out
 }
 
@@ -232,28 +233,28 @@ contributions <- function(media, model, intercept = NULL, index = NULL,
 #' `spend_level = 0`.
 #'
 #' @section Marginal return when the regressor was adstocked:
-#' `mroi()` differentiates the saturation curve with respect to the quantity the
-#' coefficient multiplies -- the *transformed* media. Two consequences follow,
-#' and missing either of them produces a number that looks right and is not.
+#' `mroi()` is the slope of the saturation curve with respect to the quantity
+#' the coefficient multiplies -- the *transformed* media -- at a single level.
+#' It is a property of the curve, not yet a return on spend, and two things
+#' separate the two.
 #'
-#' Evaluate it at the adstocked level, not at raw spend. `mean(spend)` and
-#' `mean(adstock_geometric(spend, decay))` are different numbers and sit at
-#' different points on the curve.
+#' Carryover spreads a unit of spend over many periods. Under a normalised
+#' kernel the weights sum to one, so the *total* extra response to one more
+#' unit of spend is roughly the curve's slope, arriving over the kernel's
+#' length. Multiplying by the kernel's first weight (`1 - decay`) gives only
+#' the response inside the period of spend; comparing that with an average ROI
+#' that counts every period's carryover compares a part with a whole, and
+#' understates slow channels several-fold.
 #'
-#' Then apply the chain rule. A unit of spend in the current period contributes
-#' only the kernel's first weight to the current period's adstock, so the
-#' marginal return on *this period's spend* is `mroi()` multiplied by that
-#' weight. For a normalised geometric kernel it is `1 - decay`; for any other
-#' kernel it is `adstock_weights(...)[1]`. A channel with a long carryover
-#' therefore has a much smaller immediate marginal return than its saturation
-#' curve alone suggests -- the rest of the effect arrives in later periods.
+#' And the slope at the *mean* adstocked level is not the mean of the slope
+#' across periods, which matters for flighted media and S-shaped curves.
 #'
-#' ```
-#' z <- adstock_geometric(spend, decay = 0.85)
-#' mroi(mean(z), coefficient = beta, half_max = h, shape = s) * (1 - 0.85)
-#' ```
+#' [marginal_roi()] handles both by re-running the whole transform on a
+#' slightly larger budget. Use it for anything that feeds a budget decision,
+#' and use `mroi()` to read the shape of a curve.
 #'
-#' @seealso [contributions()], [response_curve()], [spend_for()]
+#' @seealso [marginal_roi()] for marginal return on spend through the full
+#'   transform, [contributions()], [response_curve()], [spend_for()]
 #'
 #' @examples
 #' data(mm_weekly)
@@ -280,18 +281,18 @@ contributions <- function(media, model, intercept = NULL, index = NULL,
 #'
 #' roi(contrib, north[channels])
 #'
-#' # Average and marginal return are different questions. Television here has
-#' # shape = 1.6, an S-curve, and sits *below* its inflection point, so its
-#' # marginal return is HIGHER than its average -- the channel is under-funded,
-#' # not saturated. Search has shape = 1, a concave curve, where marginal is
-#' # always the lower of the two.
+#' # Average and marginal return are different questions. marginal_roi()
+#' # re-runs the whole transform on a 1% larger budget, so carryover and
+#' # flighting are both accounted for. Display's average pound returns about
+#' # 1.5, but its next pound returns less than it costs.
 #' avg <- roi(contrib, north[channels])
-#' for (ch in c("tv", "search")) {
-#'   m <- mroi(spend_level = mean(north[[ch]]),
-#'             coefficient = stats::coef(fit)[[ch]],
-#'             half_max = truth$half_max[[ch]], shape = truth$shape[[ch]])
-#'   cat(sprintf("%-7s shape %.1f  average %.4f  marginal %.4f\n",
-#'               ch, truth$shape[[ch]], avg$roi[avg$channel == ch], m))
+#' for (ch in channels) {
+#'   m <- marginal_roi(north[[ch]], coefficient = stats::coef(fit)[[ch]],
+#'                     adstock = list(decay = truth$decay[[ch]]),
+#'                     saturation = list(half_max = truth$half_max[[ch]],
+#'                                       shape = truth$shape[[ch]]))
+#'   cat(sprintf("%-8s average %.2f  marginal %.2f\n",
+#'               ch, avg$roi[avg$channel == ch], m$mroi))
 #' }
 #' @export
 roi <- function(contributions, spend) {
@@ -353,13 +354,20 @@ mroi <- function(spend_level, coefficient, type = "hill", delta = 0.01, ...) {
   coefficient <- .mm_check_scalar(coefficient, "coefficient")
   delta <- .mm_check_scalar(delta, "delta", lower = 0, upper = 1,
                             inclusive = c(FALSE, TRUE))
-  h <- max(spend_level * delta, .Machine$double.eps^0.25)
+  .mm_slope(spend_level, coefficient, type, delta, ...)
+}
+
+# Central-difference slope of `coefficient * saturate(x)`, vectorised over x.
+#' @keywords internal
+#' @noRd
+.mm_slope <- function(x, coefficient, type, delta, ...) {
+  h <- pmax(x * delta, .Machine$double.eps^0.25)
   # Clamp the lower point at zero -- spend cannot be negative -- and divide by
   # the interval actually spanned. Dividing by `h` regardless would halve the
   # answer at `spend_level = 0`, which is the single most decision-relevant
   # query: what does the first pound into a dark channel return?
-  lo_s <- max(0, spend_level - h / 2)
-  hi_s <- spend_level + h / 2
+  lo_s <- pmax(0, x - h / 2)
+  hi_s <- x + h / 2
   lo <- saturate(lo_s, type = type, ...)
   hi <- saturate(hi_s, type = type, ...)
   coefficient * (hi - lo) / (hi_s - lo_s)
@@ -428,10 +436,12 @@ response_curve <- function(spend, coefficient, type = "hill", ...) {
   spend <- .mm_check_numeric(spend, "spend", allow_na = FALSE, finite = TRUE)
   coefficient <- .mm_check_scalar(coefficient, "coefficient")
   resp <- coefficient * saturate(spend, type = type, ...)
-  marg <- vapply(spend, function(s)
-    mroi(s, coefficient = coefficient, type = type, ...), numeric(1))
-  data.frame(spend = spend, response = resp, marginal = marg,
-             stringsAsFactors = FALSE)
+  if (any(spend < 0)) cli::cli_abort("{.arg spend} must be non-negative.")
+  marg <- .mm_slope(spend, coefficient, type, delta = 0.01, ...)
+  out <- data.frame(spend = spend, response = resp, marginal = marg,
+                    stringsAsFactors = FALSE)
+  class(out) <- c("mm_response_curve", "data.frame")
+  out
 }
 
 #' @rdname response_curve

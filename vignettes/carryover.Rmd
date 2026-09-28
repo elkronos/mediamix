@@ -8,7 +8,8 @@ vignette: >
 ---
 
 ```{r setup, include = FALSE}
-knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", fig.width = 7,
+                      fig.height = 4.2, out.width = "100%", dpi = 110)
 options(digits = 4)
 ```
 
@@ -88,7 +89,14 @@ tuned <- tune_carryover(
 tuned
 ```
 
-Recovered exactly. And it is not a fluke of one decay value:
+Recovered exactly. The profile shows how sharply the data identifies it —
+a clear valley here, which is what a well-identified carryover looks like:
+
+```{r}
+plot(tuned, truth = truth)
+```
+
+And it is not a fluke of one decay value:
 
 ```{r}
 recover <- function(true_decay, seed = 1) {
@@ -178,18 +186,48 @@ rbind(true = truth_params$decay[channels],
 The lesson is not that cross-validation fails. It is that **carryover is not
 separable from the rest of the specification**, so tuning it one channel at a
 time against a model you do not intend to fit answers a question you did not
-ask. Two ways forward:
+ask.
 
-- Pass the model you actually mean, via `fit_fn` and `predict_fn`. Note that
-  these receive only the adstocked media vector and `y`, so controls have to
-  reach them another way — a closure over pre-residualised `y`, as above, or
-  variables captured from the enclosing environment.
-- Better, tune all the channels' carryover and saturation *jointly*, inside the
-  same resampling as the model itself. That is what the recipes layer is for;
-  see `vignette("tidymodels")`.
+## Tuning every channel at once
 
-Either way, `tune_carryover()` on a single channel is a diagnostic and a
-starting point, not a deliverable.
+`tune_carryover_joint()` puts all five channels and the controls into one
+model and chooses each channel's decay with the others' effects accounted for.
+It searches by coordinate descent — one channel at a time, holding the rest,
+repeating until nothing moves — so it costs a few sweeps of the one-channel
+grid rather than the full five-dimensional grid:
+
+```{r}
+controls <- data.frame(week = seq_len(nrow(north)), price = north$price,
+                       seasonality = north$seasonality,
+                       holiday = north$holiday)
+
+joint <- tune_carryover_joint(north[channels], north$revenue,
+                              controls = controls, decays = grid)
+joint
+
+rbind(true = truth_params$decay[channels],
+      one_at_a_time = one_at_a_time,
+      residualised = residualised,
+      joint = joint$best$decay,
+      joint_1se = joint$best_1se$decay)
+```
+
+Much closer, and the profiles show where the remaining doubt lies:
+
+```{r fig.height = 5.5}
+plot(joint, truth = truth_params$decay)
+```
+
+Television, video and social have clear valleys. Search's profile barely
+moves across the whole range: the data cannot tell a search half-life of a
+fraction of a week from one of several, and the one-standard-error choice
+falls back to the short end, near the truth. That flatness is itself the
+finding, and a point estimate without the profile would hide it.
+
+The model here is still linear in adstocked media, with no saturation, so it
+is not the model the data came from. For carryover tuned jointly with
+saturation and a model penalty, use the recipe steps in
+`vignette("tidymodels")`.
 
 ## Reading the result
 
@@ -201,6 +239,29 @@ The `results` grid is worth looking at rather than just taking `best`. If the
 metric is nearly flat across a wide band of decay, the data does not identify
 carryover tightly and a confident point estimate would be overstating things.
 
+Two things in the output help with that. `std_err` is the standard error of
+the per-split errors, which says how far apart two candidates need to be before
+the difference means anything. And `best_1se` applies the
+one-standard-error rule (Breiman et al., 1984; Hastie, Tibshirani and
+Friedman, 2009): the *shortest* carryover whose error is within one standard
+error of the minimum.
+
+```{r}
+rbind(best = tuned$best, one_se = tuned$best_1se)
+```
+
+When the two agree, the data has spoken clearly. When they do not, the data
+cannot tell them apart, and the shorter carryover is the more conservative
+claim to put in front of a client — a long carryover flatters a channel by
+crediting it with sales weeks after it ran.
+
+By default the metric is *pooled*: every out-of-sample forecast across all
+splits is collected and `metric_fn` is evaluated once, so `rmse` is the root
+mean squared forecast error. `aggregate = "mean"` averages a per-split metric
+instead, which is the `tune` convention; with one-period assessment sets that
+turns any RMSE into a mean absolute error, because the RMSE of a single point
+is its absolute error.
+
 `tune_carryover()` warns when the winner is pinned to the edge of the grid:
 
 ```{r}
@@ -211,6 +272,23 @@ narrow$best$decay
 
 Here the truth is 0.7 and the grid stops at 0.5, so the optimum is outside it.
 The warning is the signal to widen the grid rather than to believe the answer.
+
+## The start of the series
+
+Adstock starts from zero unless told otherwise, as if no media had ever run
+before the first week. For a slow channel that understates the early weeks:
+
+```{r}
+steady <- rep(100, 8)
+rbind(cold = adstock_geometric(steady, decay = 0.85),
+      warm = adstock_geometric(steady, decay = 0.85,
+                               state = adstock_steady_state(steady, 0.85)))
+```
+
+`adstock_steady_state()` seeds the filter as though the early average spend
+had always been running, and `warm_start = TRUE` applies it to every
+candidate in `tune_carryover()` and `tune_carryover_joint()`. Real pre-period
+spend, passed through `adstock_state()`, is better still when you have it.
 
 ## Sanity-check the answer against the data you have
 
@@ -246,3 +324,14 @@ is cheaper on long series.
 
 For tuning carryover jointly with saturation and a model's own penalty, see
 `vignette("tidymodels")`.
+
+## References
+
+Bergmeir, C. and Benítez, J. M. (2012). On the use of cross-validation for
+time series predictor evaluation. *Information Sciences*, 191, 192–213.
+
+Breiman, L., Friedman, J., Olshen, R. and Stone, C. (1984). *Classification and
+Regression Trees*. Wadsworth.
+
+Hastie, T., Tibshirani, R. and Friedman, J. (2009). *The Elements of
+Statistical Learning* (2nd ed.). Springer.
