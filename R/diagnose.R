@@ -20,6 +20,13 @@
 #'   flagged.
 #' @param cv_threshold Coefficient of variation below which a channel is flagged
 #'   as insufficiently varying.
+#' @param decay Optional geometric decay for computing collinearity on
+#'   *adstocked* media: a single number for every channel, or a named vector
+#'   with one per channel (unnamed channels are left raw). Adstock smooths each
+#'   series, and smoothed series are usually more correlated than the raw
+#'   spend, so this is the collinearity the model will actually face. Rows
+#'   must be in time order within each group. Variation and flighting are
+#'   always reported on the raw spend.
 #'
 #' @return An object of class `mm_diagnosis`: a named list with elements
 #'   \describe{
@@ -41,8 +48,9 @@
 #'       added. `NULL` otherwise.}
 #'     \item{`flags`}{Character vector of the problems found, in the order they
 #'       should be dealt with. Empty when nothing was found.}
-#'     \item{`n_obs`, `n_groups`, `grouped`}{Rows examined, series examined,
-#'       and whether `by` was supplied.}
+#'     \item{`n_obs`, `n_groups`, `grouped`, `adstocked`}{Rows examined,
+#'       series examined, whether `by` was supplied, and whether collinearity
+#'       was measured on adstocked media.}
 #'   }
 #'
 #' @details
@@ -85,13 +93,18 @@
 #' d$variation
 #' d$collinearity
 #'
+#' # Collinearity after adstocking is what the model actually sees
+#' diagnose_media(mm_weekly, media = channels, by = "geo",
+#'                decay = attr(mm_weekly, "truth")$decay)$collinearity
+#'
 #' # A deliberately collinear pair is caught
 #' fake <- mm_weekly[mm_weekly$geo == "north", ]
 #' fake$twin <- fake$tv * 1.02 + 5
 #' diagnose_media(fake, media = c("tv", "twin", "search"))$collinearity
 #' @export
 diagnose_media <- function(data, media, spend = NULL, impressions = NULL,
-                           by = NULL, vif_threshold = 5, cv_threshold = 0.15) {
+                           by = NULL, vif_threshold = 5, cv_threshold = 0.15,
+                           decay = NULL) {
   if (!is.data.frame(data)) {
     cli::cli_abort("{.arg data} must be a data frame.")
   }
@@ -150,6 +163,16 @@ diagnose_media <- function(data, media, spend = NULL, impressions = NULL,
   # documented. Pooling geographies that differ mainly in scale manufactures
   # correlation that exists in no single series.
   live <- m[, usable, drop = FALSE]
+  decays <- .mm_diag_decays(decay, media)
+  if (!is.null(decays)) {
+    for (cn in intersect(names(decays), names(live))) {
+      for (rows in grp) {
+        v <- live[[cn]][rows]
+        live[[cn]][rows] <- adstock_geometric(v, decay = decays[[cn]],
+                                              na_action = "zero")
+      }
+    }
+  }
   per_group_stats <- lapply(grp, function(rows) {
     sub <- live[rows, , drop = FALSE]
     keep <- vapply(sub, function(z) {
@@ -210,7 +233,8 @@ diagnose_media <- function(data, media, spend = NULL, impressions = NULL,
     list(variation = variation, collinearity = collinearity,
          correlations = cors, cpm = cpm, flags = flags,
          n_obs = nrow(data), n_groups = length(grp),
-         grouped = !is.null(by) && length(by) > 0L),
+         grouped = !is.null(by) && length(by) > 0L,
+         adstocked = !is.null(decays)),
     class = "mm_diagnosis"
   )
 }
@@ -220,6 +244,9 @@ print.mm_diagnosis <- function(x, ...) {
   cli::cli_h3("Media diagnostics")
   cli::cli_text("{x$n_obs} observation{?s} across {x$n_groups} series, \\
                  {nrow(x$variation)} channel{?s}")
+  if (isTRUE(x$adstocked)) {
+    cli::cli_text("{.emph Collinearity measured on adstocked media.}")
+  }
   if (!isTRUE(x$grouped) && x$n_groups == 1L) {
     cli::cli_text("{.emph Ungrouped. On panel data, pass {.arg by} so that \\
                    collinearity is measured within series.}")
@@ -233,6 +260,23 @@ print.mm_diagnosis <- function(x, ...) {
   cli::cli_text("")
   cli::cli_text("{.emph Inspect $variation, $collinearity, $correlations.}")
   invisible(x)
+}
+
+#' @keywords internal
+#' @noRd
+.mm_diag_decays <- function(decay, media, call = parent.frame()) {
+  if (is.null(decay)) return(NULL)
+  if (!is.numeric(decay) || anyNA(decay) || any(decay < 0 | decay >= 1)) {
+    cli::cli_abort("{.arg decay} must be numeric in [0, 1).", call = call)
+  }
+  if (length(decay) == 1L && is.null(names(decay))) {
+    return(stats::setNames(rep(decay, length(media)), media))
+  }
+  if (is.null(names(decay)) || !all(names(decay) %in% media)) {
+    cli::cli_abort("{.arg decay} must be one number, or a vector named by \\
+                    media column.", call = call)
+  }
+  decay
 }
 
 # Variance inflation factors without a modelling dependency: regress each

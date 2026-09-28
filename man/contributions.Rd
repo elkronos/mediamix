@@ -61,6 +61,9 @@ presenting any of this.
 On panel data, pass one geography at a time or supply \code{by}. \code{index} is used
 as a label, not a key: with \code{by} supplied and one date per geography, a
 \code{tapply()} over \code{period} alone silently adds the geographies together.
+
+The result has class \code{mm_contributions}, with a \link[=plot.mm_contributions]{plot()}
+method.
 }
 \examples{
 data(mm_weekly)
@@ -100,5 +103,6 @@ all.equal(totals, unname(stats::fitted(fit)))
 round(tapply(contrib$contribution, contrib$channel, sum))
 }
 \seealso{
-\code{\link[=roi]{roi()}}, \code{\link[=response_curve]{response_curve()}}, \code{\link[=diagnose_media]{diagnose_media()}}
+\code{\link[=roi]{roi()}}, \code{\link[=response_curve]{response_curve()}}, \code{\link[=diagnose_media]{diagnose_media()}},
+\code{\link[=plot.mm_contributions]{plot.mm_contributions()}}
 }

@@ -53,8 +53,9 @@ after the spend,
 saturation, in that order, and will not do it backwards quietly.}
 \item{Choosing parameters}{\code{\link[=decay_from_half_life]{decay_from_half_life()}}, \code{\link[=half_life]{half_life()}} and
 \code{\link[=effective_window]{effective_window()}} translate between half-lives and decay
-coefficients. \code{\link[=tune_carryover]{tune_carryover()}} selects them by cross-validation
-against an actual KPI.}
+coefficients. \code{\link[=tune_carryover]{tune_carryover()}} and \code{\link[=tune_carryover_joint]{tune_carryover_joint()}} select
+them by cross-validation against an actual KPI;
+\code{\link[=adstock_steady_state]{adstock_steady_state()}} removes start-up bias.}
 }
 }
 
@@ -80,7 +81,8 @@ how much the answer depends on which you picked.}
 \code{\link[=diagnose_media]{diagnose_media()}} checks whether the data can support a model at all --
 run it first. \code{\link[=contributions]{contributions()}}, \code{\link[=roi]{roi()}}, \code{\link[=marginal_roi]{marginal_roi()}}, \code{\link[=mroi]{mroi()}},
 \code{\link[=response_curve]{response_curve()}} and \code{\link[=spend_for]{spend_for()}} turn a fitted model into a
-deliverable. \code{\link[=step_adstock]{step_adstock()}} and
+deliverable, and \code{\link[=block_bootstrap]{block_bootstrap()}} puts intervals on it. Each result has
+a \code{plot()} method; \code{\link[=mm_palette]{mm_palette()}} exposes their colours. \code{\link[=step_adstock]{step_adstock()}} and
 \code{\link[=step_saturation]{step_saturation()}} are \pkg{recipes} steps that carry filter state across
 the train/test boundary, with \code{\link[=carryover_decay]{carryover_decay()}} and friends as their
 \pkg{dials} parameters.

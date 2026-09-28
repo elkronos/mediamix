@@ -8,7 +8,8 @@ vignette: >
 ---
 
 ```{r setup, include = FALSE}
-knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", fig.width = 7,
+                      fig.height = 3.4, out.width = "100%", dpi = 110)
 options(digits = 4)
 ```
 
@@ -71,7 +72,27 @@ round(rbind(forward = forward, backward = backward), 6)
 all.equal(forward, backward)
 ```
 
-Identical. Not analogous — identical.
+Identical. Not analogous — identical. Drawn on one time axis, with the
+event at zero, the two are mirror images:
+
+```{r mirror}
+ink <- mm_palette(role = "ink")
+cols <- mm_palette(2)
+op <- par(mar = c(4, 4.5, 1, 1), bg = ink[["surface"]], fg = ink[["axis"]])
+plot(NA, xlim = c(-3.5, 3.5), ylim = c(0, 0.6), las = 1, bty = "n",
+     xlab = "Periods from the event (spend on the right, conversion on the left)",
+     ylab = "Weight", col.axis = ink[["muted"]], col.lab = ink[["secondary"]])
+abline(v = 0, col = ink[["axis"]])
+# Offset each side slightly so the two bars at the event itself both show.
+segments(0:3 + 0.1, 0, 0:3 + 0.1, forward, lwd = 10, lend = 1, col = cols[1])
+segments(-(0:3) - 0.1, 0, -(0:3) - 0.1, backward, lwd = 10, lend = 1,
+         col = cols[2])
+text(1.8, 0.5, "adstock: spend spreads forward", col = ink[["secondary"]],
+     cex = 0.85)
+text(-1.8, 0.5, "time decay: credit spreads back", col = ink[["secondary"]],
+     cex = 0.85)
+par(op)
+```
 
 The reason is that both are the geometric kernel $\theta^{d}$ evaluated at a
 distance $d$ from an event, normalised over the periods in scope. Adstock

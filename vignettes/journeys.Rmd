@@ -8,7 +8,8 @@ vignette: >
 ---
 
 ```{r setup, include = FALSE}
-knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", fig.width = 7,
+                      fig.height = 4.6, out.width = "100%", dpi = 110)
 options(digits = 4)
 ```
 
@@ -223,6 +224,13 @@ number could have been, which is more honest and usually more useful:
 
 ```{r}
 attribution_spread(res)
+```
+
+The same table as a picture — each bar is the range a channel's share
+covers across all six rules:
+
+```{r spread-plot}
+plot(res, n = 6)
 ```
 
 Display's share runs from 7% to 29% depending only on the convention chosen.

@@ -27,6 +27,7 @@ Depends:
 Imports: 
     cli,
     data.table,
+    graphics,
     parallel,
     stats,
     utils

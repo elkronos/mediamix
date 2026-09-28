@@ -47,9 +47,12 @@ own:
   transform on a 1% larger budget — the definition used in Google's MMM
   research and Meridian — instead of differentiating a curve at one point,
   which understates slow channels several-fold.
-- **Carryover selection with honest uncertainty.** `tune_carryover()` scores
-  candidates on held-out KPI with forward-only resampling and reports the
-  one-standard-error choice alongside the minimum.
+- **Carryover selection with honest uncertainty.** `tune_carryover()` and,
+  for every channel at once inside one model with controls,
+  `tune_carryover_joint()` score candidates on held-out KPI with forward-only
+  resampling and report the one-standard-error choice alongside the minimum.
+- **Intervals, not just point estimates.** `block_bootstrap()` resamples runs
+  of weeks to put intervals on ROI, marginal ROI or anything else you compute.
 - **Journeys as a first-class step.** `build_paths()` turns a raw event log
   into journeys with every construction choice an argument, and accounts for
   the conversions that filtering leaves unattributable.
@@ -147,6 +150,12 @@ attribution_spread(attribute(paths))
 #> 4      social 0.11638088 0.2207224  0.1658973 0.1043415        1.8965517
 ```
 
+```r
+plot(attribute(paths))
+```
+
+![Attribution shares by rule: each bar spans the range of a channel's share across six rules](man/figures/README-attribution.png)
+
 Display's share runs from 7% to 29% depending only on the convention chosen.
 That channel has not been measured; it has been assigned a number. The Markov
 model lands inside the heuristic range here, which is typical: a data-driven
@@ -199,6 +208,29 @@ tuned$best      # the minimum of the cross-validation curve
 tuned$best_1se  # the shortest carryover within one standard error of it
 ```
 
+With several channels, tune them together so none is credited with
+another's effect — and pass the controls, which stay aligned with every split:
+
+```r
+data(mm_weekly)
+north <- mm_weekly[mm_weekly$geo == "north", ]
+channels <- c("tv", "video", "search", "social", "display")
+
+controls <- data.frame(week = seq_len(nrow(north)), price = north$price,
+                       seasonality = north$seasonality,
+                       holiday = north$holiday)
+
+joint <- tune_carryover_joint(north[channels], north$revenue,
+                              controls = controls)
+joint$best$decay
+#> [1] 0.80 0.50 0.65 0.55 0.60      # truth: 0.85 0.70 0.15 0.45 0.55
+plot(joint)   # each channel's cross-validation profile
+```
+
+Search is the miss, and its cross-validation profile is almost flat: the
+data does not identify its carryover, which `plot(joint)` makes visible and a
+bare point estimate would hide.
+
 The test suite generates data from a known decay and requires it to be
 recovered to within one grid step at every value tested. Carryover is weakly
 identified in most real data, which is why the one-standard-error rule
@@ -237,8 +269,6 @@ extra response from a 1% larger budget, divided by the extra spend — by
 re-running carryover and saturation rather than differentiating a curve:
 
 ```r
-data(mm_weekly)
-north <- mm_weekly[mm_weekly$geo == "north", ]
 marginal_roi(north$tv, coefficient = 6013,
              adstock = list(decay = 0.85),
              saturation = list(half_max = 2250, shape = 1.6))
@@ -249,6 +279,16 @@ marginal_roi(north$tv, coefficient = 6013,
 The tempting shortcut — the curve's slope times the kernel's first weight —
 gives 0.21 for this channel: it counts only the week of spend and discards
 the 85% of the effect that arrives later.
+
+Every result has a `plot()` method in one consistent, colour-vision-checked
+style — here, the decomposition that `contributions()` returns:
+
+![Weekly media contribution by channel, stacked](man/figures/README-contributions.png)
+
+And `block_bootstrap()` puts intervals on any of it. On `mm_weekly` they are
+wide, which is the point: see the
+[budget walkthrough](https://elkronos.github.io/mediamix/articles/budget-walkthrough.html)
+for how that changes a recommendation.
 
 ## Scope
 

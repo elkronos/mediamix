@@ -236,3 +236,29 @@ test_that("a geography that simply pays more is not flagged as join errors", {
   expect_identical(nrow(grouped$cpm), 60L)
   expect_identical(pooled$cpm$row, 1:60)
 })
+
+# ---- diagnose_media(decay =) ---------------------------------------------------
+
+test_that("collinearity can be measured on adstocked media", {
+  set.seed(8)
+  n <- 150
+  a <- pmax(0, rnorm(n, 100, 40))
+  # b is a with a one-week lag: modest raw correlation, strong after adstock
+  b <- c(a[1], a[-n]) + rnorm(n, sd = 5)
+  d <- data.frame(a = a, b = b, c = runif(n, 50, 150))
+  raw <- diagnose_media(d, media = c("a", "b", "c"))
+  ad <- diagnose_media(d, media = c("a", "b", "c"), decay = 0.8)
+  r_raw <- raw$correlations["a", "b"]
+  r_ad <- ad$correlations["a", "b"]
+  expect_gt(r_ad, r_raw)
+  expect_true(ad$adstocked)
+  expect_false(raw$adstocked)
+  # Variation is still reported on raw spend
+  expect_equal(ad$variation, raw$variation)
+  # Per-channel decays, and a bad one refused
+  expect_no_error(diagnose_media(d, media = c("a", "b", "c"),
+                                 decay = c(a = 0.8, b = 0.2)))
+  expect_error(diagnose_media(d, media = c("a", "b"), decay = c(z = 0.5)),
+               "named")
+  expect_error(diagnose_media(d, media = c("a", "b"), decay = 1), "\\[0, 1\\)")
+})

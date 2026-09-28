@@ -135,35 +135,35 @@ suggests splitting on conversion.
 | Methods article | Every function mapped to its method and reference | — |
 | Comparison article | When to use mediamix vs. Robyn, Meridian, PyMC-Marketing, ChannelAttribution | — |
 
-## Open items (not changed, recommended)
+## Follow-up round: open items implemented
 
-1. **`tune_carryover()` is single-channel.** Its own vignette shows this
-   gives wrong decays on correlated multi-channel data. The recipes route
-   works; a multi-channel method (coordinate descent over channels inside one
-   model) would make the standalone function useful beyond diagnostics.
-2. **No uncertainty on contributions or ROI.** A block bootstrap over weeks
-   (refit, recompute `contributions()` and `marginal_roi()`) would give
-   intervals cheaply and fit the package's tone.
-3. **VIFs are computed on raw spend.** Collinearity after adstocking is
-   usually higher; an option to diagnose transformed media would be more
-   relevant to the model actually fitted.
-4. **Cold-start bias** is now documented but not handled; an option to seed
-   the filter at a steady state from the first *k* periods would help short
-   series.
-5. **`cran-comments.md`** lists win-builder and macOS runs that could not be
-   verified here; confirm before submitting.
-6. **Not executed in review:** the joint `tune_bayes()` chunk and the
-   ChannelAttribution cross-check (packages unavailable for R 4.3 offline).
-   Worth confirming `markov_removal()` against
-   `ChannelAttribution::markov_model(order = 1)` on `mm_events` once CI runs.
-7. **Enable GitHub Pages** (Settings → Pages → deploy from the `gh-pages`
-   branch) after the pkgdown workflow first runs on `main`.
+| Item | Status |
+|---|---|
+| `tune_carryover()` was single-channel | **Done.** `tune_carryover_joint()` tunes every channel inside one model with controls by coordinate descent and plots each channel's profile. On `mm_weekly` it lands within 0.1 of the truth for three channels and 0.2 for a fourth (one-at-a-time missed by up to 0.45), and shows search's carryover is unidentified. `tune_carryover()` also gained `controls`. |
+| No uncertainty on contributions or ROI | **Done.** `block_bootstrap()` (moving block bootstrap, Kunsch 1989). The walkthrough now shows that the display-to-social ranking holds in 72% of replicates: evidence for a test, not a rollout. |
+| VIFs on raw spend | **Done.** `diagnose_media(decay =)` measures collinearity on adstocked media; on `mm_weekly` the TV–video correlation doubles (0.16 to 0.32). |
+| Cold-start bias | **Done.** `adstock_steady_state()`, and `warm_start` in both tuners. |
+| ChannelAttribution cross-check | **Added as a test** (`test-interop.R`), skipped where ChannelAttribution is absent, so it runs in CI. |
+| `cran-comments.md` environments | **Not changed.** Only the author can confirm which external builders were run. |
+| Enable GitHub Pages | **Needs the repository owner:** Settings → Pages → deploy from `gh-pages`, after the pkgdown workflow runs on `main`. |
+
+Also added in this round:
+
+- **Visuals:** `plot()` methods for every main result, with a fixed,
+  colour-vision-checked palette exported as `mm_palette()`. Figures were
+  added to every vignette, the walkthrough and the README.
+- **Bug found by the new plot tests:** graphical parameters were not
+  restored after a plot.
+- **Performance:** `assisted_conversions()` is about 16× faster and
+  `top_paths()` about 2× faster.
+- **`inst/CITATION`.**
 
 ## References
 
 Anderl, E., Becker, I., von Wangenheim, F. and Schumann, J. H. (2016).
 *International Journal of Research in Marketing*, 33(3), 457–474.
 Breiman, L. et al. (1984). *Classification and Regression Trees.*
+Kunsch, H. R. (1989). *The Annals of Statistics*, 17(3), 1217–1241.
 Hastie, T., Tibshirani, R. and Friedman, J. (2009). *The Elements of
 Statistical Learning*, 2nd ed.
 Jin, Y. et al. (2017). *Bayesian methods for media mix modeling with carryover

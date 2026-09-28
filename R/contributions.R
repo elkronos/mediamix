@@ -49,7 +49,11 @@
 #' as a label, not a key: with `by` supplied and one date per geography, a
 #' `tapply()` over `period` alone silently adds the geographies together.
 #'
-#' @seealso [roi()], [response_curve()], [diagnose_media()]
+#'   The result has class `mm_contributions`, with a [plot()][plot.mm_contributions]
+#'   method.
+#'
+#' @seealso [roi()], [response_curve()], [diagnose_media()],
+#'   [plot.mm_contributions()]
 #'
 #' @examples
 #' data(mm_weekly)
@@ -172,6 +176,7 @@ contributions <- function(media, model, intercept = NULL, index = NULL,
   front <- c("period", if (!is.null(by)) "group", "channel", "contribution")
   out <- out[, c(front, setdiff(names(out), front)), drop = FALSE]
   rownames(out) <- NULL
+  class(out) <- c("mm_contributions", "data.frame")
   out
 }
 
@@ -349,13 +354,20 @@ mroi <- function(spend_level, coefficient, type = "hill", delta = 0.01, ...) {
   coefficient <- .mm_check_scalar(coefficient, "coefficient")
   delta <- .mm_check_scalar(delta, "delta", lower = 0, upper = 1,
                             inclusive = c(FALSE, TRUE))
-  h <- max(spend_level * delta, .Machine$double.eps^0.25)
+  .mm_slope(spend_level, coefficient, type, delta, ...)
+}
+
+# Central-difference slope of `coefficient * saturate(x)`, vectorised over x.
+#' @keywords internal
+#' @noRd
+.mm_slope <- function(x, coefficient, type, delta, ...) {
+  h <- pmax(x * delta, .Machine$double.eps^0.25)
   # Clamp the lower point at zero -- spend cannot be negative -- and divide by
   # the interval actually spanned. Dividing by `h` regardless would halve the
   # answer at `spend_level = 0`, which is the single most decision-relevant
   # query: what does the first pound into a dark channel return?
-  lo_s <- max(0, spend_level - h / 2)
-  hi_s <- spend_level + h / 2
+  lo_s <- pmax(0, x - h / 2)
+  hi_s <- x + h / 2
   lo <- saturate(lo_s, type = type, ...)
   hi <- saturate(hi_s, type = type, ...)
   coefficient * (hi - lo) / (hi_s - lo_s)
@@ -424,10 +436,12 @@ response_curve <- function(spend, coefficient, type = "hill", ...) {
   spend <- .mm_check_numeric(spend, "spend", allow_na = FALSE, finite = TRUE)
   coefficient <- .mm_check_scalar(coefficient, "coefficient")
   resp <- coefficient * saturate(spend, type = type, ...)
-  marg <- vapply(spend, function(s)
-    mroi(s, coefficient = coefficient, type = type, ...), numeric(1))
-  data.frame(spend = spend, response = resp, marginal = marg,
-             stringsAsFactors = FALSE)
+  if (any(spend < 0)) cli::cli_abort("{.arg spend} must be non-negative.")
+  marg <- .mm_slope(spend, coefficient, type, delta = 0.01, ...)
+  out <- data.frame(spend = spend, response = resp, marginal = marg,
+                    stringsAsFactors = FALSE)
+  class(out) <- c("mm_response_curve", "data.frame")
+  out
 }
 
 #' @rdname response_curve

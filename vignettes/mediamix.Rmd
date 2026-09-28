@@ -9,7 +9,7 @@ vignette: >
 
 ```{r setup, include = FALSE}
 knitr::opts_chunk$set(collapse = TRUE, comment = "#>", fig.width = 7,
-                      fig.height = 4.2)
+                      fig.height = 4.2, out.width = "100%", dpi = 110)
 options(digits = 4)
 ```
 
@@ -126,8 +126,26 @@ can:
 ```{r}
 w_geo <- adstock_weights(8, decay = 0.6)
 w_wei <- adstock_weights_weibull(8, shape = 2, scale = 3, type = "pdf")
-round(rbind(geometric = w_geo, weibull = w_wei), 3)
+w_del <- adstock_weights_delayed(8, decay = 0.6, peak = 2)
+round(rbind(geometric = w_geo, weibull = w_wei, delayed = w_del), 3)
 which.max(w_wei)
+```
+
+The delayed kernel of Jin et al. (2017) does the same with a `peak` read
+directly in weeks. The three shapes side by side:
+
+```{r kernels, fig.height = 3.6}
+cols <- mm_palette(3)
+ink <- mm_palette(role = "ink")
+op <- par(mar = c(4, 4.5, 1, 1), bg = ink[["surface"]], fg = ink[["axis"]])
+matplot(0:7, cbind(w_geo, w_wei, w_del), type = "o", pch = 19, lty = 1,
+        lwd = 2, col = cols, xlab = "Weeks after spend",
+        ylab = "Share of the effect", las = 1, bty = "n",
+        col.axis = ink[["muted"]], col.lab = ink[["secondary"]])
+legend("topright", c("geometric, decay 0.6", "Weibull pdf, shape 2",
+                     "delayed, peak at week 2"),
+       col = cols, lwd = 2, pch = 19, bty = "n", text.col = ink[["secondary"]])
+par(op)
 ```
 
 ## Saturation
@@ -141,6 +159,22 @@ round(rbind(
   concave = saturate_hill(levels, half_max = 100000),
   s_shape = saturate_hill(levels, half_max = 100000, shape = 3)
 ), 3)
+```
+
+```{r saturation, fig.height = 3.6}
+grid_spend <- seq(0, 400000, by = 2000)
+op <- par(mar = c(4, 4.5, 1, 1), bg = ink[["surface"]], fg = ink[["axis"]])
+plot(grid_spend / 1000, saturate_hill(grid_spend, half_max = 100000),
+     type = "l", lwd = 2, col = cols[1], ylim = c(0, 1), las = 1, bty = "n",
+     xlab = "Spend (thousands)", ylab = "Share of the ceiling",
+     col.axis = ink[["muted"]], col.lab = ink[["secondary"]])
+lines(grid_spend / 1000, saturate_hill(grid_spend, 100000, shape = 3),
+      lwd = 2, col = cols[2])
+abline(v = 100, col = ink[["muted"]])
+text(100, 0.05, "half_max", pos = 4, cex = 0.8, col = ink[["muted"]])
+legend("bottomright", c("shape = 1, concave", "shape = 3, S-shaped"),
+       col = cols[1:2], lwd = 2, bty = "n", text.col = ink[["secondary"]])
+par(op)
 ```
 
 `half_max` is the spend at which the response reaches half its ceiling, which
@@ -224,6 +258,16 @@ seasonality and the December uplift, pooled. It is *not* organic demand, and
 reporting it as such is the commonest way one of these decks overstates its
 own precision.
 
+Over time, with the baseline left out so the media is visible:
+
+```{r contributions-plot}
+plot(contrib)
+```
+
+The dip at the very start of 2023 is the cold start: television's long
+carryover takes weeks to fill from zero. `adstock_steady_state()` removes it
+when that matters — see `vignette("carryover")`.
+
 Pooling it that way is what makes the arithmetic close exactly:
 
 ```{r}
@@ -304,13 +348,18 @@ starved.
 
 The full curve, and its inverse:
 
-```{r}
+```{r response-curve, fig.height = 5.5}
 curve <- response_curve(
   spend = seq(0, 6000, by = 1000),
   coefficient = coef(fit)[["tv"]],
   half_max = truth$half_max[["tv"]], shape = truth$shape[["tv"]]
 )
 curve
+
+fine <- response_curve(seq(0, 6000, by = 50), coefficient = coef(fit)[["tv"]],
+                       half_max = truth$half_max[["tv"]],
+                       shape = truth$shape[["tv"]])
+plot(fine, observed = adstock_geometric(north$tv, truth$decay[["tv"]]))
 
 spend_for(target = 3000, coefficient = coef(fit)[["tv"]],
           half_max = truth$half_max[["tv"]], shape = truth$shape[["tv"]])

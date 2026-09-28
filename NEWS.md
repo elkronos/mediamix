@@ -39,7 +39,28 @@
   kernel of Jin et al. (2017); `media_transform()` accepts
   `kernel = "delayed"`.
 * `tune_carryover()` reports `std_err` and a `best_1se` choice using a paired
-  one-standard-error rule.
+  one-standard-error rule, and gains `controls` (entered into the model and
+  kept aligned with every split) and `warm_start`.
+* `tune_carryover_joint()` tunes every channel's carryover inside one model
+  with controls, by coordinate descent, reporting each channel's profile.
+* `block_bootstrap()`: moving block bootstrap (Kunsch 1989) with percentile
+  intervals for ROI, marginal ROI or any statistic.
+* `adstock_steady_state()` seeds a filter at steady state, removing the
+  start-up bias of long-carryover channels.
+* `diagnose_media(decay =)` measures collinearity on adstocked media.
+* `plot()` methods for carryover profiles, joint tuning, bootstrap intervals,
+  contributions (over time or in total), response curves (with the
+  extrapolation region shaded) and attribution shares, in one
+  colour-vision-checked style. `mm_palette()` exports the colours.
+  `contributions()`, `response_curve()` and `attribute()` now return
+  subclassed data frames so the methods dispatch.
+* `inst/CITATION` added.
+
+## Performance
+
+* `assisted_conversions()` is about 16x faster and `top_paths()` /
+  `as_channel_paths()` about 2x faster on large journey tables, via
+  data.table. `response_curve()` computes marginals in one vectorised pass.
 
 ## Documentation
 

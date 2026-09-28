@@ -51,6 +51,7 @@ reference:
   - adstock_weights
   - adstock_weights_weibull
   - adstock_state
+  - adstock_steady_state
   - decay_vocabulary
 - title: Saturation
   desc: Diminishing returns, and composing it with carryover.
@@ -60,6 +61,7 @@ reference:
 - title: Choosing carryover parameters
   contents:
   - tune_carryover
+  - tune_carryover_joint
   - fit_ols
   - metrics
 - title: Diagnostics and reporting
@@ -70,6 +72,16 @@ reference:
   - roi
   - marginal_roi
   - response_curve
+  - block_bootstrap
+- title: Plots
+  desc: A `plot()` method for each result, in one consistent style.
+  contents:
+  - plot_carryover
+  - plot.mm_bootstrap
+  - plot.mm_contributions
+  - plot.mm_response_curve
+  - plot.mm_attribution
+  - mm_palette
 - title: tidymodels integration
   contents:
   - step_adstock

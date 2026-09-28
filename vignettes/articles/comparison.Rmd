@@ -38,9 +38,11 @@ with no compiled code and no Python:
 |---|---|---|
 | Adstock and saturation inside your own `lm()`, `brms`, `glmnet` or Stan model | Yes — plain functions on vectors | Usually inside the framework's model |
 | Carryover tuned jointly with a model penalty in tidymodels | `step_adstock()` keeps state across resampling boundaries | Framework-specific search |
+| Per-channel carryover by cross-validation in your own model | `tune_carryover_joint()` | Framework-specific search |
 | Marginal ROI by counterfactual simulation | `marginal_roi()` | Robyn, Meridian, PyMC-Marketing all report one |
 | Journeys built from a raw event log | `build_paths()` | Not covered by the MMM frameworks; ChannelAttribution starts from paths |
 | Heuristic and Markov attribution side by side | `attribute()`, `attribution_spread()` | ChannelAttribution (Markov and heuristics) |
+| Uncertainty intervals | `block_bootstrap()` around any model | Posterior intervals in Meridian, PyMC-Marketing; bootstrap in Robyn |
 | Bayesian estimation with priors | No — use `brms` or Stan on mediamix transforms | Meridian, PyMC-Marketing |
 | Budget optimisation | No — `marginal_roi()` and scenario simulation only | Robyn, Meridian, PyMC-Marketing |
 | Reach and frequency, geo hierarchies | No | Meridian |

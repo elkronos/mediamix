@@ -101,6 +101,7 @@ attribute <- function(paths,
   front <- c("rule", "channel", "conversions", "share")
   res <- res[, c(front, setdiff(names(res), front)), drop = FALSE]
   rownames(res) <- NULL
+  class(res) <- c("mm_attribution", "data.frame")
   res
 }
 

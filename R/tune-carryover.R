@@ -7,12 +7,10 @@
 #' @param x Numeric vector of media spend in time order.
 #' @param y Numeric vector of the KPI, the same length as `x`.
 #' @param fit_fn A function of `(x_adstocked, y)` returning a fitted model.
-#'   Defaults to [fit_ols()]. It receives only the adstocked media and the
-#'   response, so control variables must reach it another way: residualise `y`
-#'   against the controls before calling, or capture them from the enclosing
-#'   environment. To tune carryover jointly with controls and with the model's
-#'   own hyperparameters, use [step_adstock()] inside a \pkg{recipes} pipeline
-#'   instead.
+#'   Defaults to [fit_ols()]. When `controls` are supplied it receives a data
+#'   frame instead -- the adstocked media as column `media`, then the
+#'   controls -- and the default becomes least squares on all of them. For
+#'   several channels at once, see [tune_carryover_joint()].
 #' @param predict_fn A function of `(model, newdata)` returning predictions,
 #'   where `newdata` is the adstocked media for the assessment rows. Defaults to
 #'   [stats::predict()].
@@ -39,6 +37,12 @@
 #'   `scheme = "rolling_origin"` only.
 #' @param k Number of forward blocks when `scheme = "k_fold_forward"`.
 #'   Ignored otherwise.
+#' @param controls Optional data frame of control variables (trend, price,
+#'   seasonality, ...) entered into the model untransformed, so carryover is
+#'   judged with them accounted for. The rows are kept aligned with every split
+#'   automatically.
+#' @param warm_start Seed the adstock with [adstock_steady_state()] rather
+#'   than zero, removing the start-up bias of a long carryover.
 #' @param cores Number of cores. Values above 1 use [parallel::mclapply()] on
 #'   Unix-alikes and a socket cluster elsewhere.
 #' @param aggregate How to turn the assessment sets into one score.
@@ -121,8 +125,9 @@
 #' reaches only 15% of its steady-state level in week one and 90% after
 #' `effective_window(0.85)` = 15 weeks. With `initial` at half the series this
 #' rarely decides the answer, but it biases the fit towards short carryover on
-#' short series. Pass real pre-period spend via [adstock_state()] where you
-#' have it.
+#' short series. `warm_start = TRUE` seeds every candidate with
+#' [adstock_steady_state()]; better still, pass real pre-period spend through
+#' [adstock_state()] and your own `fit_fn` when you have it.
 #'
 #' @references
 #' Breiman, L., Friedman, J., Olshen, R. and Stone, C. (1984).
@@ -134,7 +139,8 @@
 #' Bergmeir, C. and Benitez, J. M. (2012). On the use of cross-validation for
 #' time series predictor evaluation. *Information Sciences*, 191, 192--213.
 #'
-#' @seealso [adstock_geometric()], [fit_ols()], [effective_window()]
+#' @seealso [tune_carryover_joint()] for several channels at once,
+#'   [adstock_geometric()], [fit_ols()], [effective_window()]
 #'
 #' @examples
 #' # Recover a known decay from data generated with it
@@ -189,7 +195,9 @@ tune_carryover <- function(x, y,
                            skip = 0L,
                            k = 5L,
                            cores = 1L,
-                           aggregate = c("pooled", "mean")) {
+                           aggregate = c("pooled", "mean"),
+                           controls = NULL,
+                           warm_start = FALSE) {
   scheme <- match.arg(scheme)
   aggregate <- match.arg(aggregate)
   metric_name <- .mm_fn_label(substitute(metric_fn))
@@ -204,6 +212,8 @@ tune_carryover <- function(x, y,
   if (!is.function(predict_fn)) cli::cli_abort("{.arg predict_fn} must be a function.")
   if (!is.function(metric_fn)) cli::cli_abort("{.arg metric_fn} must be a function.")
   .mm_check_flag(normalise, "normalise")
+  .mm_check_flag(warm_start, "warm_start")
+  ctrl <- .mm_control_matrix(controls, length(x))
 
   max_lags <- .mm_check_lag_grid(max_lags)
   decays <- .mm_check_decay_grid(decays)
@@ -233,15 +243,25 @@ tune_carryover <- function(x, y,
   }
   if (nrow(grid) == 0L) cli::cli_abort("The parameter grid is empty.")
 
-  fast <- identical(fit_fn, fit_ols) && identical(predict_fn, stats::predict)
+  default_model <- identical(fit_fn, fit_ols) &&
+    identical(predict_fn, stats::predict)
+  fast <- default_model && is.null(ctrl)
+  if (!is.null(ctrl) && default_model) {
+    fit_fn <- .mm_ols_multi
+    predict_fn <- .mm_ols_multi_predict
+  }
 
   eval_one <- function(i) {
+    st <- if (warm_start) {
+      adstock_steady_state(x, grid$decay[i], max_lag = grid$max_lag[i])
+    } else 0
     z <- adstock_geometric(x, decay = grid$decay[i], max_lag = grid$max_lag[i],
-                           normalise = normalise)
+                           normalise = normalise, state = st)
     out <- if (fast) .mm_cv_fast(z, y, splits) else NULL
     # NULL means the fast path declined this grid point as numerically unsafe.
     if (is.null(out)) {
-      out <- .mm_cv_general(z, y, splits, fit_fn, predict_fn)
+      design <- if (is.null(ctrl)) z else cbind(data.frame(media = z), ctrl)
+      out <- .mm_cv_general(design, y, splits, fit_fn, predict_fn)
     }
     .mm_cv_score(out, metric_fn, aggregate)
   }
@@ -413,10 +433,15 @@ print.mm_carryover <- function(x, ...) {
 #' @keywords internal
 #' @noRd
 .mm_cv_general <- function(z, y, splits, fit_fn, predict_fn) {
+  rows <- if (is.data.frame(z)) {
+    function(i) z[i, , drop = FALSE]
+  } else {
+    function(i) z[i]
+  }
   lapply(splits, function(s) {
-    fit <- try(fit_fn(z[s$train], y[s$train]), silent = TRUE)
+    fit <- try(fit_fn(rows(s$train), y[s$train]), silent = TRUE)
     if (inherits(fit, "try-error")) return(NULL)
-    pred <- try(predict_fn(fit, z[s$test]), silent = TRUE)
+    pred <- try(predict_fn(fit, rows(s$test)), silent = TRUE)
     if (inherits(pred, "try-error") || length(pred) != length(s$test)) {
       return(NULL)
     }

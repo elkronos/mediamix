@@ -20,6 +20,9 @@ the implementation makes, so a result can be reproduced, cited or challenged.
 | `saturate_hill()` | Hill saturation | Hill (1910); Jin et al. (2017) |
 | `saturate_michaelis_menten()`, `saturate_exponential()`, `saturate_power()` | Alternative concave response curves | Standard |
 | `tune_carryover()` | Forward-only cross-validation, one-SE rule | Bergmeir & Benítez (2012); Hastie et al. (2009) |
+| `tune_carryover_joint()` | Coordinate descent over per-channel carryover in one model | Standard |
+| `adstock_steady_state()` | Steady-state filter initialisation | Standard |
+| `block_bootstrap()` | Moving block bootstrap | Künsch (1989); Lahiri (2003) |
 | `step_adstock()` | Stateful IIR filter across resampling boundaries | This package |
 | `contributions()` | Additive decomposition, baseline as residual | Standard |
 | `marginal_roi()` | Counterfactual marginal ROI | Jin et al. (2017); Meridian |
@@ -92,6 +95,39 @@ best by the standard error of their per-split difference, not of either one's
 mean. The unpaired form is dominated by how hard each period is to forecast,
 which is shared by every candidate, and admits almost the whole grid.
 
+**Several channels.** Tuned one at a time, a channel's carryover absorbs the
+other channels' effects and the controls'. `tune_carryover_joint()` puts every
+channel and the controls into one model and chooses each channel's
+`(max_lag, decay)` by coordinate descent: each channel in turn is set to its
+best grid point with the rest held fixed, repeating until a sweep changes
+nothing. Every accepted step lowers the cross-validated error, so it
+terminates, at a local optimum of the grid; the cost is a few sweeps of the
+one-channel grid rather than the full product grid. It reports each channel's
+final profile, so a flat one — carryover the data does not identify — is
+visible rather than hidden behind a point estimate.
+
+**Start-up bias.** `adstock_steady_state()` returns the filter state that
+constant spend at the early-period mean would have left, $m/(1-\theta)$ for
+the recursive kernel, so a series does not begin at zero adstock.
+`warm_start = TRUE` applies it inside both tuners. It uses media only, never
+the KPI, so it cannot leak outcome information into a cross-validation.
+
+## Uncertainty
+
+`block_bootstrap()` implements the moving block bootstrap of Künsch (1989):
+resample overlapping blocks of consecutive rows, concatenate them to the
+original length, recompute the statistic, and report percentile intervals.
+Blocks preserve the autocorrelation that carryover creates, which resampling
+single weeks would destroy and so understate uncertainty. The default block
+length $\lceil n^{1/3} \rceil$ is the usual rate-optimal order (Lahiri,
+2003); for media data a block at least as long as the carryover's effective
+window is a sensible floor. With `by`, blocks are drawn within each group.
+
+The transform should be computed once, on the original series, before
+bootstrapping: re-adstocking resampled rows would carry spend across the joins
+between blocks. The resulting intervals describe sampling uncertainty given
+the transform parameters, not the uncertainty in choosing them.
+
 ## Joint tuning with tidymodels
 
 `step_adstock()` stores the geometric filter's single-number state at `prep()`
@@ -131,7 +167,9 @@ c(shortcut  = mroi(mean(z), 1000, half_max = 1000) * (1 - 0.85),
 
 `diagnose_media()` reports variance inflation factors (regressing each channel
 on the others), the coefficient of variation, the share of dark periods and
-implied cost-per-mille outliers (a median-absolute-deviation rule). With `by`,
+implied cost-per-mille outliers (a median-absolute-deviation rule). With
+`decay`, collinearity is measured on adstocked media, which is what the model
+actually sees. With `by`,
 each is computed within series and the worst case reported, since pooling
 geographies that differ in scale manufactures correlation.
 
@@ -200,3 +238,8 @@ for media mix modeling with carryover and shape effects.* Google Inc.
 
 Koyck, L. M. (1954). *Distributed Lags and Investment Analysis.*
 North-Holland.
+
+Künsch, H. R. (1989). The jackknife and the bootstrap for general stationary
+observations. *The Annals of Statistics*, 17(3), 1217–1241.
+
+Lahiri, S. N. (2003). *Resampling Methods for Dependent Data.* Springer.

@@ -43,8 +43,9 @@
 #'     saturation, in that order, and will not do it backwards quietly.}
 #'   \item{Choosing parameters}{[decay_from_half_life()], [half_life()] and
 #'     [effective_window()] translate between half-lives and decay
-#'     coefficients. [tune_carryover()] selects them by cross-validation
-#'     against an actual KPI.}
+#'     coefficients. [tune_carryover()] and [tune_carryover_joint()] select
+#'     them by cross-validation against an actual KPI;
+#'     [adstock_steady_state()] removes start-up bias.}
 #' }
 #'
 #' @section The attribution half:
@@ -66,7 +67,8 @@
 #' [diagnose_media()] checks whether the data can support a model at all --
 #' run it first. [contributions()], [roi()], [marginal_roi()], [mroi()],
 #' [response_curve()] and [spend_for()] turn a fitted model into a
-#' deliverable. [step_adstock()] and
+#' deliverable, and [block_bootstrap()] puts intervals on it. Each result has
+#' a `plot()` method; [mm_palette()] exposes their colours. [step_adstock()] and
 #' [step_saturation()] are \pkg{recipes} steps that carry filter state across
 #' the train/test boundary, with [carryover_decay()] and friends as their
 #' \pkg{dials} parameters.

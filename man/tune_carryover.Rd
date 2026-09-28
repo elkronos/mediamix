@@ -19,7 +19,9 @@ tune_carryover(
   skip = 0L,
   k = 5L,
   cores = 1L,
-  aggregate = c("pooled", "mean")
+  aggregate = c("pooled", "mean"),
+  controls = NULL,
+  warm_start = FALSE
 )
 }
 \arguments{
@@ -28,12 +30,10 @@ tune_carryover(
 \item{y}{Numeric vector of the KPI, the same length as \code{x}.}
 
 \item{fit_fn}{A function of \verb{(x_adstocked, y)} returning a fitted model.
-Defaults to \code{\link[=fit_ols]{fit_ols()}}. It receives only the adstocked media and the
-response, so control variables must reach it another way: residualise \code{y}
-against the controls before calling, or capture them from the enclosing
-environment. To tune carryover jointly with controls and with the model's
-own hyperparameters, use \code{\link[=step_adstock]{step_adstock()}} inside a \pkg{recipes} pipeline
-instead.}
+Defaults to \code{\link[=fit_ols]{fit_ols()}}. When \code{controls} are supplied it receives a data
+frame instead -- the adstocked media as column \code{media}, then the
+controls -- and the default becomes least squares on all of them. For
+several channels at once, see \code{\link[=tune_carryover_joint]{tune_carryover_joint()}}.}
 
 \item{predict_fn}{A function of \verb{(model, newdata)} returning predictions,
 where \code{newdata} is the adstocked media for the assessment rows. Defaults to
@@ -81,6 +81,14 @@ root mean squared forecast error. \code{"mean"} evaluates \code{metric_fn} on ea
 split and averages, which is the \pkg{tune} convention; note that with
 \code{assess = 1} a per-split RMSE is an absolute error, so the mean of them is
 a mean absolute error whatever \code{metric_fn} is called.}
+
+\item{controls}{Optional data frame of control variables (trend, price,
+seasonality, ...) entered into the model untransformed, so carryover is
+judged with them accounted for. The rows are kept aligned with every split
+automatically.}
+
+\item{warm_start}{Seed the adstock with \code{\link[=adstock_steady_state]{adstock_steady_state()}} rather
+than zero, removing the start-up bias of a long carryover.}
 }
 \value{
 An object of class \code{mm_carryover}: a list with elements
@@ -167,8 +175,9 @@ long-carryover channel are understated: with \code{decay = 0.85} a constant spen
 reaches only 15\% of its steady-state level in week one and 90\% after
 \code{effective_window(0.85)} = 15 weeks. With \code{initial} at half the series this
 rarely decides the answer, but it biases the fit towards short carryover on
-short series. Pass real pre-period spend via \code{\link[=adstock_state]{adstock_state()}} where you
-have it.
+short series. \code{warm_start = TRUE} seeds every candidate with
+\code{\link[=adstock_steady_state]{adstock_steady_state()}}; better still, pass real pre-period spend through
+\code{\link[=adstock_state]{adstock_state()}} and your own \code{fit_fn} when you have it.
 }
 
 \examples{
@@ -222,5 +231,6 @@ Bergmeir, C. and Benitez, J. M. (2012). On the use of cross-validation for
 time series predictor evaluation. \emph{Information Sciences}, 191, 192--213.
 }
 \seealso{
+\code{\link[=tune_carryover_joint]{tune_carryover_joint()}} for several channels at once,
 \code{\link[=adstock_geometric]{adstock_geometric()}}, \code{\link[=fit_ols]{fit_ols()}}, \code{\link[=effective_window]{effective_window()}}
 }

@@ -41,23 +41,13 @@ price term, no baseline and no controls, so carryover parameters chosen
 against it absorb whatever those omitted terms would have explained. That is
 fine for a first pass and wrong for a deliverable.
 
-To tune against a model with controls, note that \code{\link[=tune_carryover]{tune_carryover()}} hands
-\code{fit_fn} only the adstocked media and the response -- there is no mechanism
-for passing extra columns through. Two things follow: controls have to be
-captured from the enclosing environment, and \code{predict_fn} has to supply them
-for the assessment rows itself, which means knowing which rows those are.
-Under a forward-only scheme the assessment rows are always the ones
-immediately following the training rows, so a \code{predict_fn} can reconstruct
-them from \code{length(newdata)} -- but it has to get that arithmetic exactly
-right, and a silently misaligned control column produces a plausible number
-rather than an error.
-
-Two safer routes exist, and one of them is almost always what you want.
-Residualise \code{y} against the controls first and tune carryover on the
-residual, which needs no row bookkeeping at all; or use \code{\link[=step_adstock]{step_adstock()}} in a
-\pkg{recipes} pipeline, where the resampling machinery keeps every row
-aligned for you and carryover is tuned jointly with everything else. Both are
-worked through in \code{vignette("carryover")}.
+To tune against a model with controls, pass them to \code{\link[=tune_carryover]{tune_carryover()}}'s
+\code{controls} argument, which switches the default model to least squares on
+the adstocked media plus the controls and keeps every row aligned with every
+split. For several channels at once use \code{\link[=tune_carryover_joint]{tune_carryover_joint()}}, and for
+carryover tuned jointly with saturation and a model penalty, \code{\link[=step_adstock]{step_adstock()}}
+in a \pkg{recipes} pipeline. All three are worked through in
+\code{vignette("carryover")} and \code{vignette("tidymodels")}.
 }
 \examples{
 set.seed(1)

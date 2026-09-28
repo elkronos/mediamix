@@ -540,6 +540,78 @@ adstock_state <- function(x, decay, max_lag = Inf, state = 0, by = NULL,
   stats::setNames(out, names(idx))
 }
 
+#' Steady-state starting value for an adstock filter
+#'
+#' A filter started from zero assumes no media ran before the series began, so
+#' the first periods of a long-carryover channel are understated: at
+#' `decay = 0.85` a constant spend reaches only 15% of its steady-state adstock
+#' in the first period. This function returns the state the filter would hold
+#' had the average spend of the first `periods` been running forever, which is
+#' the usual remedy when real pre-period spend is not available.
+#'
+#' @inheritParams adstock_geometric
+#' @param periods Number of leading periods to average. Defaults to the
+#'   geometric kernel's 90% effective window, capped at the series length,
+#'   since that is how far back the start of the series "remembers".
+#'
+#' @return A state in the form [adstock_geometric()], [adstock_filter()] and
+#'   friends accept: a single raw accumulator for `max_lag = Inf`, the
+#'   `max_lag - 1` preceding values for a finite kernel, or a named list of
+#'   these when `by` is supplied.
+#'
+#' @details
+#' For the recursive kernel the raw accumulator under constant spend \eqn{m} is
+#' \eqn{m / (1 - \theta)}; for a finite kernel the preceding values are all
+#' \eqn{m}. Either way a series that really was constant at \eqn{m} adstocks
+#' to \eqn{m} (normalised) from its first period.
+#'
+#' The seed uses the series' own early *media*, never the KPI, so it does not
+#' leak outcome information into a cross-validation. It does assume the
+#' pre-period looked like the first few observed periods; when you have the
+#' real pre-period spend, pass [adstock_state()] of it instead.
+#'
+#' @seealso [adstock_state()], [adstock_geometric()], [tune_carryover()],
+#'   which accepts `warm_start = TRUE`.
+#'
+#' @examples
+#' x <- rep(100, 10)
+#' round(adstock_geometric(x, decay = 0.85), 1)             # cold start
+#' s <- adstock_steady_state(x, decay = 0.85)
+#' round(adstock_geometric(x, decay = 0.85, state = s), 1)  # no burn-in
+#'
+#' # Finite kernels and grouped series work the same way
+#' adstock_steady_state(c(10, 20, 30, 40), decay = 0.5, max_lag = 3)
+#' adstock_steady_state(c(10, 20, 100, 200), decay = 0.5,
+#'                      by = c("a", "a", "b", "b"), periods = 2)
+#' @export
+adstock_steady_state <- function(x, decay, max_lag = Inf, periods = NULL,
+                                 by = NULL) {
+  x <- .mm_check_numeric(x, "x")
+  decay <- .mm_check_scalar(decay, "decay", lower = 0, upper = 1)
+  max_lag <- .mm_check_count(max_lag, "max_lag", min = 1L, allow_inf = TRUE)
+  if (!is.null(periods)) periods <- .mm_check_count(periods, "periods", min = 1L)
+  by <- .mm_check_by(by, length(x))
+  if (is.infinite(max_lag) && decay == 1) {
+    cli::cli_abort(c(
+      "An undecaying infinite kernel has no steady state.",
+      i = "Use a finite {.arg max_lag}, or a {.arg decay} below 1."
+    ))
+  }
+  one <- function(xi) {
+    k <- if (is.null(periods)) {
+      if (decay == 0) 1L else if (decay < 1) effective_window(decay, 0.9) else
+        length(xi)
+    } else periods
+    k <- min(k, length(xi))
+    m <- mean(xi[seq_len(k)], na.rm = TRUE)
+    if (!is.finite(m)) m <- 0
+    if (is.infinite(max_lag)) m / (1 - decay) else rep(m, max_lag - 1L)
+  }
+  if (is.null(by)) return(one(x))
+  idx <- split(seq_along(x), factor(by, levels = unique(by)))
+  lapply(idx, function(i) one(x[i]))
+}
+
 # ---- internals ---------------------------------------------------------------
 
 #' @keywords internal

@@ -1,0 +1,21 @@
+year <- if (!is.null(meta$Date)) {
+  sub("-.*", "", meta$Date)
+} else if (!is.null(meta$Packaged)) {
+  sub("-.*", "", meta$Packaged)
+} else {
+  format(Sys.Date(), "%Y")
+}
+
+bibentry(
+  bibtype = "Manual",
+  title = "{mediamix}: Media Transforms and Attribution Path Construction",
+  author = person("Justin", "Chase"),
+  year = year,
+  note = paste("R package version", meta$Version),
+  url = "https://elkronos.github.io/mediamix/",
+  textVersion = paste0(
+    "Chase, J. (", year, "). mediamix: Media Transforms and Attribution ",
+    "Path Construction. R package version ", meta$Version,
+    ". https://elkronos.github.io/mediamix/"
+  )
+)
