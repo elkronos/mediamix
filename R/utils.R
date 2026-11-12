@@ -36,18 +36,21 @@
   if (!lo_ok || !hi_ok) {
     lb <- if (inclusive[1L]) "[" else "("
     rb <- if (inclusive[2L]) "]" else ")"
+    shown <- .mm_format_num(x)
     cli::cli_abort(
-      "{.arg {arg}} must be in {lb}{lower}, {upper}{rb}, not {.val {x}}.",
+      "{.arg {arg}} must be in {lb}{lower}, {upper}{rb}, not {shown}.",
       call = call
     )
   }
   as.numeric(x)
 }
 
+# `max` bounds the finite values a caller accepts; it is optional so that
+# every existing count keeps its behaviour.
 #' @keywords internal
 #' @noRd
 .mm_check_count <- function(x, arg, min = 1L, allow_inf = FALSE,
-                            call = parent.frame()) {
+                            call = parent.frame(), max = Inf) {
   if (!is.numeric(x) || length(x) != 1L || is.na(x)) {
     cli::cli_abort("{.arg {arg}} must be a single non-missing number.", call = call)
   }
@@ -57,11 +60,12 @@
     }
     return(Inf)
   }
+  shown <- .mm_format_num(x)
   if (x %% 1 != 0) {
-    cli::cli_abort("{.arg {arg}} must be a whole number, not {.val {x}}.", call = call)
+    cli::cli_abort("{.arg {arg}} must be a whole number, not {shown}.", call = call)
   }
   if (x < min) {
-    cli::cli_abort("{.arg {arg}} must be at least {min}, not {.val {x}}.", call = call)
+    cli::cli_abort("{.arg {arg}} must be at least {min}, not {shown}.", call = call)
   }
   int_max <- .Machine$integer.max
   if (x > int_max) {
@@ -72,7 +76,24 @@
       i = "Use {.code Inf} for an unbounded kernel."
     ), call = call)
   }
+  if (x > max) {
+    shown_max <- .mm_format_num(max)
+    cli::cli_abort(
+      "{.arg {arg}} must be at most {shown_max}, not {shown}.",
+      call = call
+    )
+  }
   as.integer(x)
+}
+
+# A number written with enough digits to tell it from its neighbours, so a
+# message never reports 2.9999999999999996 as 3.
+#' @keywords internal
+#' @noRd
+.mm_format_num <- function(x) {
+  out <- format(x, digits = 15)
+  if (is.finite(x) && as.numeric(out) != x) out <- format(x, digits = 17)
+  out
 }
 
 #' @keywords internal

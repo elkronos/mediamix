@@ -436,3 +436,14 @@ test_that("state of the wrong length is rejected with a helpful message", {
     regexp = "wrong length"
   )
 })
+
+# ---- 9. Count and range messages -------------------------------------------------
+
+test_that("counts can carry an upper bound, and say which number they got", {
+  expect_error(.mm_check_count(11, "n", max = 10), "at most 10, not 11")
+  expect_identical(.mm_check_count(10, "n", max = 10), 10L)
+  expect_identical(.mm_check_count(Inf, "n", allow_inf = TRUE, max = 10), Inf)
+  expect_error(adstock_geometric(1:3, 0.5, max_lag = 2.9999999999999996),
+               "not 2.9999999999999996")
+  expect_error(adstock_geometric(1:3, 1.0000000000000002), "not 1.0000000000000002")
+})
