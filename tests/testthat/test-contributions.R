@@ -275,6 +275,149 @@ test_that("roi() warns when contributions and spend cover different periods", {
   expect_warning(roi(contrib, rbind(spend, spend)), "156 periods")
 })
 
+# ---- roi(by =, index =, periods =) ----------------------------------------------
+
+# Two geographies of twelve weeks. The regressors are transforms of spend, so
+# each group's ROI differs from the others.
+roi_panel <- function() {
+  set.seed(21)
+  n <- 12
+  d <- data.frame(geo = rep(c("east", "west"), each = n),
+                  week = rep(as.Date("2024-01-01") + 7 * (0:(n - 1)), 2),
+                  tv = round(runif(2 * n, 100, 900)),
+                  search = round(runif(2 * n, 50, 300)))
+  media <- data.frame(tv = sqrt(d$tv), search = log1p(d$search))
+  coefs <- c("(Intercept)" = 40, tv = 3, search = 7)
+  list(d = d, media = media, coefs = coefs,
+       contrib = contributions(media, coefs, index = d$week, by = d$geo))
+}
+
+roi_by_hand <- function(p, rows, ch) {
+  sum(p$coefs[[ch]] * p$media[[ch]][rows]) / sum(p$d[[ch]][rows])
+}
+
+test_that("roi(by =) gives one row per channel per group", {
+  p <- roi_panel()
+  r <- roi(p$contrib, p$d[c("tv", "search")], by = p$d$geo)
+  expect_identical(names(r), c("group", "channel", "contribution", "spend",
+                               "roi"))
+  expect_identical(r$group, c("east", "east", "west", "west"))
+  for (i in seq_len(nrow(r))) {
+    rows <- which(p$d$geo == r$group[i])
+    expect_equal(r$roi[i], roi_by_hand(p, rows, r$channel[i]))
+    expect_equal(r$spend[i], sum(p$d[[r$channel[i]]][rows]))
+  }
+  # Channels are in descending ROI within each group.
+  expect_true(all(diff(r$roi[r$group == "east"]) <= 0))
+  expect_true(all(diff(r$roi[r$group == "west"]) <= 0))
+
+  # A column of spend, a factor and a data frame of keys name the same groups.
+  expect_equal(roi(p$contrib, p$d[c("geo", "tv", "search")], by = "geo"), r)
+  expect_equal(roi(p$contrib, p$d[c("tv", "search")], by = factor(p$d$geo)),
+               r)
+  keyed <- contributions(p$media, p$coefs, by = p$d["geo"])
+  expect_equal(roi(keyed, p$d[c("tv", "search")], by = p$d["geo"]), r)
+
+  # Without by, the groups are pooled as before.
+  pooled <- roi(p$contrib, p$d[c("tv", "search")])
+  expect_identical(names(pooled), c("channel", "contribution", "spend", "roi"))
+  expect_equal(pooled$roi[pooled$channel == "tv"],
+               roi_by_hand(p, seq_len(nrow(p$d)), "tv"))
+})
+
+test_that("groups found in only one input are reported and left out", {
+  p <- roi_panel()
+  extra <- rbind(p$d, transform(p$d[1:3, ], geo = "north"))
+  expect_message(r <- roi(p$contrib, extra[c("tv", "search")], by = extra$geo),
+                 "north")
+  expect_setequal(r$group, c("east", "west"))
+  expect_error(roi(p$contrib, p$d[c("tv", "search")],
+                   by = rep("north", nrow(p$d))),
+               "No group appears in both")
+  # A group short of rows is caught when periods are not matched.
+  expect_warning(roi(p$contrib, p$d[-1, c("tv", "search")], by = p$d$geo[-1]),
+                 "east \\(12 periods, 11 rows\\)")
+})
+
+test_that("index matches spend to contributions period by period", {
+  p <- roi_panel()
+  spend <- p$d[c("week", "geo", "tv", "search")]
+  later <- transform(spend, week = week + 7 * 12)
+  r <- roi(p$contrib, spend, by = "geo", index = "week")
+  expect_equal(r, roi(p$contrib, p$d[c("tv", "search")], by = p$d$geo))
+  # Periods with no contributions are left out, and row order does not matter.
+  both <- rbind(later, spend)[sample(2 * nrow(spend)), ]
+  expect_message(shuffled <- roi(p$contrib, both, by = "geo", index = "week"),
+                 "12 periods of `spend` are not in `contributions`")
+  expect_equal(shuffled, r)
+  # The column used as index is not taken for a channel.
+  expect_no_message(roi(p$contrib, spend, by = "geo", index = "week"))
+  expect_error(roi(p$contrib, later, by = "geo", index = "week"),
+               "No period appears in both")
+  # Ungrouped, one spend row per week covers the pooled contributions.
+  national <- aggregate(cbind(tv, search) ~ week, data = p$d, FUN = sum)
+  expect_equal(roi(p$contrib, national, index = "week"),
+               roi(p$contrib, p$d[c("tv", "search")]))
+})
+
+test_that("periods keeps the same periods of contributions and spend", {
+  p <- roi_panel()
+  spend <- p$d[c("week", "geo", "tv", "search")]
+  last4 <- sort(unique(p$d$week))[9:12]
+  r <- roi(p$contrib, spend, by = "geo", index = "week", periods = last4)
+  for (i in seq_len(nrow(r))) {
+    rows <- which(p$d$geo == r$group[i] & p$d$week %in% last4)
+    expect_equal(r$roi[i], roi_by_hand(p, rows, r$channel[i]))
+  }
+  # Dates may be given as text in ISO format.
+  expect_equal(roi(p$contrib, spend, by = "geo", index = "week",
+                   periods = format(last4)), r)
+  # With totals for spend, only the contributions are cut.
+  east <- p$d$geo == "east" & p$d$week %in% last4
+  totals <- c(tv = sum(p$d$tv[east]), search = sum(p$d$search[east]))
+  east_contrib <- p$contrib[p$contrib$group == "east", ]
+  one <- roi(east_contrib, totals, periods = last4)
+  expect_equal(one$roi[one$channel == "tv"], roi_by_hand(p, which(east), "tv"))
+})
+
+test_that("roi()'s new arguments are validated", {
+  p <- roi_panel()
+  spend <- p$d[c("week", "geo", "tv", "search")]
+  plain <- data.frame(channel = c("tv", "search"), contribution = c(5, 3))
+  expect_error(roi(p$contrib, spend, periods = p$d$week[1]), "needs `index`")
+  expect_error(roi(p$contrib, spend, index = "week", periods = as.Date(NA)),
+               "missing values")
+  expect_error(roi(p$contrib, spend, index = "week", periods = list(1)),
+               "vector of one or more periods")
+  expect_error(roi(p$contrib, spend, index = "week",
+                   periods = as.Date("2030-01-01")),
+               "No value of `periods`")
+  expect_error(roi(plain, spend, by = "geo"), "group column")
+  expect_error(roi(plain, spend, index = "week"), "period column")
+  expect_error(roi(c(tv = 5), spend, by = "geo"), "data frame from")
+  expect_error(roi(p$contrib, c(tv = 5, search = 3), by = "geo"),
+               "data frame with one\\s+row per period")
+  expect_error(roi(p$contrib, spend, by = "region"), "\"region\"")
+  expect_error(roi(p$contrib, spend, by = p$d$geo[-1]), "one value per")
+  bad <- p$d$geo
+  bad[3] <- NA
+  expect_error(roi(p$contrib, spend, by = bad), "missing values")
+  expect_error(roi(p$contrib, spend, index = replace(p$d$week, 2, NA)),
+               "missing values")
+  err <- tryCatch(roi(p$contrib, spend, by = "region"), error = identity)
+  expect_identical(conditionCall(err)[[1]], as.name("roi"))
+})
+
+test_that("a single row of spend can be labelled by a value or a column", {
+  p <- roi_panel()
+  row1 <- p$contrib[p$contrib$period == p$d$week[1] &
+                      p$contrib$group == "east", ]
+  r <- roi(row1, p$d[1, c("tv", "search")], by = "east")
+  expect_identical(unique(r$group), "east")
+  expect_equal(r$roi[r$channel == "tv"], roi_by_hand(p, 1, "tv"))
+  expect_equal(roi(row1, p$d[1, c("geo", "tv", "search")], by = "geo"), r)
+})
+
 # ---- mroi(), response_curve(), spend_for() edge cases ------------------------
 
 test_that("the slope step scales with the curve, so tiny spend scales work", {

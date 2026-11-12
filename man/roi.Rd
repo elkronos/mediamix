@@ -5,7 +5,7 @@
 \alias{mroi}
 \title{Return on investment and marginal return}
 \usage{
-roi(contributions, spend)
+roi(contributions, spend, by = NULL, index = NULL, periods = NULL)
 
 mroi(spend_level, coefficient, type = "hill", delta = 0.01, ...)
 }
@@ -17,6 +17,25 @@ vector of total contribution per channel.}
 channel and one row per period, or a named numeric vector of total spend
 per channel. Spend columns are read as numbers: a factor is read by its
 labels, and text that is not a number is an error.}
+
+\item{by}{Optional group of each row of \code{spend}, for one row per channel
+per group: the name of a column of \code{spend}, or a vector (or a data frame
+of key columns) with one value per row of \code{spend}, as given to
+\code{\link[=contributions]{contributions()}}. \code{contributions} must then come from \code{\link[=contributions]{contributions()}}
+with \code{by}, and its \code{group} column is matched to these groups.}
+
+\item{index}{Optional period of each row of \code{spend}: the name of a column
+of \code{spend}, or a vector with one value per row, as given to
+\code{\link[=contributions]{contributions()}}. With \code{index}, spend and contributions are matched
+period by period, within each group when \code{by} is supplied, and periods
+that appear in only one of them are left out, with a message.}
+
+\item{periods}{Optional vector of the periods to include, compared with the
+\code{period} column of \code{contributions} and with \code{index}, so that one year or
+one quarter of a longer decomposition can be reported. When \code{spend} is a
+data frame, \code{periods} needs \code{index}. When \code{spend} gives totals,
+\code{periods} selects contributions only, and the totals must cover the same
+periods.}
 
 \item{spend_level}{Current spend level for the channel, in the same units the
 saturation curve was fitted on.}
@@ -35,12 +54,17 @@ linear response.}
 \code{roi()} returns a data frame with columns \code{channel}, \code{contribution},
 \code{spend} and \code{roi}, ordered by descending ROI, with \code{roi} set to \code{NA} where
 spend is zero. Channels appearing in only one of the two inputs are
-omitted, and reported when that happens. \code{mroi()} returns a single number.
+omitted, and reported when that happens. With \code{by}, a \code{group} column
+comes first and there is one row per channel per group: groups in the
+order they first appear in \code{contributions}, channels by descending ROI
+within each. Groups found in only one of the two inputs are omitted, with
+a message. \code{mroi()} returns a single number.
 
 Each channel's contribution and spend must cover the same periods. When
-\code{contributions} comes from \code{\link[=contributions]{contributions()}} and \code{spend} is a data frame,
-\code{roi()} warns if the number of periods decomposed differs from the number
-of rows of \code{spend}.
+\code{contributions} comes from \code{\link[=contributions]{contributions()}} and \code{spend} is a data frame
+without \code{index}, \code{roi()} warns if the number of periods decomposed
+differs from the number of rows of \code{spend}, group by group with \code{by}.
+Give \code{index} to match the two period by period instead.
 }
 \description{
 \code{roi()} divides each channel's total contribution by its total spend.
@@ -129,6 +153,15 @@ fit <- stats::lm(north$revenue ~ ., data = model_data)
 contrib <- contributions(transformed, fit, index = north$date)
 
 roi(contrib, north[channels])
+
+# One row per channel per year: give contributions() and roi() the same `by`
+year <- format(north$date, "\%Y")
+by_year <- contributions(transformed, fit, index = north$date, by = year)
+roi(by_year, north[channels], by = year)
+
+# The last year only, with spend matched to contributions week by week
+roi(contrib, north[c("date", channels)], index = "date",
+    periods = north$date[year == "2025"])
 
 # Average and marginal return are different questions. marginal_roi()
 # re-runs the whole transform on a 1\% larger budget, so carryover and

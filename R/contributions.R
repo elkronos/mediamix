@@ -480,6 +480,22 @@ contributions <- function(media, model, intercept = NULL, index = NULL,
 #'   channel and one row per period, or a named numeric vector of total spend
 #'   per channel. Spend columns are read as numbers: a factor is read by its
 #'   labels, and text that is not a number is an error.
+#' @param by Optional group of each row of `spend`, for one row per channel
+#'   per group: the name of a column of `spend`, or a vector (or a data frame
+#'   of key columns) with one value per row of `spend`, as given to
+#'   [contributions()]. `contributions` must then come from [contributions()]
+#'   with `by`, and its `group` column is matched to these groups.
+#' @param index Optional period of each row of `spend`: the name of a column
+#'   of `spend`, or a vector with one value per row, as given to
+#'   [contributions()]. With `index`, spend and contributions are matched
+#'   period by period, within each group when `by` is supplied, and periods
+#'   that appear in only one of them are left out, with a message.
+#' @param periods Optional vector of the periods to include, compared with the
+#'   `period` column of `contributions` and with `index`, so that one year or
+#'   one quarter of a longer decomposition can be reported. When `spend` is a
+#'   data frame, `periods` needs `index`. When `spend` gives totals,
+#'   `periods` selects contributions only, and the totals must cover the same
+#'   periods.
 #' @param spend_level Current spend level for the channel, in the same units the
 #'   saturation curve was fitted on.
 #' @param coefficient The channel's fitted coefficient.
@@ -492,12 +508,17 @@ contributions <- function(media, model, intercept = NULL, index = NULL,
 #' @return `roi()` returns a data frame with columns `channel`, `contribution`,
 #'   `spend` and `roi`, ordered by descending ROI, with `roi` set to `NA` where
 #'   spend is zero. Channels appearing in only one of the two inputs are
-#'   omitted, and reported when that happens. `mroi()` returns a single number.
+#'   omitted, and reported when that happens. With `by`, a `group` column
+#'   comes first and there is one row per channel per group: groups in the
+#'   order they first appear in `contributions`, channels by descending ROI
+#'   within each. Groups found in only one of the two inputs are omitted, with
+#'   a message. `mroi()` returns a single number.
 #'
 #'   Each channel's contribution and spend must cover the same periods. When
-#'   `contributions` comes from [contributions()] and `spend` is a data frame,
-#'   `roi()` warns if the number of periods decomposed differs from the number
-#'   of rows of `spend`.
+#'   `contributions` comes from [contributions()] and `spend` is a data frame
+#'   without `index`, `roi()` warns if the number of periods decomposed
+#'   differs from the number of rows of `spend`, group by group with `by`.
+#'   Give `index` to match the two period by period instead.
 #'
 #' @details
 #' Average ROI and marginal ROI answer different questions and are routinely
@@ -583,6 +604,15 @@ contributions <- function(media, model, intercept = NULL, index = NULL,
 #'
 #' roi(contrib, north[channels])
 #'
+#' # One row per channel per year: give contributions() and roi() the same `by`
+#' year <- format(north$date, "%Y")
+#' by_year <- contributions(transformed, fit, index = north$date, by = year)
+#' roi(by_year, north[channels], by = year)
+#'
+#' # The last year only, with spend matched to contributions week by week
+#' roi(contrib, north[c("date", channels)], index = "date",
+#'     periods = north$date[year == "2025"])
+#'
 #' # Average and marginal return are different questions. marginal_roi()
 #' # re-runs the whole transform on a 1% larger budget, so carryover and
 #' # flighting are both accounted for. Display's average pound returns about
@@ -597,21 +627,17 @@ contributions <- function(media, model, intercept = NULL, index = NULL,
 #'               ch, avg$roi[avg$channel == ch], m$mroi))
 #' }
 #' @export
-roi <- function(contributions, spend) {
-  contrib <- if (is.data.frame(contributions)) {
+roi <- function(contributions, spend, by = NULL, index = NULL,
+                periods = NULL) {
+  framed <- is.data.frame(contributions)
+  if (framed) {
     if (!all(c("channel", "contribution") %in% names(contributions))) {
       cli::cli_abort("{.arg contributions} needs {.field channel} and \\
                       {.field contribution} columns.")
     }
-    tapply(contributions$contribution, contributions$channel, sum)
-  } else {
-    if (is.null(names(contributions))) {
-      cli::cli_abort("{.arg contributions} must be named when given as a vector.")
-    }
-    contributions
+  } else if (is.null(names(contributions))) {
+    cli::cli_abort("{.arg contributions} must be named when given as a vector.")
   }
-  contrib <- contrib[names(contrib) != "(baseline)"]
-
   if (!is.data.frame(spend)) {
     if (is.null(names(spend))) {
       cli::cli_abort("{.arg spend} must be named when given as a vector.")
@@ -621,31 +647,45 @@ roi <- function(contributions, spend) {
                       {.obj_type_friendly {spend}}.")
     }
   }
-  common <- intersect(names(contrib), names(spend))
-  dropped <- setdiff(union(names(contrib), names(spend)), common)
+  sel <- .mm_roi_rows(contributions, spend, by, index, periods)
+  groups <- sel$groups
+
+  # Totals per group. Without `by` every row is in the one group "".
+  contrib <- if (framed) {
+    rows <- which(sel$keep_c)
+    ch <- as.character(contributions$channel[rows])
+    val <- contributions$contribution[rows]
+    g_of <- sel$c_group[rows]
+    lapply(groups, function(g) {
+      i <- g_of == g
+      tapply(val[i], ch[i], sum)
+    })
+  } else {
+    list(contributions)
+  }
+  contrib <- lapply(contrib, function(v) v[names(v) != "(baseline)"])
+  contrib_names <- unique(unlist(lapply(contrib, names), use.names = FALSE))
+  # A column that labels the rows of `spend` is not a channel.
+  spend_names <- setdiff(names(spend), sel$label_cols)
+  common <- intersect(contrib_names, spend_names)
+  dropped <- setdiff(union(contrib_names, spend_names), common)
   sp <- if (is.data.frame(spend)) {
     # Only the channel columns are read, so a date or label column in `spend`
     # is reported as unmatched rather than summed.
     here <- environment()
-    vapply(stats::setNames(common, common), function(cn) {
-      sum(.mm_as_number(spend[[cn]], cn, call = here), na.rm = TRUE)
-    }, numeric(1))
+    values <- lapply(stats::setNames(common, common), function(cn) {
+      .mm_as_number(spend[[cn]], cn, call = here)
+    })
+    lapply(groups, function(g) {
+      i <- sel$keep_s & sel$s_group == g
+      vapply(values, function(v) sum(v[i], na.rm = TRUE), numeric(1))
+    })
   } else {
-    spend
+    list(spend)
   }
-  if (is.data.frame(contributions) && "period" %in% names(contributions) &&
-      is.data.frame(spend) && length(common) > 0L) {
-    periods <- max(table(contributions$channel))
-    if (periods != nrow(spend)) {
-      cli::cli_warn(c(
-        "{.arg contributions} cover {periods} period{?s}, but {.arg spend} has \\
-         {nrow(spend)} row{?s}.",
-        i = "ROI divides each channel's total contribution by its total spend, \\
-             so both must cover the same periods.",
-        i = "Pass the rows of {.arg spend} for the periods that were \\
-             decomposed."
-      ))
-    }
+  if (framed && "period" %in% names(contributions) && is.data.frame(spend) &&
+      is.null(index) && length(common) > 0L) {
+    .mm_roi_check_counts(contributions$channel, sel, groups)
   }
   if (length(dropped) > 0L && length(common) > 0L) {
     cli::cli_inform(c(
@@ -657,20 +697,253 @@ roi <- function(contributions, spend) {
   if (length(common) == 0L) {
     cli::cli_abort(c(
       "No channel appears in both {.arg contributions} and {.arg spend}.",
-      i = "Contributions: {.val {utils::head(names(contrib), 8)}}.",
-      i = "Spend: {.val {utils::head(names(spend), 8)}}."
+      i = "Contributions: {.val {utils::head(contrib_names, 8)}}.",
+      i = "Spend: {.val {utils::head(spend_names, 8)}}."
     ))
   }
-  out <- data.frame(
-    channel = common,
-    contribution = unname(contrib[common]),
-    spend = unname(sp[common]),
-    stringsAsFactors = FALSE
-  )
+  out <- do.call(rbind, lapply(seq_along(groups), function(k) {
+    data.frame(
+      group = groups[[k]],
+      channel = common,
+      contribution = unname(contrib[[k]][common]),
+      spend = unname(sp[[k]][common]),
+      stringsAsFactors = FALSE
+    )
+  }))
   out$roi <- ifelse(out$spend > 0, out$contribution / out$spend, NA_real_)
-  out <- out[order(-out$roi), , drop = FALSE]
+  out <- out[order(match(out$group, groups), -out$roi), , drop = FALSE]
+  if (is.null(by)) out$group <- NULL
   rownames(out) <- NULL
   out
+}
+
+# Which rows of `contributions` and `spend` enter the totals, and the group
+# of each row. Groups are keys, as contributions() stores them; without `by`
+# every row is in the group "". Rows outside `periods`, groups found in only
+# one input and, with `index`, periods found in only one input are left out.
+#' @keywords internal
+#' @noRd
+.mm_roi_rows <- function(contributions, spend, by, index, periods,
+                         call = parent.frame()) {
+  framed <- is.data.frame(contributions)
+  if (!framed && (!is.null(by) || !is.null(index) || !is.null(periods))) {
+    cli::cli_abort(c(
+      "{.arg by}, {.arg index} and {.arg periods} need {.arg contributions} \\
+       as a data frame from {.fn contributions}.",
+      i = "A vector of totals has no groups or periods to select."
+    ), call = call)
+  }
+  if (!is.data.frame(spend) && (!is.null(by) || !is.null(index))) {
+    cli::cli_abort(c(
+      "{.arg by} and {.arg index} need {.arg spend} as a data frame with one \\
+       row per period.",
+      i = "A vector of totals has no rows to group or match."
+    ), call = call)
+  }
+  if (!is.null(by) && !"group" %in% names(contributions)) {
+    cli::cli_abort(c(
+      "{.arg by} needs the {.field group} column that \\
+       {.code contributions(by = )} adds.",
+      i = "Decompose with the same {.arg by}, then pass it to {.fn roi}."
+    ), call = call)
+  }
+  dated <- !is.null(index) || !is.null(periods)
+  if (dated && !"period" %in% names(contributions)) {
+    cli::cli_abort("{.arg index} and {.arg periods} need the {.field period} \\
+                    column that {.fn contributions} adds.", call = call)
+  }
+  if (!is.null(periods) && is.data.frame(spend) && is.null(index)) {
+    cli::cli_abort(c(
+      "{.arg periods} needs {.arg index}, the period of each row of \\
+       {.arg spend}.",
+      i = "Without it, the rows of {.arg spend} that fall in {.arg periods} \\
+           are not known."
+    ), call = call)
+  }
+  s_by <- .mm_roi_labels(by, spend, "by", frame = TRUE, call = call)
+  s_index <- .mm_roi_labels(index, spend, "index", frame = FALSE, call = call)
+
+  n_c <- if (framed) nrow(contributions) else 0L
+  n_s <- if (is.data.frame(spend)) nrow(spend) else 0L
+  c_group <- if (is.null(by)) rep("", n_c) else
+    .mm_key_values(contributions$group)
+  s_group <- if (is.null(by)) rep("", n_s) else s_by$keys
+  c_period <- if (dated) .mm_key_values(contributions$period) else NULL
+  s_period <- s_index$keys
+  keep_c <- rep(TRUE, n_c)
+  keep_s <- rep(TRUE, n_s)
+
+  if (!is.null(periods)) {
+    wanted <- .mm_roi_periods(periods, call = call)
+    keep_c <- !is.na(c_period) & c_period %in% wanted
+    if (!any(keep_c)) {
+      cli::cli_abort(c(
+        "No value of {.arg periods} is in the {.field period} column of \\
+         {.arg contributions}.",
+        i = "Its periods include {.val {utils::head(unique(c_period), 3)}}."
+      ), call = call)
+    }
+    if (!is.null(s_period)) keep_s <- s_period %in% wanted
+  }
+
+  if (!is.null(by)) {
+    in_c <- unique(c_group[keep_c])
+    in_s <- unique(s_group[keep_s])
+    both <- intersect(in_c, in_s)
+    if (length(both) == 0L) {
+      cli::cli_abort(c(
+        "No group appears in both {.arg contributions} and {.arg spend}.",
+        i = "Contributions: {.val {utils::head(.mm_show_key(in_c), 6)}}.",
+        i = "Spend: {.val {utils::head(.mm_show_key(in_s), 6)}}."
+      ), call = call)
+    }
+    lone <- setdiff(union(in_c, in_s), both)
+    if (length(lone) > 0L) {
+      cli::cli_inform(c(
+        "{length(lone)} group{?s} appear{?s/} in only one of \\
+         {.arg contributions} and {.arg spend}, and {?is/are} not in the \\
+         table.",
+        i = "Omitted: {.val {utils::head(.mm_show_key(lone), 6)}}."
+      ))
+    }
+    keep_c <- keep_c & c_group %in% both
+    keep_s <- keep_s & s_group %in% both
+  }
+
+  if (!is.null(s_period)) {
+    sep <- .mm_key_sep()
+    kc <- paste(c_group, c_period, sep = sep)
+    ks <- paste(s_group, s_period, sep = sep)
+    matched_c <- kc %in% ks[keep_s]
+    matched_s <- ks %in% kc[keep_c]
+    lone_c <- keep_c & !matched_c
+    lone_s <- keep_s & !matched_s
+    if (!any(keep_c & matched_c)) {
+      cli::cli_abort(c(
+        "No period appears in both {.arg contributions} and {.arg spend}.",
+        i = "Contributions: {.val {utils::head(unique(c_period[keep_c]), 3)}}.",
+        i = "Spend: {.val {utils::head(unique(s_period[keep_s]), 3)}}.",
+        i = "Give {.arg index} as the same kind of value as the {.arg index} \\
+             passed to {.fn contributions}."
+      ), call = call)
+    }
+    if (any(lone_c) || any(lone_s)) {
+      n_lone_c <- length(unique(c_period[lone_c]))
+      n_lone_s <- length(unique(s_period[lone_s]))
+      eg_c <- utils::head(unique(c_period[lone_c]), 3)
+      eg_s <- utils::head(unique(s_period[lone_s]), 3)
+      cli::cli_inform(c(
+        "Periods in only one of {.arg contributions} and {.arg spend} are \\
+         left out.",
+        i = if (n_lone_c > 0L) {
+          "{n_lone_c} period{?s} of {.arg contributions} {?has/have} no row \\
+           in {.arg spend}, for example {.val {eg_c}}."
+        },
+        i = if (n_lone_s > 0L) {
+          "{n_lone_s} period{?s} of {.arg spend} {?is/are} not in \\
+           {.arg contributions}, for example {.val {eg_s}}."
+        }
+      ))
+    }
+    keep_c <- keep_c & matched_c
+    keep_s <- keep_s & matched_s
+  }
+
+  list(keep_c = keep_c, keep_s = keep_s, c_group = c_group,
+       s_group = s_group,
+       groups = if (framed) unique(c_group[keep_c]) else "",
+       label_cols = c(s_by$col, s_index$col))
+}
+
+# Labels for the rows of `spend`, given as `by` or `index`: a column of `spend`
+# named by a string, a vector with one value per row or, for `by`, a data
+# frame of key columns. Returns the labels as keys built the way
+# contributions() builds them, and the column used, if any.
+#' @keywords internal
+#' @noRd
+.mm_roi_labels <- function(x, spend, arg, frame, call = parent.frame()) {
+  if (is.null(x)) return(NULL)
+  n <- nrow(spend)
+  col <- NULL
+  if (.mm_is_string(x) && (n != 1L || x %in% names(spend))) {
+    .mm_assert_cols(spend, x, call = call)
+    col <- x
+    x <- spend[[x]]
+  }
+  if (frame && is.data.frame(x)) {
+    if (ncol(x) == 0L || nrow(x) != n) {
+      cli::cli_abort("{.arg {arg}} must have one row per row of \\
+                      {.arg spend} ({n}), not {nrow(x)}.", call = call)
+    }
+    .mm_check_key_columns(x, arg, call = call)
+    return(list(keys = .mm_paste_key(x), col = col))
+  }
+  if (!is.atomic(x) || !is.null(dim(x)) || length(x) != n) {
+    cli::cli_abort(c(
+      "{.arg {arg}} must name a column of {.arg spend} or give one value per \\
+       row of {.arg spend} ({n}).",
+      x = "It has {length(x)} element{?s}."
+    ), call = call)
+  }
+  if (anyNA(x)) {
+    cli::cli_abort("{.arg {arg}} must not contain missing values.", call = call)
+  }
+  list(keys = .mm_key_values(x), col = col)
+}
+
+# `periods` as keys comparable with .mm_key_values() of a period column.
+#' @keywords internal
+#' @noRd
+.mm_roi_periods <- function(periods, call = parent.frame()) {
+  if (!is.atomic(periods) || !is.null(dim(periods)) || length(periods) == 0L) {
+    cli::cli_abort("{.arg periods} must be a vector of one or more periods, \\
+                    not {.obj_type_friendly {periods}}.", call = call)
+  }
+  if (anyNA(periods)) {
+    cli::cli_abort("{.arg periods} must not contain missing values.",
+                   call = call)
+  }
+  unique(.mm_key_values(periods))
+}
+
+# Without `index`, each group of `spend` must have one row per period the
+# contributions cover in that group.
+#' @keywords internal
+#' @noRd
+.mm_roi_check_counts <- function(channel, sel, groups) {
+  channel <- as.character(channel)
+  counts <- vapply(groups, function(g) {
+    i <- sel$keep_c & sel$c_group == g
+    decomposed <- if (any(i)) max(table(channel[i])) else 0L
+    c(decomposed, sum(sel$keep_s & sel$s_group == g))
+  }, numeric(2), USE.NAMES = FALSE)
+  off <- counts[1L, ] != counts[2L, ]
+  if (!any(off)) return(invisible(NULL))
+  why <- c(
+    i = "ROI divides each channel's total contribution by its total spend, so \\
+         both must cover the same periods.",
+    i = "Pass the rows of {.arg spend} for the periods that were decomposed, \\
+         or give {.arg index} to match them period by period."
+  )
+  if (identical(groups, "")) {
+    periods <- counts[1L, 1L]
+    rows <- counts[2L, 1L]
+    cli::cli_warn(c(
+      "{.arg contributions} cover {periods} period{?s}, but {.arg spend} has \\
+       {rows} row{?s}.",
+      why
+    ))
+    return(invisible(NULL))
+  }
+  shown <- sprintf("%s (%d periods, %d rows)", .mm_show_key(groups[off]),
+                   as.integer(counts[1L, off]), as.integer(counts[2L, off]))
+  cli::cli_warn(c(
+    "In {sum(off)} group{?s}, {.arg contributions} and {.arg spend} cover \\
+     different numbers of periods.",
+    i = "Affected: {.val {utils::head(shown, 5)}}.",
+    why
+  ))
+  invisible(NULL)
 }
 
 #' @rdname roi
