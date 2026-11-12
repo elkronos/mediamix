@@ -902,3 +902,144 @@ plot.mm_attribution <- function(x, n = 10L, ...) {
                   col = ink[["secondary"]])
   invisible(x)
 }
+
+# ---- diagnostics ----------------------------------------------------------------
+
+#' Plot media diagnostics
+#'
+#' One row per channel, in three panels: the worst variance inflation factor
+#' on a log scale, the lowest coefficient of variation, and the highest share
+#' of periods with no spend. What [diagnose_media()] flagged is drawn as a red
+#' triangle. When spend and impressions were supplied, a fourth panel counts
+#' the periods whose implied cost per mille is an outlier, by spend column.
+#'
+#' Dashed lines mark variance inflation factors of 5 and 10, the usual levels
+#' for attention and for a split between collinear channels that is not
+#' identified, and the 50% share of dark periods behind the flighting flag.
+#' The thresholds a run used are not stored with it, so the markers, not the
+#' lines, show what was flagged. A channel whose variance inflation factor
+#' could not be computed has no marker in the first panel, which is not the
+#' same as identified.
+#'
+#' @param x An `mm_diagnosis` object from [diagnose_media()].
+#' @param ... Graphical arguments: `main` replaces the overall title and `col`
+#'   gives two colours, for unflagged and flagged values. Others are ignored.
+#'
+#' @return `x`, invisibly.
+#'
+#' @seealso [diagnose_media()]
+#'
+#' @examples
+#' data(mm_weekly)
+#' d <- diagnose_media(mm_weekly,
+#'                     media = c("tv", "video", "search", "social", "display"),
+#'                     by = "geo")
+#' plot(d)
+#' @export
+plot.mm_diagnosis <- function(x, ...) {
+  v <- x$variation
+  co <- x$collinearity
+  .mm_plot_needs(v, c("channel", "cv", "zero_share", "low_variation",
+                      "heavily_flighted"), "diagnose_media", "x$variation")
+  .mm_plot_needs(co, c("channel", "vif", "identified"), "diagnose_media",
+                 "x$collinearity")
+  cpm <- x$cpm
+  if (!is.null(cpm)) {
+    .mm_plot_needs(cpm, c("channel", "outlier"), "diagnose_media", "x$cpm")
+  }
+  dots <- list(...)
+  pal <- unname(rep_len(.mm_arg(dots, "col", .mm_cat()[c("blue", "red")]), 2L))
+  ink <- .mm_ink()
+  ch <- as.character(v$channel)
+  hit <- match(ch, co$channel)
+  panels <- list(
+    list(title = "Variance inflation factor", value = co$vif[hit],
+         flag = co$identified[hit] %in% FALSE, labels = ch, log = TRUE,
+         ref = c(5, 10)),
+    list(title = "Coefficient of variation", value = v$cv,
+         flag = v$low_variation %in% TRUE),
+    list(title = "Share of periods with no spend", value = v$zero_share,
+         flag = v$heavily_flighted %in% TRUE, pct = TRUE, ref = 0.5)
+  )
+  if (!is.null(cpm)) {
+    n_out <- tapply(cpm$outlier %in% TRUE, as.character(cpm$channel), sum)
+    panels[[4L]] <- list(title = "Periods with an outlying CPM",
+                         value = as.numeric(n_out), flag = n_out > 0,
+                         labels = names(n_out), count = TRUE)
+  }
+  np <- length(panels)
+  op <- .mm_par(mfrow = c(1L, 1L), cex = 1, oma = c(0, 0, 3, 0))
+  on.exit(graphics::par(op), add = TRUE)
+  graphics::par(cex = 0.9)
+  fit <- lapply(panels, function(p) {
+    if (is.null(p$labels)) NULL else .mm_fit_labels(p$labels)
+  })
+  line <- graphics::par("csi") * graphics::par("mex")
+  left <- vapply(fit, function(f) if (is.null(f)) 1 else f$lines, numeric(1))
+  right <- 1.2
+  room <- graphics::par("din")[1L] - sum(left + right) * line
+  widths <- (left + right) * line + max(room / np, 0.5)
+  graphics::layout(matrix(seq_len(np), 1L), widths = widths)
+  graphics::par(cex = 0.9)
+  for (j in seq_len(np)) {
+    p <- panels[[j]]
+    k <- length(p$value)
+    y <- rev(seq_len(k))
+    graphics::par(mar = c(3, left[[j]], 2, right))
+    fin <- p$value[is.finite(p$value)]
+    xl <- if (isTRUE(p$log)) {
+      fin <- fin[fin > 0]
+      c(min(c(1, fin)), max(c(10, fin)) * 1.5)
+    } else if (isTRUE(p$pct)) {
+      c(0, 1)
+    } else {
+      c(0, max(c(fin, if (isTRUE(p$count)) 1 else 0.1)) * 1.15)
+    }
+    graphics::plot.new()
+    graphics::plot.window(xlim = xl, ylim = c(0.5, k + 0.5),
+                          log = if (isTRUE(p$log)) "x" else "")
+    at <- if (isTRUE(p$pct)) c(0, 0.5, 1) else graphics::axTicks(1)
+    if (isTRUE(p$count)) at <- at[at == round(at)]
+    graphics::abline(v = at, col = ink[["grid"]], lwd = 0.8)
+    graphics::abline(h = y, col = ink[["grid"]], lwd = 0.8, lty = 3)
+    if (!is.null(p$ref)) {
+      graphics::abline(v = p$ref, col = ink[["muted"]], lwd = 1, lty = 2)
+    }
+    .mm_xaxis(at = at, labels = if (isTRUE(p$pct)) .mm_pct(at) else
+      .mm_num(at))
+    if (!is.null(fit[[j]])) {
+      graphics::axis(2, at = y, labels = fit[[j]]$labels, las = 1, lwd = 0,
+                     col.axis = ink[["secondary"]], cex.axis = 0.85)
+    }
+    val <- p$value
+    inf <- is.infinite(val) & val > 0
+    val[inf] <- xl[2L]
+    graphics::points(val, y, pch = ifelse(p$flag, 24, 21),
+                     bg = pal[p$flag + 1L], col = ink[["surface"]],
+                     cex = 1.5, lwd = 1.5)
+    if (any(inf)) {
+      graphics::text(val[inf], y[inf], "Inf", pos = 2, cex = 0.75,
+                     col = ink[["secondary"]])
+    }
+    if (!any(is.finite(p$value) | inf)) {
+      mid <- if (isTRUE(p$log)) sqrt(prod(xl)) else mean(xl)
+      graphics::text(mid, (k + 1) / 2, "not assessed", cex = 0.8,
+                     col = ink[["muted"]])
+    }
+    graphics::title(main = p$title, col.main = ink[["primary"]],
+                    font.main = 1, cex.main = 0.95, adj = 0, line = 0.6)
+  }
+  n_flags <- length(x$flags)
+  sub <- if (n_flags == 0L) {
+    "No structural problems found."
+  } else {
+    sprintf("%d issue%s found. Triangles mark what was flagged.", n_flags,
+            if (n_flags == 1L) "" else "s")
+  }
+  graphics::mtext(.mm_arg(dots, "main", "Media diagnostics"), outer = TRUE,
+                  side = 3, line = 1.4, adj = 0, cex = 1,
+                  col = ink[["primary"]])
+  graphics::mtext(sub, outer = TRUE, side = 3, line = 0.3, adj = 0, cex = 0.8,
+                  col = ink[["secondary"]])
+  invisible(x)
+}

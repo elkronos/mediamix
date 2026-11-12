@@ -383,3 +383,28 @@ test_that("data frame plot methods take main, xlab, ylab and col", {
                            xlab = "Share"))
   expect_true(all(c("Rules", "Share") %in% drawn_text(calls)))
 })
+
+test_that("diagnose_media() results have a plot method", {
+  data(mm_weekly, envir = environment())
+  channels <- c("tv", "video", "search", "social", "display")
+  d <- diagnose_media(mm_weekly, media = channels, by = "geo")
+  expect_identical(with_device(plot(d)), d)
+
+  fake <- mm_weekly[mm_weekly$geo == "north", ]
+  fake$twin <- fake$tv * 1.02 + 5
+  fake$imp <- fake$tv * 40 * (1 + (seq_len(nrow(fake)) %% 5) / 50)
+  fake$imp[c(10, 50)] <- fake$imp[c(10, 50)] * 20
+  flagged <- diagnose_media(fake, media = c("tv", "twin", "search"),
+                            spend = "tv", impressions = "imp")
+  calls <- draw_calls(plot(flagged, main = "Before modelling"))
+  panels <- vapply(calls_to(calls, "title"), function(cl) cl$args$main, "")
+  expect_length(panels, 4L)
+  shapes <- unlist(lapply(calls_to(calls, "points"), function(cl) cl$args$pch))
+  expect_true(any(shapes == 24))
+  expect_true("Before modelling" %in% drawn_text(calls))
+  expect_true(all(c("tv", "twin", "search") %in% left_labels(calls)))
+
+  edited <- d
+  edited$collinearity <- edited$collinearity[, c("channel", "identified")]
+  expect_error(plot(edited), "vif", class = "rlang_error")
+})
