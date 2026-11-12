@@ -102,8 +102,10 @@
 #'
 #' **Non-converting journeys.** These are kept by default because Markov removal
 #' effects are computed *against* them: the transition matrix needs to know how
-#' often a path ends in nothing. Dropping them does not merely lose data, it
-#' biases every channel's estimated effect upward, and it does so silently.
+#' often a path ends in nothing. Without them the baseline conversion
+#' probability is 1, and every channel's removal effect moves, up or down
+#' depending on how the dropped journeys differed from the converting ones.
+#' [markov_removal()] warns when a table has none.
 #'
 #' **Direct, none and missing channels.** Every real log has them and every
 #' tutorial handles them differently. `"drop"` treats direct as non-marketing
@@ -531,28 +533,29 @@ build_paths <- function(events,
   )
 }
 
+# Printed with cat() so that the whole printout goes to standard output, where
+# print() belongs; cli's text functions write to the message stream.
 #' @export
 print.mm_paths <- function(x, ...) {
-  cli::cli_h3("{.cls mm_paths}")
+  plural <- function(n, word) paste0(n, " ", word, if (n == 1L) "" else "s")
+  cat("<mm_paths>\n")
   if (nrow(x) == 0L) {
-    cli::cli_text("No journeys.")
+    cat("No journeys.\n")
     return(invisible(x))
   }
   first <- !duplicated(x$path_id)
-  n_j <- sum(first)
   n_conv <- sum(first & x$converted)
-  cli::cli_text("{n_j} journey{?s} over {nrow(x)} touchpoint{?s} \\
-                 ({n_conv} converting)")
-  cli::cli_text("Mean journey length: {round(mean(x$touch_n[first]), 2)}")
+  cat(plural(sum(first), "journey"), " over ", plural(nrow(x), "touchpoint"),
+      " (", n_conv, " converting)\n", sep = "")
+  cat("Mean journey length: ", round(mean(x$touch_n[first]), 2), "\n", sep = "")
   cnt <- attr(x, "mm_counts")
   if (!is.null(cnt) && isTRUE(cnt$conversions_unattributable > 0L)) {
-    cli::cli_alert_warning(
-      "{cnt$conversions_unattributable} conversion{?s} lost every touchpoint \\
-       to filtering and cannot be attributed."
-    )
+    cat("! ", plural(cnt$conversions_unattributable, "conversion"),
+        " lost every touchpoint to filtering and cannot be attributed.\n",
+        sep = "")
   }
-  print(utils::head(as.data.frame(x), 6L))
-  if (nrow(x) > 6L) cli::cli_text("{.emph ... {nrow(x) - 6L} more row{?s}}")
+  print(utils::head(as.data.frame(x), 6L), ...)
+  if (nrow(x) > 6L) cat("# ... ", plural(nrow(x) - 6L, "more row"), "\n", sep = "")
   invisible(x)
 }
 

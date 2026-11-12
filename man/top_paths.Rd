@@ -13,7 +13,9 @@ top_paths(paths, n = 10, sep = " > ", converting_only = FALSE)
 every journey that followed that sequence, so the \code{journeys} column will
 normally sum to far more than \code{n}.}
 
-\item{sep}{Separator between channels in the rendered path string.}
+\item{sep}{Separator between channels in the rendered path string. A
+channel name that contains \code{sep} is an error, since two different channel
+sequences could then render as the same string.}
 
 \item{converting_only}{Restrict to converting journeys? Defaults to \code{FALSE},
 because the commonest non-converting journeys are usually the more
@@ -22,7 +24,8 @@ interesting half.}
 \value{
 A data frame with one row per distinct channel sequence: \code{path},
 \code{journeys} (how many journeys followed it), \code{conversions} and
-\code{conversion_rate}. Ordered by descending frequency, then alphabetically.
+\code{conversion_rate}. Ordered by descending frequency, then alphabetically
+in the C locale, so ties fall the same way on every platform.
 }
 \description{
 Most common journeys

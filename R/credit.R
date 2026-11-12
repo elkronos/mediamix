@@ -19,8 +19,10 @@
 #'   conversion, in the journey table's units -- see the `units` argument of
 #'   [build_paths()], which sets them. `fn` is called once per *converting*
 #'   journey and never for a non-converting one, so `recency` is always
-#'   present and the weights need no missing-value handling. Weights must be
-#'   finite and non-negative; returning all zeros declines the journey.
+#'   present and the weights need no missing-value handling. The three vectors
+#'   run in `touch_rank` order, whatever the order of the rows, and the weights
+#'   are matched back to the rows in that order. Weights must be finite and
+#'   non-negative; returning all zeros declines the journey.
 #' @param normalise For `credit_custom()`, should weights be rescaled to sum to
 #'   1 within each journey? Defaults to `TRUE`. Setting it to `FALSE` breaks the
 #'   guarantee that total credit equals total conversions, and is only sensible
@@ -53,7 +55,8 @@
 #' decay; time-decay attribution takes one conversion and spreads its credit
 #' backward across prior touchpoints with the same geometric kernel. Same
 #' arithmetic, opposite arrow, and the same `decay` vocabulary in both
-#' directions.
+#' directions. With `decay = 0` there is no carryover, and all the credit goes
+#' to the most recent touch, shared equally when several touches tie.
 #'
 #' @section Custom rules:
 #' `credit_custom()` takes a function of `(touch_rank, touch_n, recency)` and is
@@ -169,10 +172,12 @@ credit_time_decay <- function(paths, decay = decay_from_half_life(7),
     k <- length(rank)
     if (anyNA(recency)) return(rep(1 / k, k))
     if (decay == 0) {
-      # No carryover at all: everything goes to the touch at the moment of
-      # conversion. `0^0` is 1 and `0^positive` is 0, which is exactly this.
-      w <- as.numeric(recency <= 0)
-      return(if (sum(w) > 0) w / sum(w) else c(rep(0, k - 1L), 1))
+      # No carryover at all: everything goes to the most recent touch, which
+      # is the touch at the moment of conversion unless filtering removed it.
+      # Comparing with the minimum rather than with zero keeps the answer
+      # independent of row order when no touch has zero recency.
+      w <- as.numeric(recency == min(recency))
+      return(w / sum(w))
     }
     # Normalise in log space. Evaluating decay^(recency/period) directly
     # underflows to all-zero once recency/period passes a few hundred -- which
@@ -199,7 +204,7 @@ credit_custom <- function(paths, fn, normalise = TRUE) {
 #' @keywords internal
 #' @noRd
 .mm_assign_credit <- function(paths, fn, normalise = TRUE,
-                              user_supplied = FALSE, call = parent.frame(2)) {
+                              user_supplied = FALSE, call = parent.frame()) {
   if (nrow(paths) == 0L) {
     paths$credit <- numeric(0)
     paths$credit_value <- numeric(0)
@@ -208,7 +213,11 @@ credit_custom <- function(paths, fn, normalise = TRUE) {
 
   cred <- numeric(nrow(paths))
   declined <- 0L
-  idx <- split(seq_len(nrow(paths)), paths$path_id)
+  # Row indices of each journey in touch_rank order, so that every rule sees
+  # a journey's touches first to last whatever the order of the rows.
+  o <- order(paths$path_id, paths$touch_rank, method = "radix")
+  pid <- paths$path_id[o]
+  idx <- split(o, factor(pid, levels = unique(pid)))
   rank <- paths$touch_rank
   n <- paths$touch_n
   rec <- paths$time_to_conversion

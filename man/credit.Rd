@@ -42,8 +42,10 @@ same length as its inputs. \code{recency} is time from each touch to the
 conversion, in the journey table's units -- see the \code{units} argument of
 \code{\link[=build_paths]{build_paths()}}, which sets them. \code{fn} is called once per \emph{converting}
 journey and never for a non-converting one, so \code{recency} is always
-present and the weights need no missing-value handling. Weights must be
-finite and non-negative; returning all zeros declines the journey.}
+present and the weights need no missing-value handling. The three vectors
+run in \code{touch_rank} order, whatever the order of the rows, and the weights
+are matched back to the rows in that order. Weights must be finite and
+non-negative; returning all zeros declines the journey.}
 
 \item{normalise}{For \code{credit_custom()}, should weights be rescaled to sum to
 1 within each journey? Defaults to \code{TRUE}. Setting it to \code{FALSE} breaks the
@@ -83,7 +85,8 @@ one impulse of spend and spreads its effect forward in time with geometric
 decay; time-decay attribution takes one conversion and spreads its credit
 backward across prior touchpoints with the same geometric kernel. Same
 arithmetic, opposite arrow, and the same \code{decay} vocabulary in both
-directions.
+directions. With \code{decay = 0} there is no carryover, and all the credit goes
+to the most recent touch, shared equally when several touches tie.
 }
 \section{Custom rules}{
 

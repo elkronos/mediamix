@@ -22,7 +22,13 @@
 #' The probabilities come from the absorbing-chain fundamental matrix, so they
 #' are exact for the fitted transition matrix rather than simulated: with
 #' \eqn{Q} the transitions among transient states and \eqn{R} those into the
-#' absorbing states, absorption probabilities are \eqn{(I - Q)^{-1} R}.
+#' absorbing states, absorption probabilities are \eqn{(I - Q)^{-1} R}. One
+#' inverse serves every channel. Once channel \eqn{s} is removed, a walk
+#' converts only if it converts without reaching \eqn{s}, so with
+#' \eqn{N = (I - Q)^{-1}} and \eqn{x = N R} the conversion probability is
+#' \eqn{x_1 - (N_{1s} / N_{ss}) x_s}, where \eqn{N_{1s} / N_{ss}} is the
+#' probability of ever reaching \eqn{s} from the start and \eqn{x_s} that of
+#' converting from \eqn{s}.
 #'
 #' This is the order-1 model, with no dependency beyond base R. For
 #' higher-order chains, or journey tables with millions of distinct paths,
@@ -79,9 +85,9 @@ markov_removal <- function(paths) {
                       stringsAsFactors = FALSE)
   if (nrow(paths) == 0L) return(empty)
 
-  p <- paths[order(paths$path_id, paths$touch_rank), , drop = FALSE]
-  p <- as.data.frame(p)
-  chans <- sort(unique(p$channel))
+  p <- as.data.frame(paths)
+  p <- p[order(p$path_id, p$touch_rank, method = "radix"), , drop = FALSE]
+  chans <- sort(unique(p$channel), method = "radix")
   k <- length(chans)
   # State indices: 1 = start, 2..k+1 = channels, k+2 = conversion, k+3 = null.
   conv_s <- k + 2L
@@ -103,8 +109,9 @@ markov_removal <- function(paths) {
   if (n_null == 0L) {
     cli::cli_warn(c(
       "The journey table has no non-converting journeys.",
-      i = "Without them the null state is never observed, and every removal \\
-           effect is overstated.",
+      i = "Without them the null state is never observed, so the baseline \\
+           conversion probability is 1 and each removal effect moves up or \\
+           down, depending on how the missing journeys differ.",
       i = "Build the paths with {.code keep_null_paths = TRUE}."
     ))
   }
@@ -115,29 +122,21 @@ markov_removal <- function(paths) {
     return(out)
   }
 
-  p_conv <- function(removed = NULL) {
-    cm <- counts
-    if (!is.null(removed)) {
-      # Everything that would have entered the removed state is lost.
-      cm[, null_s] <- cm[, null_s] + cm[, removed]
-      cm[, removed] <- 0
-      cm[removed, ] <- 0
-    }
-    rs <- rowSums(cm)
-    live <- which(rs[seq_len(k + 1L)] > 0)
-    if (!1L %in% live) return(0)
-    P <- cm[live, , drop = FALSE] / rs[live]
-    Q <- P[, live, drop = FALSE]
-    R <- P[, conv_s]
-    b <- solve(diag(length(live)) - Q, R)
-    unname(b[match(1L, live)])
-  }
-
-  base <- p_conv()
-  re <- vapply(seq_len(k) + 1L, function(s) {
-    if (base <= 0) return(0)
-    max(0, 1 - p_conv(s) / base)
-  }, numeric(1))
+  # The start and every channel state have at least one outgoing transition,
+  # since each channel in the table was followed by a touch, a conversion or
+  # nothing; so every transient row of the count matrix is non-empty.
+  tr <- seq_len(k + 1L)
+  P <- counts[tr, , drop = FALSE] / rowSums(counts)[tr]
+  N <- solve(diag(k + 1L) - P[, tr, drop = FALSE])
+  x <- drop(N %*% P[, conv_s])
+  base <- x[1L]
+  # Removing channel s sends every transition into it to null, so the start
+  # loses exactly the conversions that pass through s: the probability of
+  # ever reaching s, N[1, s] / N[s, s], times the chance of converting from
+  # there, x[s].
+  s <- tr[-1L]
+  p_removed <- base - N[1L, s] / N[cbind(s, s)] * x[s]
+  re <- if (base > 0) pmax(0, 1 - p_removed / base) else rep(0, k)
   share <- if (sum(re) > 0) re / sum(re) else rep(0, k)
   out <- data.frame(channel = chans, removal_effect = re,
                     conversions = n_conv * share, share = share,
@@ -146,7 +145,8 @@ markov_removal <- function(paths) {
     v <- p$conversion_value[first & p$converted]
     out$value <- sum(v[!is.na(v)]) * share
   }
-  out <- out[order(-out$conversions, out$channel), , drop = FALSE]
+  out <- out[order(-out$conversions, out$channel, method = "radix"), ,
+             drop = FALSE]
   rownames(out) <- NULL
   attr(out, "p_conversion") <- base
   out

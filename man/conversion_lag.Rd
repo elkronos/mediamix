@@ -9,12 +9,16 @@ conversion_lag(paths, probs = c(0.5, 0.75, 0.9, 0.95, 0.99, 1))
 \arguments{
 \item{paths}{An \code{mm_paths} object from \code{\link[=build_paths]{build_paths()}}.}
 
-\item{probs}{Quantiles to report.}
+\item{probs}{Quantiles to report: probabilities in \verb{[0, 1]}.}
 }
 \value{
 A data frame with columns \code{quantile} and \code{lag}, in the journey
 table's time units, plus an attribute \code{units} naming them. Only converting
 journeys contribute.
+
+Run it on journeys built without \code{lookback}. A lookback removes every
+touch older than the window, so no lag can exceed it, and a warning says
+so.
 }
 \description{
 How long journeys take, measured from first touch to conversion. This is how

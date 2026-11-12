@@ -9,13 +9,18 @@ as_channel_paths(paths, sep = " > ")
 \arguments{
 \item{paths}{An \code{mm_paths} object from \code{\link[=build_paths]{build_paths()}}.}
 
-\item{sep}{Separator between channels. \code{" > "} is
-\pkg{ChannelAttribution}'s default.}
+\item{sep}{Separator between channels, \code{" > "} by default. A channel name
+that contains \code{sep} is an error, since its path strings could not be
+split back into channels. \pkg{ChannelAttribution}'s \code{markov_model()} has
+a \code{sep} argument of its own; give both the same value, as the example
+does.}
 }
 \value{
 A data frame with columns \code{path}, \code{total_conversions},
 \code{total_null} and, when the journey table carries values,
-\code{total_conversion_value}. One row per distinct channel sequence.
+\code{total_conversion_value}. One row per distinct channel sequence, ordered
+by descending conversions, then descending null journeys, then path in
+the C locale.
 }
 \description{
 Collapses an \code{mm_paths} object into the aggregated \code{"a > b > c"} table that
@@ -25,10 +30,12 @@ Neither needs to do the other's job.
 }
 \details{
 The \code{total_null} column is why \code{\link[=build_paths]{build_paths()}} keeps non-converting journeys
-by default. Markov removal effects are computed by comparing the probability
-of reaching conversion against the probability of reaching the null state, so
-a transition matrix built without null paths has no absorbing failure state
-and overstates every channel's effect.
+by default. Markov removal effects compare the probability of reaching
+conversion with the probability of reaching the null state. Without null
+paths the transition matrix has no absorbing failure state, the baseline
+conversion probability is 1, and each channel's removal effect moves up or
+down depending on how the missing non-converting journeys differ from the
+converting ones.
 }
 \examples{
 data(mm_events)
@@ -39,11 +46,13 @@ paths <- build_paths(mm_events, id = "customer_id", channel = "channel",
 ca <- as_channel_paths(paths)
 head(ca)
 
-# Hand off to ChannelAttribution, if it is installed
+# Hand off to ChannelAttribution, if it is installed, with the same
+# separator on both sides
 if (requireNamespace("ChannelAttribution", quietly = TRUE)) {
+  ca_in <- as_channel_paths(paths, sep = ">")
   ChannelAttribution::markov_model(
-    ca, var_path = "path",
-    var_conv = "total_conversions", var_null = "total_null"
+    ca_in, var_path = "path",
+    var_conv = "total_conversions", var_null = "total_null", sep = ">"
   )
 }
 }

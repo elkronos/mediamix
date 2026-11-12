@@ -31,7 +31,13 @@ are then divided among channels in proportion to their removal effects.
 The probabilities come from the absorbing-chain fundamental matrix, so they
 are exact for the fitted transition matrix rather than simulated: with
 \eqn{Q} the transitions among transient states and \eqn{R} those into the
-absorbing states, absorption probabilities are \eqn{(I - Q)^{-1} R}.
+absorbing states, absorption probabilities are \eqn{(I - Q)^{-1} R}. One
+inverse serves every channel. Once channel \eqn{s} is removed, a walk
+converts only if it converts without reaching \eqn{s}, so with
+\eqn{N = (I - Q)^{-1}} and \eqn{x = N R} the conversion probability is
+\eqn{x_1 - (N_{1s} / N_{ss}) x_s}, where \eqn{N_{1s} / N_{ss}} is the
+probability of ever reaching \eqn{s} from the start and \eqn{x_s} that of
+converting from \eqn{s}.
 
 This is the order-1 model, with no dependency beyond base R. For
 higher-order chains, or journey tables with millions of distinct paths,

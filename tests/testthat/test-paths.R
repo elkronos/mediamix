@@ -653,3 +653,18 @@ test_that("print.mm_paths runs without error on populated and empty paths", {
                         timestamp = "timestamp", conversion = "conversion")
   expect_no_error(capture.output(print(empty)))
 })
+
+test_that("print.mm_paths writes to standard output and passes ... on", {
+  ev <- data.frame(id = "a", ch = c("x", "y"), ts = c(1, 2), conv = c(0, 1),
+                   val = c(NA, 12.3456))
+  p <- build_paths(ev, id = "id", channel = "ch", timestamp = "ts",
+                   conversion = "conv", value = "val")
+  expect_no_message(out <- capture.output(print(p)))
+  expect_identical(out[1L], "<mm_paths>")
+  expect_match(out[2L], "1 journey over 2 touchpoints \\(1 converting\\)")
+  expect_true(any(grepl("12.3456", out, fixed = TRUE)))
+  short <- capture.output(print(p, digits = 3))
+  expect_false(any(grepl("12.3456", short, fixed = TRUE)))
+  expect_true(any(grepl("12.3", short, fixed = TRUE)))
+  expect_identical(capture.output(print(p[0, ]))[2L], "No journeys.")
+})

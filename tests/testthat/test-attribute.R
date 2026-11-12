@@ -60,6 +60,103 @@ test_that("attribute() works on a hand-made journey table with a known answer", 
   expect_equal(res$share, c(0.5, 0.5))
 })
 
+test_that("a rule named twice is run once, so mean_share is not skewed", {
+  ev <- data.frame(cust = c("a", "a", "b"), ch = c("X", "Y", "Z"),
+                   ts = as.POSIXct("2024-01-01", tz = "UTC") + c(0, 1, 0) * 86400,
+                   conv = c(0, 1, 1))
+  p <- build_paths(ev, id = "cust", channel = "ch", timestamp = "ts",
+                   conversion = "conv")
+  twice <- attribute(p, rules = c("first", "first", "last"))
+  once <- attribute(p, rules = c("first", "last"))
+  expect_identical(nrow(twice), nrow(once))
+  expect_equal(attribution_spread(twice), attribution_spread(once))
+})
+
+test_that("ties between channels are ordered the same way in every locale", {
+  ev <- data.frame(cust = c("a", "b", "c"), ch = c("b", "B", "a"),
+                   ts = as.POSIXct("2024-01-01", tz = "UTC"), conv = 1)
+  p <- build_paths(ev, id = "cust", channel = "ch", timestamp = "ts",
+                   conversion = "conv")
+  # Under an English collation sort() puts "a" first; the C order puts
+  # capitals first. The result must not depend on the session's locale.
+  old <- Sys.getlocale("LC_COLLATE")
+  suppressWarnings(Sys.setlocale("LC_COLLATE", "en_US.UTF-8"))
+  res <- tryCatch(
+    list(attr = suppressWarnings(attribute(p, rules = c("linear", "markov"))),
+         pos = channel_positions(p),
+         top = top_paths(p)),
+    finally = Sys.setlocale("LC_COLLATE", old)
+  )
+  expect_identical(res$attr$channel, c("B", "a", "b", "B", "a", "b"))
+  expect_identical(res$pos$channel, c("B", "a", "b"))
+  expect_identical(res$top$path, c("B", "a", "b"))
+})
+
+test_that("markov_removal() matches one linear solve per removed channel", {
+  # The per-channel solve that one factorisation replaces.
+  reference <- function(paths) {
+    p <- as.data.frame(paths)
+    p <- p[order(p$path_id, p$touch_rank), ]
+    chans <- sort(unique(p$channel), method = "radix")
+    k <- length(chans)
+    code <- match(p$channel, chans) + 1L
+    first <- !duplicated(p$path_id)
+    last <- !duplicated(p$path_id, fromLast = TRUE)
+    from <- c(rep(1L, sum(first)), code[!last], code[last])
+    to <- c(code[first], code[-1L][!last[-length(last)]],
+            ifelse(p$converted[last], k + 2L, k + 3L))
+    counts <- matrix(0, k + 3L, k + 3L)
+    for (r in seq_along(from)) {
+      counts[from[r], to[r]] <- counts[from[r], to[r]] + 1
+    }
+    p_conv <- function(removed = NULL) {
+      cm <- counts
+      if (!is.null(removed)) {
+        cm[, k + 3L] <- cm[, k + 3L] + cm[, removed]
+        cm[, removed] <- 0
+        cm[removed, ] <- 0
+      }
+      rs <- rowSums(cm)
+      live <- which(rs[seq_len(k + 1L)] > 0)
+      P <- cm[live, , drop = FALSE] / rs[live]
+      b <- solve(diag(length(live)) - P[, live, drop = FALSE], P[, k + 2L])
+      b[match(1L, live)]
+    }
+    base <- p_conv()
+    stats::setNames(vapply(seq_len(k) + 1L, function(s) {
+      max(0, 1 - p_conv(s) / base)
+    }, numeric(1)), chans)
+  }
+  set.seed(3)
+  ev <- data.frame(id = sample(sprintf("c%02d", 1:40), 300, replace = TRUE),
+                   ch = sample(c("a", "b", "c", "d", "e"), 300, replace = TRUE),
+                   ts = runif(300, 0, 50))
+  ev$conv <- as.numeric(runif(300) < 0.1)
+  p <- build_paths(ev, id = "id", channel = "ch", timestamp = "ts",
+                   conversion = "conv", collapse_repeats = FALSE)
+  mk <- markov_removal(p)
+  ref <- reference(p)
+  expect_equal(mk$removal_effect, unname(ref[mk$channel]), tolerance = 1e-10)
+
+  data(mm_events)
+  paths <- build_paths(mm_events, id = "customer_id", channel = "channel",
+                       timestamp = "timestamp", conversion = "conversion")
+  mk <- markov_removal(paths)
+  ref <- reference(paths)
+  expect_equal(mk$removal_effect, unname(ref[mk$channel]), tolerance = 1e-10)
+})
+
+test_that("the warning for a table without null paths does not claim a direction", {
+  ev <- data.frame(id = c("j1", "j1", "j2"), ch = c("a", "b", "b"),
+                   ts = c(1, 2, 1), conv = c(0, 1, 1))
+  p <- build_paths(ev, id = "id", channel = "ch", timestamp = "ts",
+                   conversion = "conv")
+  w <- tryCatch(markov_removal(p), warning = function(w) conditionMessage(w))
+  expect_match(w, "no non-converting")
+  expect_match(w, "up or")
+  expect_no_match(w, "overstated")
+})
+
 test_that("attribution_spread() summarises attribute() output correctly", {
   data(mm_events)
   paths <- build_paths(mm_events, id = "customer_id", channel = "channel",

@@ -145,8 +145,10 @@ non-converting one, from the last touch.
 
 \strong{Non-converting journeys.} These are kept by default because Markov removal
 effects are computed \emph{against} them: the transition matrix needs to know how
-often a path ends in nothing. Dropping them does not merely lose data, it
-biases every channel's estimated effect upward, and it does so silently.
+often a path ends in nothing. Without them the baseline conversion
+probability is 1, and every channel's removal effect moves, up or down
+depending on how the dropped journeys differed from the converting ones.
+\code{\link[=markov_removal]{markov_removal()}} warns when a table has none.
 
 \strong{Direct, none and missing channels.} Every real log has them and every
 tutorial handles them differently. \code{"drop"} treats direct as non-marketing

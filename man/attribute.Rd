@@ -19,7 +19,8 @@ attribute(
 \item{rules}{Character vector of rules to apply: any of \code{"linear"},
 \code{"first"}, \code{"last"}, \code{"position"}, \code{"time_decay"} and \code{"markov"}. The
 first five are heuristic conventions; \code{"markov"} is the data-driven
-removal-effect model of \code{\link[=markov_removal]{markov_removal()}}. All six are run by default.}
+removal-effect model of \code{\link[=markov_removal]{markov_removal()}}. All six are run by default. A
+rule named twice is run once.}
 
 \item{first_weight, last_weight}{Passed to \code{\link[=credit_position]{credit_position()}}.}
 
@@ -38,7 +39,8 @@ table carries values.}
 \item{\code{touches}}{Number of touchpoints on the channel across all
 journeys, converting or not.}
 }
-Rows are ordered by rule, then by descending conversions.
+Rows are ordered by rule, then by descending conversions, with ties in
+channel order (C locale, so the same on every platform).
 }
 \description{
 Runs a set of credit rules over the same journey table and returns their

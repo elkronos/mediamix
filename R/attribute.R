@@ -10,7 +10,8 @@
 #' @param rules Character vector of rules to apply: any of `"linear"`,
 #'   `"first"`, `"last"`, `"position"`, `"time_decay"` and `"markov"`. The
 #'   first five are heuristic conventions; `"markov"` is the data-driven
-#'   removal-effect model of [markov_removal()]. All six are run by default.
+#'   removal-effect model of [markov_removal()]. All six are run by default. A
+#'   rule named twice is run once.
 #' @param first_weight,last_weight Passed to [credit_position()].
 #' @param decay,period Passed to [credit_time_decay()].
 #'
@@ -26,7 +27,8 @@
 #'     \item{`touches`}{Number of touchpoints on the channel across all
 #'       journeys, converting or not.}
 #'   }
-#'   Rows are ordered by rule, then by descending conversions.
+#'   Rows are ordered by rule, then by descending conversions, with ties in
+#'   channel order (C locale, so the same on every platform).
 #'
 #' @seealso [credit_linear()] and friends, [markov_removal()],
 #'   [attribution_spread()]
@@ -52,8 +54,11 @@ attribute <- function(paths,
                       first_weight = 0.4, last_weight = 0.4,
                       decay = decay_from_half_life(7), period = 1) {
   paths <- .mm_check_paths(paths)
-  rules <- match.arg(rules, c("linear", "first", "last", "position",
-                              "time_decay", "markov"), several.ok = TRUE)
+  # A rule named twice would be counted twice by attribution_spread()'s
+  # mean_share.
+  rules <- unique(match.arg(rules, c("linear", "first", "last", "position",
+                                     "time_decay", "markov"),
+                            several.ok = TRUE))
 
   if (nrow(paths) == 0L) {
     return(data.frame(rule = character(0), channel = character(0),
@@ -73,7 +78,8 @@ attribute <- function(paths,
       if (has_value) agg$value <- if (is.null(mk$value)) 0 else mk$value
       agg$touches <- as.integer(touch_tab[match(agg$channel, touch_lab)])
       agg$rule <- r
-      return(agg[order(-agg$conversions), , drop = FALSE])
+      return(agg[order(-agg$conversions, agg$channel, method = "radix"), ,
+                 drop = FALSE])
     }
     scored <- switch(
       r,
@@ -94,7 +100,7 @@ attribute <- function(paths,
     }
     agg$touches <- as.integer(touch_tab[match(agg$channel, touch_lab)])
     agg$rule <- r
-    agg[order(-agg$conversions), , drop = FALSE]
+    agg[order(-agg$conversions, agg$channel, method = "radix"), , drop = FALSE]
   })
 
   res <- do.call(rbind, out)
