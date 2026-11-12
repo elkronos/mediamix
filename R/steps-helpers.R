@@ -58,7 +58,7 @@
 step_adstock_channels <- function(recipe, channels, ...) {
   .mm_require_recipes()
   here <- environment()
-  .mm_check_channels(channels)
+  .mm_check_step_channels(channels)
   args <- list(...)
   .mm_check_channel_args(args)
 
@@ -95,7 +95,7 @@ step_adstock_channels <- function(recipe, channels, ...) {
 
 #' @keywords internal
 #' @noRd
-.mm_check_channels <- function(channels, call = parent.frame()) {
+.mm_check_step_channels <- function(channels, call = parent.frame()) {
   if (!is.character(channels) || length(channels) == 0L) {
     cli::cli_abort(
       "{.arg channels} must be a character vector of column names, not \\
