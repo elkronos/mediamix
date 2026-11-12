@@ -4,8 +4,9 @@
 #' best predicts a held-out key performance indicator, using forward-only
 #' resampling and a model you supply.
 #'
-#' @param x Numeric vector of media spend in time order. It must be finite and
-#'   must vary: a constant series carries no information about carryover.
+#' @param x Numeric vector of media spend, in time order unless `index` is
+#'   given. It must be finite and must vary: a constant series carries no
+#'   information about carryover.
 #' @param y Numeric vector of the KPI, the same length as `x`.
 #' @param fit_fn A function of `(x_adstocked, y)` returning a fitted model.
 #'   Defaults to [fit_ols()]. When `controls` are supplied it receives a data

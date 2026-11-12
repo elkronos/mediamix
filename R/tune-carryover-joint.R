@@ -7,17 +7,16 @@
 #' absorbed.
 #'
 #' @param media A data frame (or matrix with column names) of raw media, one
-#'   column per channel, rows in time order. Every column must be finite and
-#'   must vary.
+#'   column per channel, rows in time order unless `index` is given. Every
+#'   column must be finite and must vary.
 #' @param y Numeric vector of the KPI, one value per row of `media`.
 #' @param controls Optional data frame of control variables, such as trend,
 #'   price, seasonality and holidays, entered into the model untransformed.
-#'   Character,
-#'   factor and logical columns are expanded to treatment dummies by
-#'   [stats::model.matrix()] and every name is made syntactic. A column with a
-#'   single value is dropped with a message, and missing or non-finite values
-#'   are an error that names the column and rows. No control may share a name
-#'   with a channel.
+#'   Character, factor and logical columns are expanded to treatment dummies
+#'   by [stats::model.matrix()] and every name is made syntactic. A column
+#'   with a single value is dropped with a message, and missing or non-finite
+#'   values are an error that names the column and rows. No control may share
+#'   a name with a channel.
 #' @param fit_fn,predict_fn Optional model. `fit_fn(X, y)` receives a data frame
 #'   of the adstocked media followed by the controls; `predict_fn(model, X)`
 #'   returns predictions for new rows of the same shape. Both `NULL` (the

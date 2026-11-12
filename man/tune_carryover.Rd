@@ -28,8 +28,9 @@ tune_carryover(
 )
 }
 \arguments{
-\item{x}{Numeric vector of media spend in time order. It must be finite and
-must vary: a constant series carries no information about carryover.}
+\item{x}{Numeric vector of media spend, in time order unless \code{index} is
+given. It must be finite and must vary: a constant series carries no
+information about carryover.}
 
 \item{y}{Numeric vector of the KPI, the same length as \code{x}.}
 

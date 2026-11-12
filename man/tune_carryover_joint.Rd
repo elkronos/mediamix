@@ -31,19 +31,18 @@ tune_carryover_joint(
 }
 \arguments{
 \item{media}{A data frame (or matrix with column names) of raw media, one
-column per channel, rows in time order. Every column must be finite and
-must vary.}
+column per channel, rows in time order unless \code{index} is given. Every
+column must be finite and must vary.}
 
 \item{y}{Numeric vector of the KPI, one value per row of \code{media}.}
 
 \item{controls}{Optional data frame of control variables, such as trend,
 price, seasonality and holidays, entered into the model untransformed.
-Character,
-factor and logical columns are expanded to treatment dummies by
-\code{\link[stats:model.matrix]{stats::model.matrix()}} and every name is made syntactic. A column with a
-single value is dropped with a message, and missing or non-finite values
-are an error that names the column and rows. No control may share a name
-with a channel.}
+Character, factor and logical columns are expanded to treatment dummies
+by \code{\link[stats:model.matrix]{stats::model.matrix()}} and every name is made syntactic. A column
+with a single value is dropped with a message, and missing or non-finite
+values are an error that names the column and rows. No control may share
+a name with a channel.}
 
 \item{fit_fn, predict_fn}{Optional model. \code{fit_fn(X, y)} receives a data frame
 of the adstocked media followed by the controls; \code{predict_fn(model, X)}
