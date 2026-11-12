@@ -22,31 +22,33 @@ saturate(x, type = c("hill", "exponential", "michaelis_menten", "power"), ...)
 \arguments{
 \item{x}{Numeric vector of media, normally already adstocked. Values must be
 non-negative: all four curves are defined for spend, not for arbitrary
-reals.}
+reals. Missing values stay missing.}
 
 \item{half_max}{The value of \code{x} at which the response reaches half its
-ceiling. Interpretable in the units of \code{x}, which is why it is used here in
-preference to the equivalent unnamed scale parameter.}
+ceiling, positive. Interpretable in the units of \code{x}, which is why it is
+used here in preference to the equivalent unnamed scale parameter.}
 
-\item{shape}{Hill exponent, positive. \code{shape = 1} gives a concave curve with
-diminishing returns everywhere. \code{shape > 1} gives an S-shape with an
-initial convex region, the usual representation of a threshold effect.}
+\item{shape}{Hill exponent, positive. \code{shape = 1}, the default, gives a
+concave curve with diminishing returns everywhere, as does any smaller
+value. \code{shape > 1} gives an S-shape with an initial convex region, the
+usual representation of a threshold effect.}
 
-\item{rate}{Exponential rate parameter, positive. Larger values saturate
-sooner.}
+\item{rate}{Exponential rate parameter, positive, per unit of \code{x}. Larger
+values saturate sooner.}
 
 \item{vmax}{Michaelis--Menten asymptote: the response as \code{x} grows without
-bound.}
+bound. Positive; defaults to 1.}
 
 \item{km}{Michaelis--Menten constant: the value of \code{x} at which the response
-reaches half of \code{vmax}. Required. It comes after \code{vmax} in the argument
-list, so \code{saturate_michaelis_menten(x, 100)} sets \code{vmax}; name it, as in
-\code{km = 100}.}
+reaches half of \code{vmax}. Required and positive. It comes after \code{vmax} in
+the argument list, so \code{saturate_michaelis_menten(x, 100)} sets \code{vmax};
+name it, as in \code{km = 100}.}
 
 \item{exponent}{Power exponent in \verb{(0, 1]}. \code{exponent = 1} is the identity
 (no saturation); smaller values bend the curve harder.}
 
-\item{type}{Which curve \code{\link[=saturate]{saturate()}} should dispatch to.}
+\item{type}{Which curve \code{\link[=saturate]{saturate()}} should dispatch to: \code{"hill"} (the
+default), \code{"exponential"}, \code{"michaelis_menten"} or \code{"power"}.}
 
 \item{...}{Passed to the individual curve function.}
 }
@@ -116,5 +118,6 @@ of haemoglobin on its dissociation curves. \emph{The Journal of Physiology},
 40(Suppl), iv--vii.
 }
 \seealso{
-\code{\link[=media_transform]{media_transform()}}, \code{\link[=response_curve]{response_curve()}}
+\code{\link[=media_transform]{media_transform()}}, \code{\link[=response_curve]{response_curve()}}, and \code{\link[=step_saturation]{step_saturation()}}
+for a \pkg{recipes} pipeline.
 }

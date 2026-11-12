@@ -6,24 +6,26 @@
 #'
 #' @param x Numeric vector of media, normally already adstocked. Values must be
 #'   non-negative: all four curves are defined for spend, not for arbitrary
-#'   reals.
+#'   reals. Missing values stay missing.
 #' @param half_max The value of `x` at which the response reaches half its
-#'   ceiling. Interpretable in the units of `x`, which is why it is used here in
-#'   preference to the equivalent unnamed scale parameter.
-#' @param shape Hill exponent, positive. `shape = 1` gives a concave curve with
-#'   diminishing returns everywhere. `shape > 1` gives an S-shape with an
-#'   initial convex region, the usual representation of a threshold effect.
-#' @param rate Exponential rate parameter, positive. Larger values saturate
-#'   sooner.
+#'   ceiling, positive. Interpretable in the units of `x`, which is why it is
+#'   used here in preference to the equivalent unnamed scale parameter.
+#' @param shape Hill exponent, positive. `shape = 1`, the default, gives a
+#'   concave curve with diminishing returns everywhere, as does any smaller
+#'   value. `shape > 1` gives an S-shape with an initial convex region, the
+#'   usual representation of a threshold effect.
+#' @param rate Exponential rate parameter, positive, per unit of `x`. Larger
+#'   values saturate sooner.
 #' @param vmax Michaelis--Menten asymptote: the response as `x` grows without
-#'   bound.
+#'   bound. Positive; defaults to 1.
 #' @param km Michaelis--Menten constant: the value of `x` at which the response
-#'   reaches half of `vmax`. Required. It comes after `vmax` in the argument
-#'   list, so `saturate_michaelis_menten(x, 100)` sets `vmax`; name it, as in
-#'   `km = 100`.
+#'   reaches half of `vmax`. Required and positive. It comes after `vmax` in
+#'   the argument list, so `saturate_michaelis_menten(x, 100)` sets `vmax`;
+#'   name it, as in `km = 100`.
 #' @param exponent Power exponent in `(0, 1]`. `exponent = 1` is the identity
 #'   (no saturation); smaller values bend the curve harder.
-#' @param type Which curve [saturate()] should dispatch to.
+#' @param type Which curve [saturate()] should dispatch to: `"hill"` (the
+#'   default), `"exponential"`, `"michaelis_menten"` or `"power"`.
 #' @param ... Passed to the individual curve function.
 #'
 #' @return A numeric vector the same length as `x`, in the same order, with the
@@ -59,7 +61,8 @@
 #' of haemoglobin on its dissociation curves. *The Journal of Physiology*,
 #' 40(Suppl), iv--vii.
 #'
-#' @seealso [media_transform()], [response_curve()]
+#' @seealso [media_transform()], [response_curve()], and [step_saturation()]
+#'   for a \pkg{recipes} pipeline.
 #'
 #' @examples
 #' spend <- c(0, 25, 50, 100, 200, 400)
