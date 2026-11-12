@@ -87,6 +87,10 @@
 #' `normalise = FALSE`, saturating first would also let carryover accumulate
 #' the capped values past the ceiling. See [media_transform()].
 #'
+#' When `step_adstock()` keeps the raw spend (`keep_original_cols = TRUE`), the
+#' adstocked values are in its new columns, so select those here, for example
+#' with `starts_with("adstock_")`.
+#'
 #' @section Tidying:
 #' `tidy()` returns a tibble with one row per selected column, or per column
 #' and group with `by`, and the columns `terms`, `group` (only with `by`),

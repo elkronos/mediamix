@@ -128,6 +128,10 @@ exposure rather than on each period's spend alone. With the default
 normalised kernel the result stays below the ceiling in either order; with
 \code{normalise = FALSE}, saturating first would also let carryover accumulate
 the capped values past the ceiling. See \code{\link[=media_transform]{media_transform()}}.
+
+When \code{step_adstock()} keeps the raw spend (\code{keep_original_cols = TRUE}), the
+adstocked values are in its new columns, so select those here, for example
+with \code{starts_with("adstock_")}.
 }
 
 \section{Tidying}{

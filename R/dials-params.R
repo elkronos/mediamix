@@ -28,6 +28,17 @@
 #' budget: the truncation point is usually a modelling decision rather than
 #' something the data speaks to.
 #'
+#' `carryover_shape()` and `carryover_scale()` are the shape and scale of
+#' [step_adstock()]'s Weibull kernel, spanning `[0.5, 5]` and `[0.5, 10]`
+#' periods. Over those ranges the kernel keeps some weight at its first lag in
+#' both forms and at every `max_lag`, so no candidate is rejected as a kernel
+#' that is zero everywhere. `carryover_peak()` is the delayed kernel's peak
+#' lag, from 0 to 4 periods. A peak must not pass `max_lag - 1`, so
+#' [step_adstock()] stops this range there when `max_lag` is fixed, and starts
+#' a tuned `max_lag` above the largest peak. For the delayed kernel it also
+#' narrows `carryover_decay()` to `[0.05, 0.95]`, since that kernel needs a
+#' positive retention rate.
+#'
 #' `saturation_half_max()` is a fraction of each column's reference level, so
 #' its range is unitless and comparable across channels. See
 #' [step_saturation()].
@@ -49,6 +60,9 @@
 #'
 #' saturation_shape()
 #' dials::grid_regular(carryover_decay(), saturation_shape(), levels = 3)
+#'
+#' # The Weibull kernel's two parameters
+#' dials::grid_regular(carryover_shape(), carryover_scale(), levels = 3)
 #' @name mediamix_params
 NULL
 
@@ -69,6 +83,36 @@ carryover_max_lag <- function(range = c(1L, 26L), trans = NULL) {
   dials::new_quant_param(
     type = "integer", range = range, inclusive = c(TRUE, TRUE), trans = trans,
     label = c(max_lag = "Maximum Carryover Lag"), finalize = NULL
+  )
+}
+
+#' @rdname mediamix_params
+#' @export
+carryover_shape <- function(range = c(0.5, 5), trans = NULL) {
+  .mm_require_dials()
+  dials::new_quant_param(
+    type = "double", range = range, inclusive = c(TRUE, TRUE), trans = trans,
+    label = c(shape = "Weibull Carryover Shape"), finalize = NULL
+  )
+}
+
+#' @rdname mediamix_params
+#' @export
+carryover_scale <- function(range = c(0.5, 10), trans = NULL) {
+  .mm_require_dials()
+  dials::new_quant_param(
+    type = "double", range = range, inclusive = c(TRUE, TRUE), trans = trans,
+    label = c(scale = "Weibull Carryover Scale (periods)"), finalize = NULL
+  )
+}
+
+#' @rdname mediamix_params
+#' @export
+carryover_peak <- function(range = c(0, 4), trans = NULL) {
+  .mm_require_dials()
+  dials::new_quant_param(
+    type = "double", range = range, inclusive = c(TRUE, TRUE), trans = trans,
+    label = c(peak = "Carryover Peak Lag (periods)"), finalize = NULL
   )
 }
 

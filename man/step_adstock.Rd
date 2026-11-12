@@ -16,12 +16,21 @@ step_adstock(
   na_action = c("zero", "error"),
   tol = 0.25,
   period = NULL,
-  role = NA,
+  kernel = c("geometric", "weibull", "delayed"),
+  shape = NULL,
+  scale = NULL,
+  type = c("cdf", "pdf"),
+  peak = 0,
+  start = c("zero", "steady"),
+  keep_original_cols = FALSE,
+  prefix = "adstock_",
+  role = "predictor",
   trained = FALSE,
   columns = NULL,
   states = NULL,
   last_index = NULL,
   history = NULL,
+  seeds = NULL,
   skip = FALSE,
   id = .mm_rand_id("adstock")
 )
@@ -44,10 +53,13 @@ models need. This is an explicit argument because \pkg{recipes} has no
 group awareness and a grouped data frame does not reliably survive into
 \code{bake()}. Grouping columns must not contain missing values.}
 
-\item{decay}{Geometric decay coefficient in \verb{[0, 1]}. Tunable.}
+\item{decay}{Geometric decay coefficient in \verb{[0, 1]}, or for
+\code{kernel = "delayed"} the retention rate, in \verb{(0, 1)}. Ignored by the
+Weibull kernel. Tunable.}
 
 \item{max_lag}{Kernel length; \code{Inf} (the default) uses the infinite recursive
-form. Tunable.}
+form of the geometric kernel. The Weibull and delayed kernels need a
+finite value. Tunable.}
 
 \item{normalise}{Should the kernel sum to 1? See \code{\link[=adstock_geometric]{adstock_geometric()}}.}
 
@@ -57,7 +69,8 @@ or repeats the training series, and otherwise cold-starts with a warning.
 \code{"warm"} errors instead of cold-starting: on a gap, on a start that does
 not line up with the training periods, on an unseen group and when the
 period is unknown. \code{"cold"} always restarts from zero, which reproduces
-the behaviour of a lag-based step.}
+the behaviour of a lag-based step; under \code{start = "steady"} it restarts
+from the steady state of the new data's first periods.}
 
 \item{na_action}{What to do about missing media values. \code{"zero"} (the
 default) treats missing media as no media, which is usually right for
@@ -82,12 +95,42 @@ that report on different weekdays each keep their own grid. A group with
 a single training time point takes the median of the other groups'
 periods.}
 
-\item{role}{Not used by this step, since new columns are not created.}
+\item{kernel}{The carryover kernel: \code{"geometric"} (the default),
+\code{"weibull"} or \code{"delayed"}, applied by \code{\link[=adstock_geometric]{adstock_geometric()}},
+\code{\link[=adstock_weibull]{adstock_weibull()}} or \code{\link[=adstock_delayed]{adstock_delayed()}}. See "Kernels" below.}
+
+\item{shape, scale}{Weibull shape and scale, both positive; \code{scale} is in
+periods. Required when \code{kernel = "weibull"} and ignored otherwise.
+Tunable.}
+
+\item{type}{The form of the Weibull kernel, \code{"cdf"} (the default) or
+\code{"pdf"}. See \code{\link[=adstock_weights_weibull]{adstock_weights_weibull()}}. Ignored by the other kernels.}
+
+\item{peak}{Lag of the peak effect when \code{kernel = "delayed"}, in periods,
+in \verb{[0, max_lag - 1]}. Ignored by the other kernels. Tunable.}
+
+\item{start}{How each series starts. \code{"zero"} (the default) assumes no
+media ran before its first row. \code{"steady"} starts it at the steady state
+of its own first periods, as \code{\link[=adstock_steady_state]{adstock_steady_state()}} computes it, so a
+long carryover has no burn-in. See "Steady-state starts" below.}
+
+\item{keep_original_cols}{Should the selected columns be kept unchanged?
+\code{FALSE} (the default) replaces each one with its adstocked values. \code{TRUE}
+writes the adstocked values to a new column named with \code{prefix} and keeps
+the raw spend, which ROI calculations need after the model.}
+
+\item{prefix}{The start of each new column's name when
+\code{keep_original_cols = TRUE}: the default \code{"adstock_"} turns \code{tv} into
+\code{adstock_tv}. Unused otherwise.}
+
+\item{role}{The role of the new columns made with
+\code{keep_original_cols = TRUE}, \code{"predictor"} by default. Unused when the
+columns are transformed in place.}
 
 \item{trained}{Has the step been prepared?}
 
-\item{columns, states, last_index, history}{Populated by \code{prep()}; not set
-directly.}
+\item{columns, states, last_index, history, seeds}{Populated by \code{prep()}; not
+set directly.}
 
 \item{skip}{Should the step be skipped when baking? Must remain \code{FALSE}:
 adstock is a predictor transform and has to run at prediction time.}
@@ -98,9 +141,11 @@ adstock is a predictor transform and has to run at prediction time.}
 An updated recipe with the new step added.
 }
 \description{
-Applies geometric adstock to one or more columns inside a \pkg{recipes}
-pipeline, carrying the filter's state across the train/test boundary instead
-of emitting missing values there.
+Applies adstock to one or more columns inside a \pkg{recipes} pipeline,
+carrying the filter's state across the train/test boundary instead of
+emitting missing values there. The kernel is geometric by default; the
+Weibull and delayed kernels can put the peak effect after the period of
+spend.
 }
 \section{The problem this solves}{
 
@@ -147,8 +192,9 @@ them:
 continues or repeats the series. The filter runs over the earlier
 training rows and then the new rows, and the result is identical to
 filtering the whole series at once. A block that starts at or before the
-first training time point has nothing before it and starts from zero,
-as \code{prep()} did, which is why \code{bake(rec, new_data = training)}
+first training time point has nothing before it, so it starts as the
+training series did (from zero, or from its steady state under
+\code{start = "steady"}), which is why \code{bake(rec, new_data = training)}
 reproduces the prepared output. A block that repeats the last periods
 of training, as \code{rsample::rolling_origin(lag = )} builds, continues from
 the rows before it.}
@@ -161,9 +207,73 @@ and warn.}
 }
 
 Under \code{carry_over = "warm"} each of these warnings is an error instead.
+A cold start begins the block from zero, or under \code{start = "steady"} from
+the steady state of the block's own first periods.
 Row count and row order are preserved in every case. The step sorts by
 \code{index} internally and restores the original order before returning, so
 nothing downstream sees a reordered table.
+}
+
+\section{Kernels}{
+
+The geometric kernel is the only one with a recursive form, and the only
+one that accepts \code{max_lag = Inf}. The Weibull and delayed kernels are
+finite, and either can put the peak effect one or more periods after the
+spend; see \code{\link[=adstock_weibull]{adstock_weibull()}} and \code{\link[=adstock_delayed]{adstock_delayed()}}. A finite kernel
+reaches back \code{max_lag - 1} periods, so \code{bake()} puts at most that many
+training rows in front of the new data, and the boundary cases above work
+the same way for every kernel.
+
+Each kernel uses its own arguments and ignores the others, and only its own
+can be marked with \code{tune()}:
+
+\describe{
+\item{\code{"geometric"}}{\code{decay} and \code{max_lag}, tuned over
+\code{\link[=carryover_decay]{carryover_decay()}} and \code{\link[=carryover_max_lag]{carryover_max_lag()}}.}
+\item{\code{"weibull"}}{\code{shape}, \code{scale} and \code{max_lag}, tuned over
+\code{\link[=carryover_shape]{carryover_shape()}}, \code{\link[=carryover_scale]{carryover_scale()}} and \code{\link[=carryover_max_lag]{carryover_max_lag()}}.}
+\item{\code{"delayed"}}{\code{decay}, \code{peak} and \code{max_lag}. Its \code{decay} is tuned
+over \verb{[0.05, 0.95]}, since the kernel needs a positive retention rate.
+\code{\link[=carryover_peak]{carryover_peak()}} stops at \code{max_lag - 1} when \code{max_lag} is fixed, and
+a tuned \code{max_lag} starts above the largest peak the search can propose,
+so every candidate is a valid kernel.}
+}
+
+\code{\link[=step_saturation]{step_saturation()}} also has a \code{shape} argument. When both steps tune one,
+give them distinct ids, for example \code{shape = tune("adstock_shape")}.
+}
+
+\section{Steady-state starts}{
+
+A filter started from zero understates the first periods of a
+long-carryover channel. With \code{start = "steady"}, \code{prep()} stores for each
+group and column the steady state of the training series: the state the
+filter would hold had the mean spend of the series' first periods been
+running forever, from \code{\link[=adstock_steady_state]{adstock_steady_state()}}. The mean covers the
+geometric kernel's 90\% effective window, capped at \code{max_lag - 1} periods
+for a finite \code{max_lag}; the Weibull and delayed kernels average the first
+\code{max_lag - 1} periods. It uses training media only, never the outcome.
+
+\code{bake()} starts the filter from that state wherever the filter starts at the
+beginning of a training series: when it re-bakes the training data, and
+when a block repeats or continues the series. The new rows then get exactly
+the values that a filter over the whole series, started from the same
+state, gives them. A cold-started block (after a gap, misaligned, from an
+unseen group, with an unknown period, or under \code{carry_over = "cold"}) is
+treated as a series of its own and starts at the steady state of its own
+first periods. That state is computed from the block's media, so a block
+baked in pieces starts differently from the same block baked whole.
+}
+
+\section{Keeping the raw columns}{
+
+With \code{keep_original_cols = TRUE} each selected column is left as it is and
+its adstocked values go to a new column, \code{adstock_tv} for \code{tv} with the
+default \code{prefix}. The new columns get the role given by \code{role}. The raw
+columns keep theirs, so a model fitted on the baked data uses both unless
+the raw ones get another role before this step, for example with
+\code{update_role(tv, new_role = "spend")}. A new name that is already in the
+data is an error.
 }
 
 \section{Selecting media columns}{
@@ -187,14 +297,17 @@ finished, so a bare \code{all_of(ch)} selects the last channel in every step.
 \section{Tidying}{
 
 \code{tidy()} returns a tibble with one row per selected column per group and
-the columns \code{terms}, \code{group} (\code{NA} without \code{by}), \code{decay}, \code{state},
-\code{state_length} and \code{id}. \code{state} is the filter's state at the end of the
-training data. For \code{max_lag = Inf} it is the raw recursive accumulator
-\eqn{a_t}, before the \code{normalise} scaling by \eqn{1 - \theta}. For a finite
-\code{max_lag} it is the most recent of the \code{max_lag - 1} training values the
-kernel still reaches, and \code{state_length} gives their number. Before
-\code{prep()} the state columns are \code{NA}, and so is \code{decay} when it is marked
-with \code{tune()}.
+the columns \code{terms}, \code{group} (\code{NA} without \code{by}), \code{kernel}, \code{decay},
+\code{max_lag}, \code{shape}, \code{scale}, \code{type}, \code{peak}, \code{start}, \code{state},
+\code{state_length} and \code{id}. The kernel's parameters are \code{NA} where the kernel
+ignores them, and before \code{prep()} when they are marked with \code{tune()}.
+\code{state} is the filter's state at the end of the training data. For
+\code{max_lag = Inf} it is the raw recursive accumulator \eqn{a_t}, before the
+\code{normalise} scaling by \eqn{1 - \theta}, and under \code{start = "steady"} it
+includes what remains of the starting state. For a finite \code{max_lag} it is
+the most recent of the \code{max_lag - 1} training values the kernel still
+reaches, and \code{state_length} gives their number. Before \code{prep()} the state
+columns are \code{NA}.
 }
 
 \section{Resampling and leakage}{
@@ -210,7 +323,9 @@ Note also that this step is strictly causal, unlike \code{recipes::step_window()
 and \code{recipes::step_impute_roll()}, which are centred and fill the leading
 edge of a series using future values. Applied to a media filter, that would
 leak future spend into past adstock and inflate in-sample fit, which is the
-exact pathology marketing mix models are already accused of.
+exact pathology marketing mix models are already accused of. The exception
+is \code{start = "steady"}, whose starting state averages the media of a
+series' first periods.
 }
 
 \examples{
@@ -232,8 +347,18 @@ sum(is.na(baked$tv))
 
 # The filter state at the end of training, per column and geo
 tidy(rec, number = 1)
+
+# A delayed peak, started at steady state, with the raw spend kept
+rec_delayed <- recipe(revenue ~ ., data = train) |>
+  step_adstock(tv, index = "date", by = "geo", kernel = "delayed",
+               decay = 0.6, peak = 1, max_lag = 6, start = "steady",
+               keep_original_cols = TRUE) |>
+  prep()
+baked_delayed <- bake(rec_delayed, new_data = test)
+head(baked_delayed[c("date", "geo", "tv", "adstock_tv")])
 \dontshow{\}) # examplesIf}
 }
 \seealso{
-\code{\link[=adstock_geometric]{adstock_geometric()}}, \code{\link[=step_saturation]{step_saturation()}}, \code{\link[=carryover_decay]{carryover_decay()}}
+\code{\link[=adstock_geometric]{adstock_geometric()}}, \code{\link[=adstock_weibull]{adstock_weibull()}}, \code{\link[=adstock_delayed]{adstock_delayed()}},
+\code{\link[=adstock_steady_state]{adstock_steady_state()}}, \code{\link[=step_saturation]{step_saturation()}}, \code{\link[=carryover_decay]{carryover_decay()}}
 }

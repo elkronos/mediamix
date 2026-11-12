@@ -321,3 +321,24 @@ test_that("an empty selection preps, bakes nothing and tidies to zero rows", {
   expect_s3_class(td, "tbl_df")
   expect_identical(nrow(td), 0L)
 })
+
+test_that("the kept adstock columns can be saturated by their prefix", {
+  skip_if_not_installed("recipes")
+  data(mm_weekly)
+  kept <- recipes::recipe(revenue ~ ., data = mm_weekly) |>
+    step_adstock(tv, search, index = "date", by = "geo", decay = 0.7,
+                 keep_original_cols = TRUE) |>
+    step_saturation(starts_with("adstock_"), half_max = 0.4, shape = 1.5) |>
+    recipes::prep()
+  in_place <- recipes::recipe(revenue ~ ., data = mm_weekly) |>
+    step_adstock(tv, search, index = "date", by = "geo", decay = 0.7) |>
+    step_saturation(tv, search, half_max = 0.4, shape = 1.5) |>
+    recipes::prep()
+  expect_identical(kept$steps[[2]]$columns,
+                   c(adstock_tv = "adstock_tv", adstock_search = "adstock_search"))
+  out <- recipes::juice(kept)
+  ref <- recipes::juice(in_place)
+  expect_equal(out$adstock_tv, ref$tv, tolerance = 1e-12)
+  expect_equal(out$adstock_search, ref$search, tolerance = 1e-12)
+  expect_identical(out$tv, mm_weekly$tv)
+})
