@@ -11,16 +11,17 @@ Description: Feature engineering for marketing mix modelling and multi-touch
     removal-effect attribution. Marginal return on investment is computed by
     counterfactual simulation through the full transform.
     Carryover parameters are selected by cross-validation against an actual
-    key performance indicator using a user-supplied model, rather than by a
-    heuristic. The core transforms are plain R functions on numeric vectors,
-    and the only non-base dependencies are 'cli', 'rlang' and 'data.table';
-    optional 'recipes' steps and 'dials' parameter objects support joint
-    tuning of carryover, saturation and model hyperparameters. Adstock
-    methods follow Broadbent (1979, Journal of the Market Research Society,
-    21(3), 139-166) and Jin et al. (2017, Google Inc.,
-    <https://research.google/pubs/pub46001/>); saturation curves
-    follow Hill (1910, The Journal of Physiology, 40, iv-vii); Markov
-    attribution follows Anderl et al. (2016) <doi:10.1016/j.ijresmar.2016.03.001>.
+    key performance indicator using least squares or a user-supplied model,
+    rather than by a heuristic. The core transforms are plain R functions on
+    numeric vectors, and the only non-base dependencies are 'cli', 'rlang'
+    and 'data.table'; optional 'recipes' steps and 'dials' parameter objects
+    support joint tuning of carryover, saturation and model
+    hyperparameters. Geometric and delayed adstock follow Broadbent (1979,
+    Journal of the Market Research Society, 21(3), 139-166) and Jin et al.
+    (2017, Google Inc., <https://research.google/pubs/pub46001/>); the Hill
+    saturation curve follows Hill (1910, The Journal of Physiology, 40,
+    iv-vii); Markov attribution follows Anderl et al. (2016)
+    <doi:10.1016/j.ijresmar.2016.03.001>.
 License: MIT + file LICENSE
 Encoding: UTF-8
 Language: en-GB
