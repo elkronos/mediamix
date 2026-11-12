@@ -8,14 +8,18 @@ knitr::opts_chunk$set(collapse = TRUE, comment = "#>", fig.width = 7,
 options(digits = 4)
 ```
 
-This article follows one question from raw data to an answer: **if the
-marketing budget stays the same, should any of it move between channels?**
+This article follows one question from raw data to an answer: if the
+marketing budget stays the same, should any of it move between channels?
 It uses the north geography of `mm_weekly`, 156 weeks of five channels,
 generated from known parameters so that every step can be checked against the
 truth.
 
-The getting-started vignette introduces each function. This article is about
-using them together, and about where the answer is solid and where it is not.
+The getting-started vignette, `vignette("mediamix")`, introduces each
+function. This article is about using them together, and about where the
+answer is solid and where it is not.
+
+The setup keeps the parameters `mm_weekly` was generated from in `truth`, and
+adds a week counter to serve as the trend control:
 
 ```{r}
 library(mediamix)
@@ -30,6 +34,10 @@ north$week <- seq_len(nrow(north))
 
 ## 1. Check the data can answer the question
 
+A model can only tell channels apart if they move independently of one
+another and vary from week to week. `diagnose_media()` checks both before
+anything is fitted:
+
 ```{r}
 d <- diagnose_media(north, media = channels, decay = 0.6)
 d
@@ -38,10 +46,15 @@ d$collinearity[, c("channel", "vif", "most_correlated_with", "correlation")]
 
 `decay = 0.6` measures collinearity after a representative adstock, since
 smoothed series correlate more than raw spend and the model sees the smoothed
-ones. No channel is collinear enough to make its coefficient meaningless, and
-every one varies. Video and display are dark in a third or more of weeks, so they
-carry less information than their row count suggests, which is worth
-remembering when their numbers come out.
+ones. No channel is collinear enough to make its coefficient meaningless: the
+largest variance inflation factor (`vif`) is
+`r round(max(d$collinearity$vif), 2)`, well under `diagnose_media()`'s
+default warning level of 5. Every channel varies, but video and display are
+dark, with no spend at all, in
+`r round(100 * d$variation$zero_share[d$variation$channel == "video"])`% and
+`r round(100 * d$variation$zero_share[d$variation$channel == "display"])`% of
+weeks, so they carry less information than their row count suggests, which is
+worth remembering when their numbers come out.
 
 ## 2. Carryover: how well does the data identify it?
 
@@ -59,22 +72,32 @@ rbind(truth  = truth$decay[channels],
       one_se = joint$best_1se$decay)
 ```
 
+`best` is the minimum of each channel's cross-validation curve, and `one_se`
+the shortest carryover within one standard error of it. The curves themselves
+show how firmly the data pins each decay down:
+
 ```{r fig.height = 5.5}
 plot(joint, truth = truth$decay)
 ```
 
 Television, social and display land within 0.1 of the truth and video within
-0.2. Search does not, and its profile says why: it is nearly flat, so the data holds
-almost no information about search's carryover. The one-standard-error
-choice falls back to a short carryover, which here is close to right.
+0.2. Search does not, and its profile says why: it is nearly flat, so the data
+holds almost no information about search's carryover. For search the
+one-standard-error choice falls back to a short carryover, which here is close
+to right; for every other channel it is shorter than the truth.
 
 The joint search does not tune saturation. To keep this walkthrough about the
 *decision* rather than the estimation, the rest of it uses the generating
 parameters, which is what a full joint search over carryover *and*
-saturation, as in `vignette("tidymodels")`, is trying to reach. Section 7 comes back to what
-happens when television's carryover is uncertain.
+saturation, as in `vignette("tidymodels")`, is trying to reach. Section 7
+comes back to what happens when television's carryover is uncertain.
 
 ## 3. Fit the model
+
+The model is ordinary least squares on the transformed media and the
+controls. `spec` holds each channel's carryover and saturation, and the helper
+defined here applies them to any spend plan, so section 7 can reuse it on
+budgets that were never run:
 
 ```{r}
 spec <- lapply(channels, function(ch) list(
@@ -97,7 +120,19 @@ fit <- lm(north$revenue ~ ., data = model_data)
 round(rbind(estimate = coef(fit)[channels], truth = truth$beta[channels]))
 ```
 
+Even with the transforms right, the coefficients land well away from the
+truth: search's is
+`r round(100 * (1 - coef(fit)[["search"]] / truth$beta[["search"]]))`% too
+low and social's
+`r round(100 * (coef(fit)[["social"]] / truth$beta[["social"]] - 1))`% too
+high. That is three years of weekly noise, and section 8 shows what it does to
+the answer.
+
 ## 4. Where did the revenue come from?
+
+`contributions()` splits each week's fitted revenue into one part per channel
+and a baseline, and `roi()` divides each channel's total contribution by its
+total spend to give its average return:
 
 ```{r}
 contrib <- contributions(media, fit, index = north$date)
@@ -133,7 +168,10 @@ pound works nearly as hard as its average one. Display is now last, and its
 estimated marginal return is below 1: in this model, the last pounds spent on
 it did not pay for themselves.
 
-```{r avg-vs-marginal, fig.height = 3.8}
+The chart sets each channel's average return (open circle) beside its
+marginal return (filled circle); the vertical line is break-even:
+
+```{r avg-vs-marginal, echo = FALSE, fig.height = 3.8}
 ink <- mm_palette(role = "ink")
 cols <- mm_palette(2)
 o <- marginal[order(marginal$mroi), ]
@@ -193,9 +231,10 @@ boot
 plot(boot, reference = 1, xlab = "Revenue per pound")
 ```
 
-The intervals are wide. Only `r knitr::combine_words(boot$term[boot$lower > 1])`
-have intervals entirely above break-even; every other interval crosses 1, and
-display's reaches below zero. They hold the transforms at the true parameters
+The intervals are wide. Only the intervals for
+`r knitr::combine_words(boot$term[boot$lower > 1], before = "\x60", oxford_comma = FALSE)`
+lie entirely above break-even; every other interval crosses 1, and both of
+display's reach below zero. They hold the transforms at the true parameters
 chosen in section 3, so they show sampling uncertainty in the coefficients
 only. Two channels' intervals overlapping does not settle a comparison between
 them, because their estimates move together from replicate to replicate, so
@@ -210,11 +249,12 @@ paired <- c(social_beats_display = mean(reps[, "social: marginal"] >
 paired
 ```
 
-That is the honest strength of the evidence for moving money into social:
-more likely right than wrong, and not more than that. It is a reason to run
-the move as a test, not to announce it.
-
-
+Social's marginal return beats display's in
+`r round(100 * paired[["social_beats_display"]])`% of replicates and
+television's in `r round(100 * paired[["social_beats_tv"]])`%. That is the
+honest strength of the evidence for moving money into social: more likely
+right than wrong, and not more than that. It is a reason to run the move as a
+test, not to announce it.
 
 ## 7. Test the move before recommending it
 
@@ -225,20 +265,20 @@ channels is held fixed, and the controls do not change, so the difference in
 predicted revenue is the difference in media response:
 
 ```{r}
-media_revenue <- function(plan, spec) {
+media_revenue <- function(plan, spec, model = fit) {
   m <- transform_plan(plan, spec)
-  sum(vapply(channels, function(ch) coef(fit)[[ch]] * sum(m[[ch]]),
+  sum(vapply(channels, function(ch) coef(model)[[ch]] * sum(m[[ch]]),
              numeric(1)))
 }
 
 # Move an amount of budget from one channel to another. Each channel's
 # flighting pattern is kept: the change is spread over its weeks in
 # proportion to its existing spend.
-move <- function(from, to, amount, spec) {
+move <- function(from, to, amount, spec, model = fit) {
   plan <- north
   plan[[from]] <- plan[[from]] * (1 - amount / sum(plan[[from]]))
   plan[[to]] <- plan[[to]] + amount * plan[[to]] / sum(plan[[to]])
-  gain <- media_revenue(plan, spec) - media_revenue(north, spec)
+  gain <- media_revenue(plan, spec, model) - media_revenue(north, spec, model)
   c(moved = amount, revenue_change = gain, per_pound_moved = gain / amount)
 }
 
@@ -253,8 +293,9 @@ rbind(
 In the model, moving a tenth of display's budget into social raises predicted
 revenue at no extra cost. Moving the *same amount* out of television instead,
 the move the average-ROI table suggested, gains less, because it gives up
-television's still-steep fitted response. Moving two and a half times as much out of display
-gains more in total but less per pound, as social climbs its own curve.
+television's still-steep fitted response. Moving two and a half times as much
+out of display gains more in total but less per pound, as social climbs its
+own curve.
 
 Two checks before this goes in a deck. First, is the new plan inside the data?
 
@@ -266,15 +307,18 @@ c(observed = max(north$social), smaller_move = peak(tenth),
 ```
 
 Both moves push social's busiest week above anything in the data: the smaller
-by about 7%, the larger by about 18%. A little beyond the observed range is the
-unavoidable price of asking what *more* would do, but the further out a plan
-goes, the more of its predicted gain is the fitted curve's shape rather than
-evidence. The smaller move stays close enough to the data to be worth
-testing; the larger one should wait for that test.
+by about `r round(100 * (peak(tenth) / max(north$social) - 1))`%, the larger
+by about `r round(100 * (peak(2.5 * tenth) / max(north$social) - 1))`%. A
+little beyond the observed range is the unavoidable price of asking what
+*more* would do, but the further out a plan goes, the more of its predicted
+gain is the fitted curve's shape rather than evidence. The smaller move stays
+close enough to the data to be worth testing; the larger one should wait for
+that test.
 
 Second, how sensitive is the answer to carryover it could not pin down? In
 section 2 the data was consistent with a television decay as low as the
-one-SE value. Refit with that and ask again:
+one-standard-error value. Refit with that, and compare television's marginal
+return and the display-to-social move under the two fits:
 
 ```{r}
 tv_alt <- joint$best_1se$decay[joint$best_1se$channel == "tv"]
@@ -284,20 +328,33 @@ spec_alt$tv$adstock$decay <- tv_alt
 media_alt <- transform_plan(north, spec_alt)
 fit_alt <- lm(north$revenue ~ ., data = cbind(media_alt, controls))
 
-c(tv_decay = tv_alt,
-  tv_mroi_truth = marginal$mroi[marginal$channel == "tv"],
-  tv_mroi_alt = marginal_roi(
-    north$tv, coefficient = coef(fit_alt)[["tv"]],
-    adstock = spec_alt$tv$adstock, saturation = spec_alt$tv$saturation
-  )$mroi)
+tv_mroi_alt <- marginal_roi(
+  north$tv, coefficient = coef(fit_alt)[["tv"]],
+  adstock = spec_alt$tv$adstock, saturation = spec_alt$tv$saturation
+)$mroi
+sensitivity <- rbind(
+  true_decay   = c(tv_decay = truth$decay[["tv"]],
+                   tv_mroi = marginal$mroi[marginal$channel == "tv"],
+                   display_to_social = move("display", "social", tenth,
+                                            spec)[["per_pound_moved"]]),
+  one_se_decay = c(tv_decay = tv_alt,
+                   tv_mroi = tv_mroi_alt,
+                   display_to_social = move("display", "social", tenth,
+                                            spec_alt, fit_alt)[["per_pound_moved"]])
+)
+sensitivity
 ```
 
 Television's marginal return depends heavily on a carryover the data only
 loosely identifies: at the shorter decay its next pound no longer pays for
-itself. The display-to-social move does not depend on television's
-carryover, which makes it the cleaner test. Whether television is over- or
-under-funded is a question this data cannot settle, and saying so is part of
-the answer.
+itself. The display-to-social move does not touch television's budget, but it
+is not immune either, because refitting moves display's and social's
+coefficients too: it still gains, but
+`r round(sensitivity["one_se_decay", "display_to_social"], 2)` per pound moved
+rather than `r round(sensitivity["true_decay", "display_to_social"], 2)`. Its
+direction survives a carryover the data cannot rule out, which makes it the
+cleaner test; its size does not. Whether television is over- or under-funded
+is a question this data cannot settle, and saying so is part of the answer.
 
 ## 8. Check the answer against the truth
 
@@ -337,7 +394,7 @@ The fitted model overstates that move's gain per pound about
 and in truth television has the lowest marginal return
 (`r round(true_mroi[["tv"]], 2)`) and search the highest
 (`r round(true_mroi[["search"]], 2)`), so the best move takes from television,
-the channel this analysis advised leaving alone, and gives to search.
+the channel this analysis could not call either way, and gives to search.
 
 No step above was a mistake of method. Three years of weekly noise moved the
 coefficients enough to reorder channels whose true returns sit within a few
@@ -365,8 +422,8 @@ test.
 
 ## Where next
 
-- `vignette("tidymodels")` to tune every channel's carryover and saturation
-  jointly rather than one at a time.
+- `vignette("tidymodels")` to tune saturation and a model penalty together
+  with carryover, which the joint search in section 2 does not.
 - `vignette("carryover")` for why one-at-a-time tuning goes wrong.
 - [Methods and references](methodology.html) for the research behind each
   step.
