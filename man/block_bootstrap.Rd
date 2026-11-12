@@ -14,7 +14,8 @@ block_bootstrap(
   seed = NULL,
   panel = c("shared", "independent"),
   index = NULL,
-  circular = FALSE
+  circular = FALSE,
+  cores = 1L
 )
 }
 \arguments{
@@ -47,7 +48,9 @@ as one series per geography. How the groups are resampled is set by
 \item{seed}{Optional random seed, one whole number, for reproducible
 intervals. Every replicate's rows are drawn and the point estimate is
 computed after seeding, and the caller's random number stream is restored
-afterwards.}
+afterwards. Each replicate's call to \code{statistic} starts from a seed of
+its own, drawn before any replicate is evaluated, so a statistic that
+draws random numbers is reproducible too.}
 
 \item{panel}{How groups are resampled when \code{by} is supplied. \code{"shared"}, the
 default, draws one set of blocks of periods and applies it to every
@@ -69,6 +72,15 @@ its start (the circular block bootstrap of Politis and Romano, 1992), so
 every row is equally likely to be drawn. The default \code{FALSE} is the moving
 block bootstrap, which draws the first and last \code{block_length - 1} rows of
 each series less often than the rest.}
+
+\item{cores}{Number of cores over which the replicates are evaluated.
+Values above 1 use \code{\link[parallel:mclapply]{parallel::mclapply()}} on Unix-alikes and a socket
+cluster elsewhere. Every replicate's rows, and the seed its call to
+\code{statistic} starts from, are drawn in this session before any replicate
+is evaluated, so the result does not depend on \code{cores}. The workers of a
+socket cluster are new R sessions that load \pkg{mediamix} and nothing
+else, so there \code{statistic} must call other packages with \code{pkg::fun()}
+and must not rely on functions or data defined in your session.}
 }
 \value{
 An object of class \code{mm_bootstrap}: a data frame with one row per
@@ -108,7 +120,11 @@ possible but slow.
 
 Every replicate's rows are drawn before \code{statistic} is first called, so a
 statistic that sets its own seed, as a cross-validated fit often does,
-cannot make the resamples repeat.
+cannot make the resamples repeat. Each replicate's call to \code{statistic}
+then starts from a seed drawn for it in advance, which is what makes the
+replicates the same in a worker process as in this one. Random numbers
+that \code{statistic} draws on the replicates do not advance the caller's
+stream.
 }
 \section{Panels}{
 

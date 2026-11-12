@@ -30,7 +30,9 @@
 #' @param seed Optional random seed, one whole number, for reproducible
 #'   intervals. Every replicate's rows are drawn and the point estimate is
 #'   computed after seeding, and the caller's random number stream is restored
-#'   afterwards.
+#'   afterwards. Each replicate's call to `statistic` starts from a seed of
+#'   its own, drawn before any replicate is evaluated, so a statistic that
+#'   draws random numbers is reproducible too.
 #' @param panel How groups are resampled when `by` is supplied. `"shared"`, the
 #'   default, draws one set of blocks of periods and applies it to every
 #'   group, so a shock that hit every geography in the same week stays
@@ -49,6 +51,14 @@
 #'   every row is equally likely to be drawn. The default `FALSE` is the moving
 #'   block bootstrap, which draws the first and last `block_length - 1` rows of
 #'   each series less often than the rest.
+#' @param cores Number of cores over which the replicates are evaluated.
+#'   Values above 1 use [parallel::mclapply()] on Unix-alikes and a socket
+#'   cluster elsewhere. Every replicate's rows, and the seed its call to
+#'   `statistic` starts from, are drawn in this session before any replicate
+#'   is evaluated, so the result does not depend on `cores`. The workers of a
+#'   socket cluster are new R sessions that load \pkg{mediamix} and nothing
+#'   else, so there `statistic` must call other packages with `pkg::fun()`
+#'   and must not rely on functions or data defined in your session.
 #'
 #' @return An object of class `mm_bootstrap`: a data frame with one row per
 #'   element of the statistic -- `term`, `estimate` (on the original data),
@@ -79,7 +89,11 @@
 #'
 #' Every replicate's rows are drawn before `statistic` is first called, so a
 #' statistic that sets its own seed, as a cross-validated fit often does,
-#' cannot make the resamples repeat.
+#' cannot make the resamples repeat. Each replicate's call to `statistic`
+#' then starts from a seed drawn for it in advance, which is what makes the
+#' replicates the same in a worker process as in this one. Random numbers
+#' that `statistic` draws on the replicates do not advance the caller's
+#' stream.
 #'
 #' @section Panels:
 #' With `by` and the default `panel = "shared"`, each replicate draws one set
@@ -170,7 +184,7 @@
 block_bootstrap <- function(data, statistic, times = 200L, block_length = NULL,
                             by = NULL, level = 0.9, seed = NULL,
                             panel = c("shared", "independent"), index = NULL,
-                            circular = FALSE) {
+                            circular = FALSE, cores = 1L) {
   if (!is.data.frame(data)) cli::cli_abort("{.arg data} must be a data frame.")
   if (!is.function(statistic)) cli::cli_abort("{.arg statistic} must be a function.")
   times <- .mm_check_bounded_count(times, "times", min = 2L, max = 1e6)
@@ -179,6 +193,7 @@ block_bootstrap <- function(data, statistic, times = 200L, block_length = NULL,
   seed <- .mm_check_seed(seed)
   panel <- .mm_check_option(panel, c("shared", "independent"), "panel")
   circular <- .mm_check_flag(circular, "circular")
+  cores <- .mm_check_count(cores, "cores", min = 1L)
   n <- nrow(data)
   if (n < 2L) cli::cli_abort("{.arg data} needs at least two rows.")
   if (!is.null(by)) .mm_assert_cols(data, by)
@@ -261,17 +276,40 @@ block_bootstrap <- function(data, statistic, times = 200L, block_length = NULL,
     ))
   }
 
+  # Each replicate's call to `statistic` starts from a seed drawn here. The
+  # seeds are drawn after the rows and the point estimate, so neither depends
+  # on them, and a worker process starts from the seed it is handed, so the
+  # replicates do not depend on `cores`.
+  seeds <- sample.int(.Machine$integer.max, times, replace = TRUE)
+  kinds <- RNGkind()
+  replicate_one <- function(r) {
+    # A socket worker starts with the default generator.
+    if (!identical(RNGkind(), kinds)) do.call(RNGkind, as.list(kinds))
+    set.seed(seeds[[r]])
+    val <- tryCatch(statistic(data[rows_for(r), , drop = FALSE]),
+                    error = function(e) e)
+    if (inherits(val, "error")) conditionMessage(val) else
+      .mm_boot_align(val, terms)
+  }
+  # Seeding each replicate moves the session's stream, so it is put back
+  # where the draws above left it.
+  stream <- get0(".Random.seed", envir = globalenv(), inherits = FALSE)
+  raw <- .mm_maybe_parallel(seq_len(times), replicate_one, cores)
+  if (!is.null(stream)) assign(".Random.seed", stream, envir = globalenv())
+
   reps <- matrix(NA_real_, times, length(terms),
                  dimnames = list(NULL, terms))
   ok <- logical(times)
   first_error <- NULL
   for (r in seq_len(times)) {
-    val <- tryCatch(statistic(data[rows_for(r), , drop = FALSE]),
-                    error = function(e) e)
-    aligned <- if (inherits(val, "error")) {
-      conditionMessage(val)
-    } else {
-      .mm_boot_align(val, terms)
+    aligned <- raw[[r]]
+    if (inherits(aligned, "try-error")) {
+      cond <- attr(aligned, "condition")
+      aligned <- paste0("A parallel worker failed: ", if (is.null(cond)) {
+        as.character(aligned)
+      } else {
+        conditionMessage(cond)
+      })
     }
     if (is.character(aligned)) {
       if (is.null(first_error)) first_error <- aligned

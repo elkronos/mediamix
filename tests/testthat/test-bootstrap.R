@@ -211,6 +211,105 @@ test_that("counts are bounded before anything is allocated", {
   expect_error(block_bootstrap(d, stat, times = 3, panel = "both"), "one of")
 })
 
+# ---- cores ----------------------------------------------------------------------
+
+test_that("cores is validated", {
+  d <- data.frame(y = stats::rnorm(30))
+  stat <- function(d) c(m = mean(d$y))
+  expect_error(block_bootstrap(d, stat, times = 3, cores = 0), "at least 1")
+  expect_error(block_bootstrap(d, stat, times = 3, cores = 1.5),
+               "whole number")
+  expect_error(block_bootstrap(d, stat, times = 3, cores = NA),
+               "single non-missing number")
+  expect_error(block_bootstrap(d, stat, times = 3, cores = "2"),
+               "single non-missing number")
+  err <- tryCatch(block_bootstrap(d, stat, times = 3, cores = 0),
+                  error = identity)
+  expect_identical(conditionCall(err)[[1]], as.name("block_bootstrap"))
+})
+
+test_that("a statistic that draws random numbers is reproducible", {
+  set.seed(31)
+  d <- data.frame(y = stats::rnorm(60))
+  noisy <- function(d) c(m = mean(d$y) + stats::rnorm(1))
+  a <- attr(block_bootstrap(d, noisy, times = 30, seed = 4), "replicates")
+  b <- attr(block_bootstrap(d, noisy, times = 30, seed = 4), "replicates")
+  expect_identical(a, b)
+  expect_gt(length(unique(a[, "m"])), 25L)
+
+  # What the statistic draws on the replicates leaves the caller's stream
+  # where the bootstrap's own draws left it. Both statistics draw one number
+  # on the full data.
+  light <- function(x) c(m = mean(x$y) + stats::runif(1) * 0)
+  heavy <- function(x) {
+    k <- if (identical(x, d)) 1 else 500
+    c(m = mean(x$y) + sum(stats::runif(k)) * 0)
+  }
+  set.seed(7)
+  block_bootstrap(d, light, times = 5)
+  after_light <- stats::runif(1)
+  set.seed(7)
+  block_bootstrap(d, heavy, times = 5)
+  after_heavy <- stats::runif(1)
+  expect_identical(after_light, after_heavy)
+})
+
+test_that("cores = 2 gives the same result as cores = 1", {
+  skip_on_os("windows")
+  skip_on_cran()
+  skip_if_not(isTRUE(parallel::detectCores(logical = FALSE) >= 2))
+  set.seed(32)
+  d <- data.frame(y = as.numeric(stats::arima.sim(list(ar = 0.5), n = 120)),
+                  x = stats::rnorm(120))
+  slope <- function(d) {
+    c(mean = mean(d$y), slope = unname(stats::coef(stats::lm(y ~ x, d))[2]))
+  }
+  serial <- block_bootstrap(d, slope, times = 40, block_length = 6, seed = 5)
+  forked <- block_bootstrap(d, slope, times = 40, block_length = 6, seed = 5,
+                            cores = 2)
+  expect_identical(attr(forked, "replicates"), attr(serial, "replicates"))
+  expect_identical(as.data.frame(forked), as.data.frame(serial))
+
+  # A statistic that draws random numbers, and one that sometimes fails.
+  noisy <- function(d) c(m = mean(d$y) + stats::rnorm(1, sd = 0.1))
+  expect_identical(
+    attr(block_bootstrap(d, noisy, times = 30, seed = 6, cores = 2),
+         "replicates"),
+    attr(block_bootstrap(d, noisy, times = 30, seed = 6), "replicates")
+  )
+  picky <- function(x) {
+    if (!identical(x, d) && mean(x$y) > mean(d$y)) stop("above the full mean")
+    c(m = mean(x$y))
+  }
+  msg_serial <- tryCatch(block_bootstrap(d, picky, times = 30, seed = 6),
+                         message = conditionMessage)
+  msg_forked <- tryCatch(block_bootstrap(d, picky, times = 30, seed = 6,
+                                         cores = 2),
+                         message = conditionMessage)
+  expect_match(msg_serial, "above the full mean")
+  expect_identical(msg_forked, msg_serial)
+
+  # Panels, and more cores than the machine has.
+  p <- data.frame(geo = rep(c("a", "b"), each = 60), t = rep(1:60, 2),
+                  y = stats::rnorm(120))
+  pooled <- function(d) c(m = mean(d$y))
+  expect_identical(
+    as.data.frame(block_bootstrap(p, pooled, times = 20, by = "geo",
+                                  index = "t", seed = 7, cores = 64)),
+    as.data.frame(block_bootstrap(p, pooled, times = 20, by = "geo",
+                                  index = "t", seed = 7))
+  )
+
+  # The caller's stream ends in the same place with or without workers.
+  set.seed(8)
+  block_bootstrap(d, noisy, times = 10)
+  after_serial <- stats::runif(1)
+  set.seed(8)
+  block_bootstrap(d, noisy, times = 10, cores = 2)
+  after_forked <- stats::runif(1)
+  expect_identical(after_forked, after_serial)
+})
+
 test_that("circular blocks draw the first row as often as any other", {
   d <- data.frame(row = seq_len(60))
   first <- function(d) c(n = sum(d$row == 1))
