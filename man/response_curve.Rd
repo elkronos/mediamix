@@ -15,22 +15,27 @@ only; \code{spend_for()} has no such argument.}
 
 \item{coefficient}{The channel's fitted coefficient.}
 
-\item{type}{Saturation curve type, as in \code{\link[=saturate]{saturate()}}.}
+\item{type}{Saturation curve type, as in \code{\link[=saturate]{saturate()}}, or \code{"none"} for a
+linear response.}
 
 \item{...}{Passed to \code{\link[=saturate]{saturate()}}, for example \code{half_max} and \code{shape}.}
 
-\item{target}{Target response level. \code{spend_for()} only.}
+\item{target}{Target response level. \code{spend_for()} only. It must lie on
+the side of the response at zero spend that spending moves towards:
+above it for a positive coefficient, below it for a negative one.}
 
 \item{max_spend}{Upper bound of the search interval for \code{spend_for()}.
 Defaults to 1000 times the curve's spend-scaled parameter (\code{half_max},
-\code{km}, or \code{log(2)/rate}). \code{saturate_power()} has no such parameter, so
-\code{max_spend} is required there.}
+\code{km}, or \code{log(2)/rate}). \code{saturate_power()} and \code{"none"} have no such
+parameter, so \code{max_spend} is required there.}
 }
 \value{
 \code{response_curve()} returns a data frame with columns \code{spend},
 \code{response} and \code{marginal}, one row per element of \code{spend} and in the same
 order. \code{spend_for()} returns a single number, or \code{NA_real_} with a warning
-when the target is not reachable within \code{max_spend}.
+when the target is not reachable within \code{max_spend}. A target that no
+amount of spend can reach, such as a negative response from a channel
+with a positive coefficient, is an error.
 }
 \description{
 Predicted response across a range of spend, derived from the fitted
@@ -48,25 +53,34 @@ you that a reachable target is outside the data's support. Check the observed
 spend range yourself.
 }
 \examples{
+# The curve mm_weekly's television was simulated with: coefficient 5200,
+# half_max 2250 and shape 1.6, on adstocked weekly spend.
+data(mm_weekly)
+truth <- attr(mm_weekly, "truth")
+c(truth$beta[["tv"]], truth$half_max[["tv"]], truth$shape[["tv"]])
+
 # A concave curve: marginal return falls from the first pound onward.
 concave <- response_curve(
-  spend = seq(0, 100000, by = 20000),
-  coefficient = 5200, half_max = 45000, shape = 1
+  spend = seq(0, 5000, by = 1000),
+  coefficient = 5200, half_max = 2250, shape = 1
 )
 concave
 all(diff(concave$marginal) < 0)
 
-# An S-curve: marginal return RISES to the inflection point and only then
-# falls. Below the peak the channel is under-funded, not saturated.
+# An S-curve: marginal return rises up to the curve's steepest point, near
+# 900 here, and falls after it. Below that point each extra pound returns
+# more than the one before, so the curve is not yet saturated there; whether
+# the channel deserves more budget depends on how its marginal return
+# compares with other channels' and with break-even.
 s_curve <- response_curve(
-  spend = seq(0, 100000, by = 20000),
-  coefficient = 5200, half_max = 45000, shape = 1.6
+  spend = seq(0, 5000, by = 500),
+  coefficient = 5200, half_max = 2250, shape = 1.6
 )
 s_curve
 s_curve$spend[which.max(s_curve$marginal)]
 
 # What spend achieves a response of 2000?
-spend_for(target = 2000, coefficient = 5200, half_max = 45000, shape = 1.6)
+spend_for(target = 2000, coefficient = 5200, half_max = 2250, shape = 1.6)
 
 # An unbounded curve needs an explicit search range
 spend_for(target = 200000, coefficient = 5200, type = "power",

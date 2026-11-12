@@ -25,7 +25,8 @@ regressor.}
 \code{\link[=media_transform]{media_transform()}}. They must match the transform the model was fitted
 on.}
 
-\item{by}{Optional grouping vector, as for \code{\link[=media_transform]{media_transform()}}.}
+\item{by}{Optional grouping vector, as for \code{\link[=media_transform]{media_transform()}}, one element
+per element of \code{spend}.}
 
 \item{lift}{Proportional increase in spend used for the marginal return.
 The default \code{0.01} asks what a 1\% larger budget would have returned.}
@@ -37,10 +38,12 @@ later periods is counted.}
 
 \item{extend}{Number of zero-spend periods appended to the end of the series
 (to each group, when \code{by} is supplied) before summing response, so that
-carryover from late spend is allowed to play out. The default \code{0} matches
-\code{\link[=contributions]{contributions()}} and \code{\link[=roi]{roi()}}, which only count response inside the
-observed window; set it to \code{\link[=effective_window]{effective_window()}} of the decay to measure
-long-run return.}
+carryover from late spend is allowed to play out. At most 1,000,000. The
+default \code{0} counts response only inside the observed window, as
+\code{\link[=contributions]{contributions()}} and \code{\link[=roi]{roi()}} do, so the average return matches theirs.
+It also drops the carryover of late spend, which understates the marginal
+return of slow channels; see "Carryover after the window". Set it to
+\code{\link[=effective_window]{effective_window()}} of the decay to measure long-run return.}
 }
 \value{
 A one-row data frame with columns \code{spend} (total spend over the
@@ -58,10 +61,10 @@ Meridian: the incremental response from a small proportional increase in
 spend, divided by the incremental spend.
 }
 \details{
-Why not just differentiate the saturation curve? \code{\link[=mroi]{mroi()}} does that, and it
-answers a narrower question: the slope of the curve at one level of
-\emph{transformed} media. Turning it into a return on \emph{spend} needs two further
-steps that are easy to get wrong.
+Differentiating the saturation curve, as \code{\link[=mroi]{mroi()}} does, answers a narrower
+question: the slope of the curve at one level of \emph{transformed} media.
+Turning it into a return on \emph{spend} needs two further steps that are easy
+to get wrong.
 \itemize{
 \item \strong{Carryover.} A unit spent this week enters this week's adstock with the
 kernel's first weight only -- \code{1 - decay} for a normalised geometric
@@ -82,6 +85,22 @@ Simulation handles both by construction, for any kernel and any curve
 \code{\link[=media_transform]{media_transform()}} supports, and it is what makes average and marginal
 return directly comparable: both are totals over the same periods.
 }
+\section{Carryover after the window}{
+
+With the default \code{extend = 0}, response that spend would produce after the
+last observed period is not counted. The loss falls on spend near the end
+of the window and grows with the decay. For \code{mm_weekly}'s north television
+(decay 0.85) at its true parameters, the marginal return with \code{extend = 0}
+is 1.084, about 4\% below the 1.129 it reaches with
+\code{extend = effective_window(0.85, 0.99)}; for search (decay 0.15) the
+difference is under 0.5\%.
+
+The default makes the average return here equal the one \code{\link[=roi]{roi()}} reports
+from \code{\link[=contributions]{contributions()}}. For a budget decision, where each unit of spend
+should be credited with all the response it produces, pass
+\code{extend = effective_window(decay, 0.99)}.
+}
+
 \section{What this is not}{
 
 The answer is only as good as the fitted curve, and a curve is identified

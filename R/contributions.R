@@ -7,27 +7,48 @@
 #'
 #' @param media A data frame of the *transformed* media regressors -- adstocked
 #'   and saturated -- exactly as they entered the model. Column names must match
-#'   the model's coefficient names.
+#'   the model's coefficient names. Backticks in a coefficient name are
+#'   ignored, so a column named `TV Spend` matches the coefficient
+#'   `` `TV Spend` ``. Numeric columns that match no coefficient are left out,
+#'   with a message.
 #' @param model A fitted model, or a named numeric vector of coefficients.
-#'   Anything [stats::coef()] works on will do.
-#' @param intercept Model intercept. Taken from `model` when it has one; supply
-#'   it explicitly when passing a bare coefficient vector without an
+#'   Anything [stats::coef()] works on will do. For a mixed model from
+#'   \pkg{nlme} or \pkg{lme4}, the fixed effects are used, and group-level
+#'   deviations from them are part of the baseline.
+#' @param intercept Model intercept, used when the baseline is the intercept:
+#'   for a bare coefficient vector, or for a fitted model that cannot predict
+#'   the periods in `media`. Taken from `model` when it has one; supply it
+#'   explicitly when passing a bare coefficient vector without an
 #'   `"(Intercept)"` element.
 #' @param index Optional vector, the same length as `nrow(media)`, labelling the
 #'   periods. Used as the `period` column of the result.
 #' @param by Optional grouping vector, the same length as `nrow(media)`.
+#' @param newdata Optional data frame holding every variable `model` needs, one
+#'   row per row of `media`, for periods the model was not fitted on: a holdout,
+#'   or a reporting period. The baseline is then `predict(model, newdata)`
+#'   minus the media effect. Columns that appear in both `media` and `newdata`
+#'   must hold the same values.
 #'
 #' @return A data frame in long format with columns `period`, `group` (present
 #'   only when `by` is supplied), `channel` and `contribution`. The baseline
 #'   appears as a channel named `"(baseline)"`.
 #'
-#'   When `model` is a fitted object that [stats::fitted()] understands,
-#'   contributions sum exactly to the model's fitted value in every period,
-#'   because the baseline is computed as the fitted value minus the media
-#'   effect. When `model` is a bare coefficient vector there are no fitted
-#'   values to work from, so the baseline is just the intercept and
-#'   contributions sum to the media effect plus that intercept -- the function
-#'   says so when it happens.
+#'   The baseline is the model's prediction minus the media effect, so the
+#'   contributions in each period sum to that prediction. Which prediction is
+#'   used depends on the rows of `media`:
+#'
+#'   * When `media` holds the rows the model was fitted on, it is the model's
+#'     fitted value. The rows are recognised by comparing the media columns
+#'     with the model frame. A row the model dropped for a missing value has a
+#'     `NA` baseline, and a message says how many there are.
+#'   * For any other rows, it is `predict(model, newdata)`. Without `newdata`,
+#'     `media` itself is used when it holds every variable the model needs;
+#'     otherwise the baseline is the intercept alone, and a message says so.
+#'     The fitted values of the training rows are never used for other rows.
+#'   * For a bare coefficient vector there is nothing to predict with, so the
+#'     baseline is the intercept, and contributions sum to the media effect
+#'     plus that intercept. The function says so when the model has terms
+#'     that are not among the media columns.
 #'
 #' @details
 #' Contributions are computed as \eqn{\beta_j x_{jt}} for each channel, with
@@ -52,6 +73,18 @@
 #'   The result has class `mm_contributions`, with a [plot()][plot.mm_contributions]
 #'   method.
 #'
+#' @section Models with a link function:
+#' For a generalised linear model whose link is not the identity, such as a
+#' Poisson or log-link model, \eqn{\beta_j x_{jt}} is on the scale of the
+#' linear predictor, not of the KPI. Contributions are then computed on that
+#' scale throughout: the baseline is the linear predictor minus the media
+#' effect, each period sums to the linear predictor rather than to the fitted
+#' KPI, and a warning says so. Under a log link, `exp()` of a channel's
+#' contribution is the factor by which the channel multiplies the predicted
+#' KPI. To express a channel's effect in KPI units, compare the model's
+#' predictions with predictions from data in which that channel is set to
+#' zero.
+#'
 #' @seealso [roi()], [response_curve()], [diagnose_media()],
 #'   [plot.mm_contributions()]
 #'
@@ -71,7 +104,7 @@
 #'   truth$shape[channels]
 #' ))
 #'
-#' # Include the controls the data was generated with. Without them, the media
+#' # Include the controls the data was simulated with. Without them, the media
 #' # coefficients absorb price, trend and seasonality and two of them flip sign.
 #' model_data <- transformed
 #' model_data$week <- seq_len(nrow(model_data))
@@ -91,17 +124,36 @@
 #' # predicts that is not attributed to these five columns -- trend, price,
 #' # seasonality and the intercept. It is not organic demand.
 #' round(tapply(contrib$contribution, contrib$channel, sum))
+#'
+#' # A period the model was not fitted on: fit on the first two years and
+#' # decompose the third, with `newdata` holding the controls for those weeks.
+#' early <- seq_len(104)
+#' fit_early <- stats::lm(revenue ~ ., data = cbind(revenue = north$revenue,
+#'                                                  model_data)[early, ])
+#' holdout <- contributions(transformed[-early, ], fit_early,
+#'                          index = north$date[-early],
+#'                          newdata = model_data[-early, ])
+#' all.equal(as.numeric(tapply(holdout$contribution, holdout$period, sum)),
+#'           unname(stats::predict(fit_early, model_data[-early, ])))
 #' @export
 contributions <- function(media, model, intercept = NULL, index = NULL,
-                          by = NULL) {
+                          by = NULL, newdata = NULL) {
   if (!is.data.frame(media)) {
     if (is.matrix(media)) media <- as.data.frame(media) else
       cli::cli_abort("{.arg media} must be a data frame or matrix of \\
                       transformed regressors.")
   }
+  n <- nrow(media)
+  if (n == 0L) cli::cli_abort("{.arg media} has no rows.")
+  bare <- is.numeric(model) && !is.null(names(model))
   cf <- .mm_coefficients(model)
-  if (is.null(intercept)) {
-    intercept <- if ("(Intercept)" %in% names(cf)) unname(cf[["(Intercept)"]]) else 0
+  # A coefficient for a name that needed backticks in the formula, such as
+  # `TV Spend`, keeps them; the column it came from does not have them.
+  names(cf) <- gsub("`", "", names(cf), fixed = TRUE)
+  has_intercept <- "(Intercept)" %in% names(cf)
+  given_intercept <- !is.null(intercept)
+  if (!given_intercept) {
+    intercept <- if (has_intercept) unname(cf[["(Intercept)"]]) else 0
   }
   intercept <- .mm_check_scalar(intercept, "intercept")
   cf <- cf[setdiff(names(cf), "(Intercept)")]
@@ -129,42 +181,91 @@ contributions <- function(media, model, intercept = NULL, index = NULL,
     ))
   }
   unmatched <- setdiff(names(cf), names(media))
-  n <- nrow(media)
+  numeric_cols <- names(media)[vapply(media, is.numeric, logical(1))]
+  spare <- setdiff(numeric_cols, known)
+  if (length(spare) > 0L) {
+    cli::cli_inform(c(
+      "{length(spare)} numeric column{?s} of {.arg media} match{?es/} no model \\
+       coefficient and {?is/are} left out: {.val {utils::head(spare, 6)}}.",
+      i = if (length(unmatched) > 0L) {
+        "Coefficients with no media column: \\
+         {.val {utils::head(unmatched, 6)}}."
+      },
+      i = "Columns are matched to coefficients by exact name, so a term such \\
+           as {.code log1p(tv)} needs a column of that name."
+    ))
+  }
+  if (bare && !has_intercept && !given_intercept) {
+    cli::cli_inform(c(
+      "The coefficients have no {.val (Intercept)} element, so the intercept \\
+       is taken as 0.",
+      i = "Supply {.arg intercept} if the model had one."
+    ))
+  }
   if (is.null(index)) index <- seq_len(n)
   if (length(index) != n) {
     cli::cli_abort("{.arg index} must have {n} element{?s}, not {length(index)}.")
   }
+  if (!is.null(by)) {
+    len <- if (is.data.frame(by)) nrow(by) else length(by)
+    if (len != n) {
+      cli::cli_abort("{.arg by} must have one element per row of \\
+                      {.arg media} ({n}), not {len}.")
+    }
+  }
   by <- .mm_check_by(by, n)
 
-  media_effect <- rowSums(vapply(known, function(nm) {
-    unname(cf[[nm]]) * .mm_as_number(media[[nm]], nm)
-  }, numeric(n)))
+  link <- if (bare) NULL else .mm_link(model)
+  link_scale <- !is.null(link) && !identical(link, "identity")
+  if (link_scale) {
+    cli::cli_warn(c(
+      "{.arg model} has a {.val {link}} link, so contributions are on the \\
+       scale of its linear predictor, not of the KPI.",
+      i = "Each period sums to the linear predictor. Under a log link, \\
+           {.code exp()} of a contribution is the factor by which that \\
+           channel multiplies the prediction.",
+      i = "See \"Models with a link function\" in {.code ?contributions}."
+    ))
+  }
+
+  here <- environment()
+  values <- lapply(stats::setNames(known, known), function(nm) {
+    .mm_as_number(media[[nm]], nm, call = here)
+  })
+  effects <- lapply(known, function(nm) unname(cf[[nm]]) * values[[nm]])
+  names(effects) <- known
+  media_effect <- Reduce(`+`, effects, numeric(n))
 
   # The baseline is everything the model predicts that this decomposition does
-  # not attribute to the supplied media. Taking it as (fitted - media effect)
-  # rather than as the bare intercept is what makes the contributions actually
-  # sum to the fitted value, which is the property the whole table is read for.
-  fit <- suppressWarnings(try(stats::fitted(model), silent = TRUE))
-  exact <- !inherits(fit, "try-error") && is.numeric(fit) && length(fit) == n
-  if (exact) {
-    other <- as.numeric(fit) - media_effect
+  # not attribute to the supplied media. Taking it as (prediction - media
+  # effect) rather than as the bare intercept is what makes the contributions
+  # sum to the prediction, which is the property the whole table is read for.
+  # The prediction has to be for these rows: the fitted values belong to the
+  # rows the model was fitted on and to no others.
+  baseline <- .mm_contrib_baseline(model, bare, values, media, newdata,
+                                   link_scale, n)
+  other <- if (is.null(baseline)) {
+    rep(intercept, n)
   } else {
-    other <- rep(intercept, n)
-    if (length(unmatched) > 0L) {
-      cli::cli_inform(c(
-        "Contributions sum to the media effect plus the intercept, not to the \\
-         model's fitted value.",
-        i = "{length(unmatched)} model term{?s} {?is/are} not among the media \\
-             columns: {.val {utils::head(unmatched, 6)}}.",
-        i = "Pass a fitted model rather than a coefficient vector, and those \\
-             terms are pooled into {.val (baseline)} instead."
-      ))
-    }
+    baseline - media_effect
+  }
+  if (is.null(baseline) && bare && length(unmatched) > 0L) {
+    cli::cli_inform(c(
+      "Contributions sum to the media effect plus the intercept, not to the \\
+       model's fitted value.",
+      i = "{length(unmatched)} model term{?s} {?is/are} not among the media \\
+           columns: {.val {utils::head(unmatched, 6)}}.",
+      i = "Pass a fitted model rather than a coefficient vector, and those \\
+           terms are pooled into {.val (baseline)} instead."
+    ))
+  }
+  if (!is.null(baseline) && given_intercept) {
+    cli::cli_inform("{.arg intercept} is not used: the baseline comes from the \\
+                     model's prediction, which includes its own intercept.")
   }
 
   parts <- lapply(known, function(nm) {
-    data.frame(period = index, channel = nm,
-               contribution = unname(cf[[nm]]) * .mm_as_number(media[[nm]], nm),
+    data.frame(period = index, channel = nm, contribution = effects[[nm]],
                stringsAsFactors = FALSE)
   })
   parts[[length(parts) + 1L]] <- data.frame(
@@ -180,6 +281,193 @@ contributions <- function(media, model, intercept = NULL, index = NULL,
   out
 }
 
+# The model's prediction for the rows of `media`, on the scale contributions
+# are computed on, or NULL when there is none and the baseline is the
+# intercept.
+#' @keywords internal
+#' @noRd
+.mm_contrib_baseline <- function(model, bare, values, media, newdata,
+                                 link_scale, n, call = parent.frame()) {
+  if (!is.null(newdata)) {
+    if (bare) {
+      cli::cli_abort(c(
+        "{.arg newdata} needs a fitted model to predict from.",
+        i = "{.arg model} is a coefficient vector, which cannot predict."
+      ), call = call)
+    }
+    if (!is.data.frame(newdata)) {
+      cli::cli_abort("{.arg newdata} must be a data frame.", call = call)
+    }
+    if (nrow(newdata) != n) {
+      cli::cli_abort("{.arg newdata} must have one row per row of \\
+                      {.arg media} ({n}), not {nrow(newdata)}.", call = call)
+    }
+    both <- intersect(names(values), names(newdata))
+    differ <- both[!vapply(both, function(nm) {
+      nd <- suppressWarnings(as.numeric(newdata[[nm]]))
+      isTRUE(all.equal(values[[nm]], nd, check.attributes = FALSE))
+    }, logical(1))]
+    if (length(differ) > 0L) {
+      cli::cli_abort(c(
+        "{.arg media} and {.arg newdata} hold different values for \\
+         {.val {differ}}.",
+        i = "The media effect comes from {.arg media} and the prediction from \\
+             {.arg newdata}, so a column in both must hold the same values."
+      ), call = call)
+    }
+    pred <- tryCatch(.mm_model_predict(model, newdata, link_scale),
+                     error = function(e) {
+                       cli::cli_abort(c(
+                         "{.arg model} could not predict from {.arg newdata}.",
+                         x = conditionMessage(e)
+                       ), call = call)
+                     })
+    if (length(pred) != n) {
+      cli::cli_abort("{.fn predict} returned {length(pred)} value{?s} for the \\
+                      {n} row{?s} of {.arg newdata}.", call = call)
+    }
+    return(pred)
+  }
+  if (bare) return(NULL)
+
+  dropped <- .mm_dropped_rows(model)
+  fitted_values <- .mm_model_fitted(model, link_scale)
+  full <- if (is.null(fitted_values)) NULL else
+    .mm_spread_rows(fitted_values, dropped, n)
+  same <- if (is.null(full)) FALSE else
+    .mm_fitting_rows(model, values, dropped, n)
+  if (!isFALSE(same)) {
+    if (is.na(same)) {
+      cli::cli_inform(c(
+        "Could not check that {.arg media} holds the rows {.arg model} was \\
+         fitted on, so its fitted values are used as given.",
+        i = "For periods the model was not fitted on, pass {.arg newdata}."
+      ))
+    }
+    lost <- sum(is.na(full))
+    if (lost > 0L) {
+      cli::cli_inform(c(
+        "{lost} period{?s} {?was/were} left out of the fit for missing \\
+         values, so {?its/their} baseline is {.val {NA}}.",
+        i = "Pass {.arg newdata} with the model's variables for every period \\
+             to predict {cli::qty(lost)}{?it/them}."
+      ))
+    }
+    return(full)
+  }
+
+  vars <- .mm_model_vars(model)
+  absent <- if (is.null(vars)) character(0) else setdiff(vars, names(media))
+  if (!is.null(vars) && length(absent) == 0L) {
+    pred <- tryCatch(.mm_model_predict(model, media, link_scale),
+                     error = function(e) NULL)
+    if (length(pred) == n) return(pred)
+  }
+  cli::cli_inform(c(
+    "{.arg media} does not hold the rows {.arg model} was fitted on, so the \\
+     baseline is the intercept alone.",
+    x = "Contributions do not sum to the model's prediction for these periods.",
+    i = if (length(absent) > 0L) {
+      "Pass {.arg newdata} with the model's other variables for these \\
+       periods, such as {.val {utils::head(absent, 6)}}."
+    } else {
+      "Pass {.arg newdata} with every variable the model needs for these \\
+       periods."
+    }
+  ))
+  NULL
+}
+
+# The link of a model that has a family, or NULL.
+#' @keywords internal
+#' @noRd
+.mm_link <- function(model) {
+  fam <- tryCatch(stats::family(model), error = function(e) NULL)
+  if (!inherits(fam, "family")) return(NULL)
+  fam$link
+}
+
+#' @keywords internal
+#' @noRd
+.mm_model_predict <- function(model, newdata, link_scale) {
+  out <- if (link_scale) {
+    stats::predict(model, newdata = newdata, type = "link")
+  } else {
+    stats::predict(model, newdata = newdata)
+  }
+  as.numeric(out)
+}
+
+# Fitted values on the scale contributions are computed on, or NULL.
+#' @keywords internal
+#' @noRd
+.mm_model_fitted <- function(model, link_scale) {
+  out <- tryCatch(suppressWarnings(
+    if (link_scale) stats::predict(model, type = "link") else stats::fitted(model)
+  ), error = function(e) NULL)
+  if (!is.numeric(out)) return(NULL)
+  as.numeric(out)
+}
+
+# Rows of the original data the model dropped for missing values.
+#' @keywords internal
+#' @noRd
+.mm_dropped_rows <- function(model) {
+  na <- tryCatch(stats::na.action(model), error = function(e) NULL)
+  if (!is.numeric(na)) return(integer(0))
+  as.integer(na)
+}
+
+# Values for the rows a model was fitted on, spread back over all `n` rows of
+# the data with NA in the rows it dropped. `stats::naresid()` does this only
+# for `na.exclude`; under the default `na.omit` it returns the short vector.
+# NULL when the lengths cannot be reconciled.
+#' @keywords internal
+#' @noRd
+.mm_spread_rows <- function(v, dropped, n) {
+  if (length(v) == n) return(v)
+  k <- length(dropped)
+  if (k > 0L && length(v) + k == n && all(dropped >= 1L & dropped <= n)) {
+    out <- rep(NA_real_, n)
+    out[-dropped] <- v
+    return(out)
+  }
+  NULL
+}
+
+# TRUE when the media columns found in the model frame hold the same values as
+# `values`, so `media` is the data the model was fitted on; FALSE when they
+# differ; NA when no column could be compared.
+#' @keywords internal
+#' @noRd
+.mm_fitting_rows <- function(model, values, dropped, n) {
+  mf <- tryCatch(stats::model.frame(model), error = function(e) NULL)
+  if (!is.data.frame(mf)) return(NA)
+  checked <- FALSE
+  for (nm in intersect(names(values), names(mf))) {
+    col <- mf[[nm]]
+    if (!is.numeric(col) || !is.null(dim(col))) next
+    full <- .mm_spread_rows(as.numeric(col), dropped, n)
+    if (is.null(full)) return(FALSE)
+    keep <- !is.na(full)
+    if (!isTRUE(all.equal(full[keep], values[[nm]][keep],
+                          check.attributes = FALSE))) {
+      return(FALSE)
+    }
+    checked <- TRUE
+  }
+  if (checked) TRUE else NA
+}
+
+# Variables the model's right-hand side uses, or NULL when it has no terms.
+#' @keywords internal
+#' @noRd
+.mm_model_vars <- function(model) {
+  tt <- tryCatch(stats::terms(model), error = function(e) NULL)
+  if (!inherits(tt, "terms")) return(NULL)
+  all.vars(stats::delete.response(tt))
+}
+
 #' Return on investment and marginal return
 #'
 #' `roi()` divides each channel's total contribution by its total spend.
@@ -189,19 +477,27 @@ contributions <- function(media, model, intercept = NULL, index = NULL,
 #' @param contributions A data frame from [contributions()], or a named numeric
 #'   vector of total contribution per channel.
 #' @param spend A data frame of raw (untransformed) spend with one column per
-#'   channel, or a named numeric vector of total spend per channel.
+#'   channel and one row per period, or a named numeric vector of total spend
+#'   per channel. Spend columns are read as numbers: a factor is read by its
+#'   labels, and text that is not a number is an error.
 #' @param spend_level Current spend level for the channel, in the same units the
 #'   saturation curve was fitted on.
 #' @param coefficient The channel's fitted coefficient.
 #' @param delta Increment used for the numerical derivative, as a fraction of
 #'   `spend_level`.
 #' @param ... Passed to [saturate()], for example `half_max` and `shape`.
-#' @param type Saturation curve type.
+#' @param type Saturation curve type, as in [saturate()], or `"none"` for a
+#'   linear response.
 #'
 #' @return `roi()` returns a data frame with columns `channel`, `contribution`,
 #'   `spend` and `roi`, ordered by descending ROI, with `roi` set to `NA` where
 #'   spend is zero. Channels appearing in only one of the two inputs are
 #'   omitted, and reported when that happens. `mroi()` returns a single number.
+#'
+#'   Each channel's contribution and spend must cover the same periods. When
+#'   `contributions` comes from [contributions()] and `spend` is a data frame,
+#'   `roi()` warns if the number of periods decomposed differs from the number
+#'   of rows of `spend`.
 #'
 #' @details
 #' Average ROI and marginal ROI answer different questions and are routinely
@@ -223,14 +519,20 @@ contributions <- function(media, model, intercept = NULL, index = NULL,
 #' For an **S-shaped** response -- `saturate_hill()` with `shape > 1`, the usual
 #' way to represent a threshold effect -- the curve is *convex* below its
 #' inflection point, and there marginal ROI is **above** average ROI. A channel
-#' in that region is under-funded: each extra pound works harder than the pounds
-#' already spent, because the channel has not yet reached the pressure at which
-#' it starts to pay. Ruling that out by assuming marginal is always lower is how
-#' a threshold channel stays starved.
+#' in that region has not saturated: each extra pound works harder than the
+#' pounds already spent, so a cut there loses more per pound than the average
+#' return suggests. Whether the channel should get more budget still depends on
+#' how its marginal return compares with other channels' and with break-even.
 #'
 #' `mroi()` differentiates the fitted response curve numerically, so it works
-#' for any curve [saturate()] supports, and it is finite and correct at
-#' `spend_level = 0`.
+#' for any curve [saturate()] supports, with a step that scales with the curve's
+#' own spend parameter (`half_max`, `km`, or the half-life of `rate`). At
+#' `spend_level = 0` it is finite and correct wherever the curve's slope at
+#' zero is finite: Hill curves with `shape >= 1`, Michaelis--Menten,
+#' exponential and `"none"`. A Hill curve with `shape < 1` and a power curve
+#' with `exponent < 1` rise infinitely steeply at zero, and there `mroi()`
+#' returns the average slope over a short first step, which is large but not a
+#' derivative.
 #'
 #' @section Marginal return when the regressor was adstocked:
 #' `mroi()` is the slope of the saturation curve with respect to the quantity
@@ -310,17 +612,41 @@ roi <- function(contributions, spend) {
   }
   contrib <- contrib[names(contrib) != "(baseline)"]
 
-  sp <- if (is.data.frame(spend)) {
-    vapply(spend, function(z) sum(as.numeric(z), na.rm = TRUE), numeric(1))
-  } else {
+  if (!is.data.frame(spend)) {
     if (is.null(names(spend))) {
       cli::cli_abort("{.arg spend} must be named when given as a vector.")
     }
+    if (!is.numeric(spend)) {
+      cli::cli_abort("{.arg spend} must be numeric, not \\
+                      {.obj_type_friendly {spend}}.")
+    }
+  }
+  common <- intersect(names(contrib), names(spend))
+  dropped <- setdiff(union(names(contrib), names(spend)), common)
+  sp <- if (is.data.frame(spend)) {
+    # Only the channel columns are read, so a date or label column in `spend`
+    # is reported as unmatched rather than summed.
+    here <- environment()
+    vapply(stats::setNames(common, common), function(cn) {
+      sum(.mm_as_number(spend[[cn]], cn, call = here), na.rm = TRUE)
+    }, numeric(1))
+  } else {
     spend
   }
-
-  common <- intersect(names(contrib), names(sp))
-  dropped <- setdiff(union(names(contrib), names(sp)), common)
+  if (is.data.frame(contributions) && "period" %in% names(contributions) &&
+      is.data.frame(spend) && length(common) > 0L) {
+    periods <- max(table(contributions$channel))
+    if (periods != nrow(spend)) {
+      cli::cli_warn(c(
+        "{.arg contributions} cover {periods} period{?s}, but {.arg spend} has \\
+         {nrow(spend)} row{?s}.",
+        i = "ROI divides each channel's total contribution by its total spend, \\
+             so both must cover the same periods.",
+        i = "Pass the rows of {.arg spend} for the periods that were \\
+             decomposed."
+      ))
+    }
+  }
   if (length(dropped) > 0L && length(common) > 0L) {
     cli::cli_inform(c(
       "{length(dropped)} channel{?s} appear{?s/} in only one of \\
@@ -332,7 +658,7 @@ roi <- function(contributions, spend) {
     cli::cli_abort(c(
       "No channel appears in both {.arg contributions} and {.arg spend}.",
       i = "Contributions: {.val {utils::head(names(contrib), 8)}}.",
-      i = "Spend: {.val {utils::head(names(sp), 8)}}."
+      i = "Spend: {.val {utils::head(names(spend), 8)}}."
     ))
   }
   out <- data.frame(
@@ -354,6 +680,7 @@ mroi <- function(spend_level, coefficient, type = "hill", delta = 0.01, ...) {
   coefficient <- .mm_check_scalar(coefficient, "coefficient")
   delta <- .mm_check_scalar(delta, "delta", lower = 0, upper = 1,
                             inclusive = c(FALSE, TRUE))
+  type <- .mm_curve_type(type)
   .mm_slope(spend_level, coefficient, type, delta, ...)
 }
 
@@ -361,16 +688,52 @@ mroi <- function(spend_level, coefficient, type = "hill", delta = 0.01, ...) {
 #' @keywords internal
 #' @noRd
 .mm_slope <- function(x, coefficient, type, delta, ...) {
-  h <- pmax(x * delta, .Machine$double.eps^0.25)
+  # The step has a floor so that the slope at zero spend is defined. The floor
+  # is relative to the curve's spend scale, since an absolute one is far too
+  # wide for a curve fitted on tiny spend values. For a Hill curve with
+  # shape 1 it gives a relative error of about 3e-6 at zero, at any scale.
+  scale <- .mm_curve_scale(type, list(...), default = 1)
+  h <- pmax(x * delta, .Machine$double.eps^(1 / 3) * scale)
   # Clamp the lower point at zero -- spend cannot be negative -- and divide by
-  # the interval actually spanned. Dividing by `h` regardless would halve the
-  # answer at `spend_level = 0`, which is the single most decision-relevant
-  # query: what does the first pound into a dark channel return?
+  # the interval spanned. Dividing by `h` regardless would halve the answer at
+  # `spend_level = 0`, which is the single most decision-relevant query: what
+  # does the first pound into a dark channel return?
   lo_s <- pmax(0, x - h / 2)
   hi_s <- x + h / 2
-  lo <- saturate(lo_s, type = type, ...)
-  hi <- saturate(hi_s, type = type, ...)
+  lo <- .mm_curve(lo_s, type, ...)
+  hi <- .mm_curve(hi_s, type, ...)
   coefficient * (hi - lo) / (hi_s - lo_s)
+}
+
+#' @keywords internal
+#' @noRd
+.mm_curve_type <- function(type, call = parent.frame()) {
+  types <- c("hill", "exponential", "michaelis_menten", "power", "none")
+  if (!.mm_is_string(type) || !type %in% types) {
+    cli::cli_abort("{.arg type} must be one of {.val {types}}.", call = call)
+  }
+  type
+}
+
+# The saturation curve, with "none" as the identity, as in media_transform().
+#' @keywords internal
+#' @noRd
+.mm_curve <- function(x, type, ...) {
+  if (identical(type, "none")) return(x)
+  saturate(x, type = type, ...)
+}
+
+# The spend level that sets a curve's scale: `half_max`, `km`, or the
+# half-life of `rate`. `default` when the curve has none.
+#' @keywords internal
+#' @noRd
+.mm_curve_scale <- function(type, args, default = NULL) {
+  s <- switch(type,
+              hill = args$half_max,
+              michaelis_menten = args$km,
+              exponential = if (is.numeric(args$rate)) log(2) / args$rate,
+              NULL)
+  if (is.numeric(s) && length(s) == 1L && is.finite(s) && s > 0) s else default
 }
 
 #' Response curve for a channel
@@ -382,18 +745,23 @@ mroi <- function(spend_level, coefficient, type = "hill", delta = 0.01, ...) {
 #' @param spend Numeric vector of spend levels to evaluate. `response_curve()`
 #'   only; `spend_for()` has no such argument.
 #' @param coefficient The channel's fitted coefficient.
-#' @param type Saturation curve type, as in [saturate()].
-#' @param target Target response level. `spend_for()` only.
+#' @param type Saturation curve type, as in [saturate()], or `"none"` for a
+#'   linear response.
+#' @param target Target response level. `spend_for()` only. It must lie on
+#'   the side of the response at zero spend that spending moves towards:
+#'   above it for a positive coefficient, below it for a negative one.
 #' @param max_spend Upper bound of the search interval for `spend_for()`.
 #'   Defaults to 1000 times the curve's spend-scaled parameter (`half_max`,
-#'   `km`, or `log(2)/rate`). `saturate_power()` has no such parameter, so
-#'   `max_spend` is required there.
+#'   `km`, or `log(2)/rate`). `saturate_power()` and `"none"` have no such
+#'   parameter, so `max_spend` is required there.
 #' @param ... Passed to [saturate()], for example `half_max` and `shape`.
 #'
 #' @return `response_curve()` returns a data frame with columns `spend`,
 #'   `response` and `marginal`, one row per element of `spend` and in the same
 #'   order. `spend_for()` returns a single number, or `NA_real_` with a warning
-#'   when the target is not reachable within `max_spend`.
+#'   when the target is not reachable within `max_spend`. A target that no
+#'   amount of spend can reach, such as a negative response from a channel
+#'   with a positive coefficient, is an error.
 #'
 #' @details
 #' These describe the *response curve the model fitted*, which is not the same
@@ -408,25 +776,34 @@ mroi <- function(spend_level, coefficient, type = "hill", delta = 0.01, ...) {
 #' @seealso [saturate()], [mroi()]
 #'
 #' @examples
+#' # The curve mm_weekly's television was simulated with: coefficient 5200,
+#' # half_max 2250 and shape 1.6, on adstocked weekly spend.
+#' data(mm_weekly)
+#' truth <- attr(mm_weekly, "truth")
+#' c(truth$beta[["tv"]], truth$half_max[["tv"]], truth$shape[["tv"]])
+#'
 #' # A concave curve: marginal return falls from the first pound onward.
 #' concave <- response_curve(
-#'   spend = seq(0, 100000, by = 20000),
-#'   coefficient = 5200, half_max = 45000, shape = 1
+#'   spend = seq(0, 5000, by = 1000),
+#'   coefficient = 5200, half_max = 2250, shape = 1
 #' )
 #' concave
 #' all(diff(concave$marginal) < 0)
 #'
-#' # An S-curve: marginal return RISES to the inflection point and only then
-#' # falls. Below the peak the channel is under-funded, not saturated.
+#' # An S-curve: marginal return rises up to the curve's steepest point, near
+#' # 900 here, and falls after it. Below that point each extra pound returns
+#' # more than the one before, so the curve is not yet saturated there; whether
+#' # the channel deserves more budget depends on how its marginal return
+#' # compares with other channels' and with break-even.
 #' s_curve <- response_curve(
-#'   spend = seq(0, 100000, by = 20000),
-#'   coefficient = 5200, half_max = 45000, shape = 1.6
+#'   spend = seq(0, 5000, by = 500),
+#'   coefficient = 5200, half_max = 2250, shape = 1.6
 #' )
 #' s_curve
 #' s_curve$spend[which.max(s_curve$marginal)]
 #'
 #' # What spend achieves a response of 2000?
-#' spend_for(target = 2000, coefficient = 5200, half_max = 45000, shape = 1.6)
+#' spend_for(target = 2000, coefficient = 5200, half_max = 2250, shape = 1.6)
 #'
 #' # An unbounded curve needs an explicit search range
 #' spend_for(target = 200000, coefficient = 5200, type = "power",
@@ -434,9 +811,10 @@ mroi <- function(spend_level, coefficient, type = "hill", delta = 0.01, ...) {
 #' @export
 response_curve <- function(spend, coefficient, type = "hill", ...) {
   spend <- .mm_check_numeric(spend, "spend", allow_na = FALSE, finite = TRUE)
-  coefficient <- .mm_check_scalar(coefficient, "coefficient")
-  resp <- coefficient * saturate(spend, type = type, ...)
   if (any(spend < 0)) cli::cli_abort("{.arg spend} must be non-negative.")
+  coefficient <- .mm_check_scalar(coefficient, "coefficient")
+  type <- .mm_curve_type(type)
+  resp <- coefficient * .mm_curve(spend, type, ...)
   marg <- .mm_slope(spend, coefficient, type, delta = 0.01, ...)
   out <- data.frame(spend = spend, response = resp, marginal = marg,
                     stringsAsFactors = FALSE)
@@ -450,15 +828,14 @@ spend_for <- function(target, coefficient, type = "hill", max_spend = NULL,
                       ...) {
   target <- .mm_check_scalar(target, "target")
   coefficient <- .mm_check_scalar(coefficient, "coefficient")
+  type <- .mm_curve_type(type)
   args <- list(...)
   if (is.null(max_spend)) {
-    # A sensible upper bracket depends on the curve. Only Hill and
-    # Michaelis-Menten carry a spend-scaled parameter; for the others there is
-    # nothing to infer a scale from, so say so rather than silently searching
-    # up to 1000.
-    base <- if (!is.null(args$half_max)) args$half_max else
-      if (!is.null(args$km)) args$km else
-        if (!is.null(args$rate)) log(2) / args$rate else NULL
+    # A sensible upper bracket depends on the curve. Only Hill,
+    # Michaelis-Menten and the exponential carry a spend-scaled parameter; for
+    # the others there is nothing to infer a scale from, so say so rather than
+    # silently searching up to 1000.
+    base <- .mm_curve_scale(type, args)
     if (is.null(base)) {
       cli::cli_abort(c(
         "{.arg max_spend} is required for saturation type {.val {type}}.",
@@ -473,16 +850,35 @@ spend_for <- function(target, coefficient, type = "hill", max_spend = NULL,
   max_spend <- .mm_check_scalar(max_spend, "max_spend", lower = 0,
                                 inclusive = c(FALSE, TRUE))
 
-  f <- function(s) coefficient * saturate(s, type = type, ...) - target
+  f <- function(s) coefficient * .mm_curve(s, type, ...) - target
   f0 <- f(0)
-  fmax <- f(max_spend)
-  if (isTRUE(all.equal(f0, 0))) return(0)
-  if (!is.finite(f0) || !is.finite(fmax)) return(NA_real_)
+  if (!is.finite(f0)) return(NA_real_)
+  if (f0 == 0) return(0)
+
+  # Spend moves the response away from its value at zero spend in one
+  # direction only: up for a positive coefficient, down for a negative one.
+  # A target on the other side is out of reach at any spend.
+  at_zero <- f0 + target
+  if (coefficient == 0 || sign(target - at_zero) != sign(coefficient)) {
+    cli::cli_abort(c(
+      "No amount of spend reaches the target response.",
+      x = if (coefficient == 0) {
+        "A coefficient of 0 gives a response of {signif(at_zero, 6)} at any \\
+         spend; the target is {signif(target, 6)}."
+      } else {
+        "The response at zero spend is {signif(at_zero, 6)}, and spend can \\
+         only {if (coefficient > 0) 'raise' else 'lower'} it; the target is \\
+         {signif(target, 6)}."
+      }
+    ))
+  }
 
   # Works in both directions: a negative coefficient makes the response
   # decreasing, and a decreasing curve can still cross a negative target.
+  fmax <- f(max_spend)
+  if (!is.finite(fmax)) return(NA_real_)
   if (sign(f0) == sign(fmax)) {
-    reachable <- coefficient * saturate(max_spend, type = type, ...)
+    reachable <- coefficient * .mm_curve(max_spend, type, ...)
     bounded <- type %in% c("hill", "exponential", "michaelis_menten")
     cli::cli_warn(c(
       "The target response is not reachable within {.arg max_spend}.",
@@ -496,15 +892,23 @@ spend_for <- function(target, coefficient, type = "hill", max_spend = NULL,
     ))
     return(NA_real_)
   }
-  stats::uniroot(f, interval = c(0, max_spend))$root
+  # uniroot()'s default tolerance is absolute, about 1e-4, which loses a root
+  # that small spend levels or a small target put near zero. A tolerance
+  # relative to the search interval keeps the root's relative accuracy.
+  stats::uniroot(f, interval = c(0, max_spend),
+                 tol = .Machine$double.eps * max_spend)$root
 }
 
 #' @keywords internal
 #' @noRd
-.mm_coefficients <- function(model, call = parent.frame(2)) {
+.mm_coefficients <- function(model, call = parent.frame()) {
   if (is.numeric(model) && !is.null(names(model))) return(model)
-  cf <- try(stats::coef(model), silent = TRUE)
-  if (inherits(cf, "try-error") || !is.numeric(cf) || is.null(names(cf))) {
+  named <- function(cf) is.numeric(cf) && !is.null(names(cf))
+  cf <- tryCatch(stats::coef(model), error = function(e) NULL)
+  # For a mixed model coef() gives a table of per-group coefficients; the
+  # population-level ones are the fixed effects.
+  if (!named(cf)) cf <- .mm_fixef(model)
+  if (!named(cf)) {
     cli::cli_abort(c(
       "Could not extract named coefficients from {.arg model}.",
       i = "Pass a fitted model that {.fn stats::coef} understands, or a named \\
@@ -512,4 +916,14 @@ spend_for <- function(target, coefficient, type = "hill", max_spend = NULL,
     ), call = call)
   }
   cf
+}
+
+# Fixed effects through the generic that nlme defines and lme4 extends. A
+# model of either class can only exist once its package, and so nlme, is
+# loaded, which is why nothing is loaded here.
+#' @keywords internal
+#' @noRd
+.mm_fixef <- function(model) {
+  if (!isNamespaceLoaded("nlme")) return(NULL)
+  tryCatch(getExportedValue("nlme", "fixef")(model), error = function(e) NULL)
 }

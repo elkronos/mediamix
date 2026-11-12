@@ -14,7 +14,8 @@
 #' @param adstock,saturation Lists describing the transform, exactly as for
 #'   [media_transform()]. They must match the transform the model was fitted
 #'   on.
-#' @param by Optional grouping vector, as for [media_transform()].
+#' @param by Optional grouping vector, as for [media_transform()], one element
+#'   per element of `spend`.
 #' @param lift Proportional increase in spend used for the marginal return.
 #'   The default `0.01` asks what a 1% larger budget would have returned.
 #' @param rows Optional logical or integer index of the periods whose spend is
@@ -23,10 +24,12 @@
 #'   later periods is counted.
 #' @param extend Number of zero-spend periods appended to the end of the series
 #'   (to each group, when `by` is supplied) before summing response, so that
-#'   carryover from late spend is allowed to play out. The default `0` matches
-#'   [contributions()] and [roi()], which only count response inside the
-#'   observed window; set it to [effective_window()] of the decay to measure
-#'   long-run return.
+#'   carryover from late spend is allowed to play out. At most 1,000,000. The
+#'   default `0` counts response only inside the observed window, as
+#'   [contributions()] and [roi()] do, so the average return matches theirs.
+#'   It also drops the carryover of late spend, which understates the marginal
+#'   return of slow channels; see "Carryover after the window". Set it to
+#'   [effective_window()] of the decay to measure long-run return.
 #'
 #' @return A one-row data frame with columns `spend` (total spend over the
 #'   series), `contribution` (the channel's total response), `roi` (their
@@ -34,10 +37,10 @@
 #'   incremental spend, when the spend in `rows` is increased by `lift`).
 #'
 #' @details
-#' Why not just differentiate the saturation curve? [mroi()] does that, and it
-#' answers a narrower question: the slope of the curve at one level of
-#' *transformed* media. Turning it into a return on *spend* needs two further
-#' steps that are easy to get wrong.
+#' Differentiating the saturation curve, as [mroi()] does, answers a narrower
+#' question: the slope of the curve at one level of *transformed* media.
+#' Turning it into a return on *spend* needs two further steps that are easy
+#' to get wrong.
 #'
 #' * **Carryover.** A unit spent this week enters this week's adstock with the
 #'   kernel's first weight only -- `1 - decay` for a normalised geometric
@@ -56,6 +59,20 @@
 #' Simulation handles both by construction, for any kernel and any curve
 #' [media_transform()] supports, and it is what makes average and marginal
 #' return directly comparable: both are totals over the same periods.
+#'
+#' @section Carryover after the window:
+#' With the default `extend = 0`, response that spend would produce after the
+#' last observed period is not counted. The loss falls on spend near the end
+#' of the window and grows with the decay. For `mm_weekly`'s north television
+#' (decay 0.85) at its true parameters, the marginal return with `extend = 0`
+#' is 1.084, about 4% below the 1.129 it reaches with
+#' `extend = effective_window(0.85, 0.99)`; for search (decay 0.15) the
+#' difference is under 0.5%.
+#'
+#' The default makes the average return here equal the one [roi()] reports
+#' from [contributions()]. For a budget decision, where each unit of spend
+#' should be credited with all the response it produces, pass
+#' `extend = effective_window(decay, 0.99)`.
 #'
 #' @section What this is not:
 #' The answer is only as good as the fitted curve, and a curve is identified
@@ -110,8 +127,15 @@ marginal_roi <- function(spend, coefficient,
   if (any(spend < 0)) cli::cli_abort("{.arg spend} must be non-negative.")
   coefficient <- .mm_check_scalar(coefficient, "coefficient")
   lift <- .mm_check_scalar(lift, "lift", lower = 0, inclusive = c(FALSE, TRUE))
-  extend <- .mm_check_count(extend, "extend", min = 0L)
+  extend <- .mm_check_bounded_count(extend, "extend", min = 0L, max = 1e6)
   n <- length(spend)
+  if (!is.null(by)) {
+    len <- if (is.data.frame(by)) nrow(by) else length(by)
+    if (len != n) {
+      cli::cli_abort("{.arg by} must have one element per element of \\
+                      {.arg spend} ({n}), not {len}.")
+    }
+  }
   by <- .mm_check_by(by, n)
 
   in_window <- if (is.null(rows)) {

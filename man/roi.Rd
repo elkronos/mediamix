@@ -14,14 +14,17 @@ mroi(spend_level, coefficient, type = "hill", delta = 0.01, ...)
 vector of total contribution per channel.}
 
 \item{spend}{A data frame of raw (untransformed) spend with one column per
-channel, or a named numeric vector of total spend per channel.}
+channel and one row per period, or a named numeric vector of total spend
+per channel. Spend columns are read as numbers: a factor is read by its
+labels, and text that is not a number is an error.}
 
 \item{spend_level}{Current spend level for the channel, in the same units the
 saturation curve was fitted on.}
 
 \item{coefficient}{The channel's fitted coefficient.}
 
-\item{type}{Saturation curve type.}
+\item{type}{Saturation curve type, as in \code{\link[=saturate]{saturate()}}, or \code{"none"} for a
+linear response.}
 
 \item{delta}{Increment used for the numerical derivative, as a fraction of
 \code{spend_level}.}
@@ -33,6 +36,11 @@ saturation curve was fitted on.}
 \code{spend} and \code{roi}, ordered by descending ROI, with \code{roi} set to \code{NA} where
 spend is zero. Channels appearing in only one of the two inputs are
 omitted, and reported when that happens. \code{mroi()} returns a single number.
+
+Each channel's contribution and spend must cover the same periods. When
+\code{contributions} comes from \code{\link[=contributions]{contributions()}} and \code{spend} is a data frame,
+\code{roi()} warns if the number of periods decomposed differs from the number
+of rows of \code{spend}.
 }
 \description{
 \code{roi()} divides each channel's total contribution by its total spend.
@@ -59,14 +67,20 @@ best on an average-ROI table.
 For an \strong{S-shaped} response -- \code{saturate_hill()} with \code{shape > 1}, the usual
 way to represent a threshold effect -- the curve is \emph{convex} below its
 inflection point, and there marginal ROI is \strong{above} average ROI. A channel
-in that region is under-funded: each extra pound works harder than the pounds
-already spent, because the channel has not yet reached the pressure at which
-it starts to pay. Ruling that out by assuming marginal is always lower is how
-a threshold channel stays starved.
+in that region has not saturated: each extra pound works harder than the
+pounds already spent, so a cut there loses more per pound than the average
+return suggests. Whether the channel should get more budget still depends on
+how its marginal return compares with other channels' and with break-even.
 
 \code{mroi()} differentiates the fitted response curve numerically, so it works
-for any curve \code{\link[=saturate]{saturate()}} supports, and it is finite and correct at
-\code{spend_level = 0}.
+for any curve \code{\link[=saturate]{saturate()}} supports, with a step that scales with the curve's
+own spend parameter (\code{half_max}, \code{km}, or the half-life of \code{rate}). At
+\code{spend_level = 0} it is finite and correct wherever the curve's slope at
+zero is finite: Hill curves with \code{shape >= 1}, Michaelis--Menten,
+exponential and \code{"none"}. A Hill curve with \code{shape < 1} and a power curve
+with \code{exponent < 1} rise infinitely steeply at zero, and there \code{mroi()}
+returns the average slope over a short first step, which is large but not a
+derivative.
 }
 \section{Marginal return when the regressor was adstocked}{
 
