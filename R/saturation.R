@@ -18,17 +18,22 @@
 #' @param vmax Michaelis--Menten asymptote: the response as `x` grows without
 #'   bound.
 #' @param km Michaelis--Menten constant: the value of `x` at which the response
-#'   reaches half of `vmax`.
+#'   reaches half of `vmax`. Required. It comes after `vmax` in the argument
+#'   list, so `saturate_michaelis_menten(x, 100)` sets `vmax`; name it, as in
+#'   `km = 100`.
 #' @param exponent Power exponent in `(0, 1]`. `exponent = 1` is the identity
 #'   (no saturation); smaller values bend the curve harder.
 #' @param type Which curve [saturate()] should dispatch to.
 #' @param ... Passed to the individual curve function.
 #'
-#' @return A numeric vector the same length as `x`, in the same order.
+#' @return A numeric vector the same length as `x`, in the same order, with the
+#'   names and time-series attributes of `x`.
 #'
 #' @details
-#' `saturate_hill()` and `saturate_exponential()` are bounded on `[0, 1)`, so
-#' the fitted coefficient carries the channel's ceiling.
+#' `saturate_hill()` and `saturate_exponential()` rise from 0 towards 1 and
+#' never exceed it, so the fitted coefficient carries the channel's ceiling.
+#' Mathematically they stay below 1; in floating point they reach exactly 1
+#' once `x` is large enough, for example `saturate_exponential(40, rate = 1)`.
 #' `saturate_michaelis_menten()` is bounded by `vmax`. All three approach their
 #' ceiling smoothly at arbitrarily large `x`, including `Inf`, rather than
 #' overflowing.
@@ -42,9 +47,11 @@
 #' and practitioners arrive expecting one or the other.
 #'
 #' @section Transform order:
-#' Saturation is applied *after* adstock, not before. Saturating first would
-#' cap each period's spend in isolation and then let carryover accumulate the
-#' capped values past the cap, which defeats the point of having a ceiling. Use
+#' Saturation is applied *after* adstock, not before. Saturating first puts
+#' each period's spend through the curve in isolation, so carryover from
+#' earlier periods never counts towards saturation. With an unnormalised
+#' kernel (`normalise = FALSE`) carryover then also accumulates the saturated
+#' values past the ceiling, which defeats the point of having one. Use
 #' [media_transform()] to get the order right without having to remember it.
 #'
 #' @references
@@ -83,6 +90,7 @@ NULL
 #' @rdname saturation
 #' @export
 saturate_hill <- function(x, half_max, shape = 1) {
+  x_in <- x
   x <- .mm_check_saturation_input(x)
   half_max <- .mm_check_scalar(half_max, "half_max", lower = 0,
                                inclusive = c(FALSE, TRUE))
@@ -90,23 +98,34 @@ saturate_hill <- function(x, half_max, shape = 1) {
   # Computed as 1 / (1 + (half_max/x)^shape) rather than x^s / (x^s + h^s).
   # The two are algebraically identical, but the direct form overflows to
   # Inf/Inf = NaN for large x or large shape, which would break the documented
-  # [0, 1) bound exactly where the curve should be flattest.
+  # [0, 1] bound exactly where the curve should be flattest.
   out <- 1 / (1 + (half_max / x)^shape)
   out[!is.na(x) & x == 0] <- 0
-  out
+  .mm_like_input(out, x_in)
 }
 
 #' @rdname saturation
 #' @export
 saturate_exponential <- function(x, rate) {
+  x_in <- x
   x <- .mm_check_saturation_input(x)
   rate <- .mm_check_scalar(rate, "rate", lower = 0, inclusive = c(FALSE, TRUE))
-  1 - exp(-rate * x)
+  # -expm1(-y) rather than 1 - exp(-y), which loses the digits of a small y.
+  .mm_like_input(-expm1(-rate * x), x_in)
 }
 
 #' @rdname saturation
 #' @export
 saturate_michaelis_menten <- function(x, vmax = 1, km) {
+  if (missing(km)) {
+    cli::cli_abort(c(
+      "{.arg km} is missing, with no default.",
+      i = "The second argument is {.arg vmax}, so a lone positional value \\
+           sets the ceiling. Name the half-saturation point, as in \\
+           {.code km = 100}."
+    ))
+  }
+  x_in <- x
   x <- .mm_check_saturation_input(x)
   vmax <- .mm_check_scalar(vmax, "vmax", lower = 0, inclusive = c(FALSE, TRUE))
   km <- .mm_check_scalar(km, "km", lower = 0, inclusive = c(FALSE, TRUE))
@@ -114,16 +133,17 @@ saturate_michaelis_menten <- function(x, vmax = 1, km) {
   # x = Inf where the direct form gives Inf/Inf.
   out <- vmax / (1 + km / x)
   out[!is.na(x) & x == 0] <- 0
-  out
+  .mm_like_input(out, x_in)
 }
 
 #' @rdname saturation
 #' @export
 saturate_power <- function(x, exponent) {
+  x_in <- x
   x <- .mm_check_saturation_input(x)
   exponent <- .mm_check_scalar(exponent, "exponent", lower = 0, upper = 1,
                                inclusive = c(FALSE, TRUE))
-  x^exponent
+  .mm_like_input(x^exponent, x_in)
 }
 
 #' @rdname saturation

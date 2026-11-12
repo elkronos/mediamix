@@ -175,6 +175,20 @@
   vapply(.mm_split_key(key), paste, character(1), collapse = " / ")
 }
 
+# Validation strips a series to a bare double, so a transform puts the input's
+# names and time-series attributes back on its output, which has the same
+# length and order.
+#' @keywords internal
+#' @noRd
+.mm_like_input <- function(out, x) {
+  if (!is.null(names(x))) names(out) <- names(x)
+  if (stats::is.ts(x)) {
+    stats::tsp(out) <- stats::tsp(x)
+    class(out) <- "ts"
+  }
+  out
+}
+
 # A short, printable name for a function passed as an argument. `deparse()` on
 # an anonymous function yields a fragment of its source, which is not a label.
 #' @keywords internal

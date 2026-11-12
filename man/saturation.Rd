@@ -39,7 +39,9 @@ sooner.}
 bound.}
 
 \item{km}{Michaelis--Menten constant: the value of \code{x} at which the response
-reaches half of \code{vmax}.}
+reaches half of \code{vmax}. Required. It comes after \code{vmax} in the argument
+list, so \code{saturate_michaelis_menten(x, 100)} sets \code{vmax}; name it, as in
+\code{km = 100}.}
 
 \item{exponent}{Power exponent in \verb{(0, 1]}. \code{exponent = 1} is the identity
 (no saturation); smaller values bend the curve harder.}
@@ -49,7 +51,8 @@ reaches half of \code{vmax}.}
 \item{...}{Passed to the individual curve function.}
 }
 \value{
-A numeric vector the same length as \code{x}, in the same order.
+A numeric vector the same length as \code{x}, in the same order, with the
+names and time-series attributes of \code{x}.
 }
 \description{
 Diminishing returns to media. Adstock says \emph{when} money works; saturation
@@ -57,8 +60,10 @@ says \emph{how hard} it works at the margin. Four curves are provided; they diff
 in whether the response is bounded, and in whether they allow an S-shape.
 }
 \details{
-\code{saturate_hill()} and \code{saturate_exponential()} are bounded on \verb{[0, 1)}, so
-the fitted coefficient carries the channel's ceiling.
+\code{saturate_hill()} and \code{saturate_exponential()} rise from 0 towards 1 and
+never exceed it, so the fitted coefficient carries the channel's ceiling.
+Mathematically they stay below 1; in floating point they reach exactly 1
+once \code{x} is large enough, for example \code{saturate_exponential(40, rate = 1)}.
 \code{saturate_michaelis_menten()} is bounded by \code{vmax}. All three approach their
 ceiling smoothly at arbitrarily large \code{x}, including \code{Inf}, rather than
 overflowing.
@@ -73,9 +78,11 @@ and practitioners arrive expecting one or the other.
 }
 \section{Transform order}{
 
-Saturation is applied \emph{after} adstock, not before. Saturating first would
-cap each period's spend in isolation and then let carryover accumulate the
-capped values past the cap, which defeats the point of having a ceiling. Use
+Saturation is applied \emph{after} adstock, not before. Saturating first puts
+each period's spend through the curve in isolation, so carryover from
+earlier periods never counts towards saturation. With an unnormalised
+kernel (\code{normalise = FALSE}) carryover then also accumulates the saturated
+values past the ceiling, which defeats the point of having one. Use
 \code{\link[=media_transform]{media_transform()}} to get the order right without having to remember it.
 }
 
