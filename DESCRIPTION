@@ -19,9 +19,9 @@ Description: Feature engineering for marketing mix modelling and multi-touch
     hyperparameters. Geometric and delayed adstock follow Broadbent (1979,
     Journal of the Market Research Society, 21(3), 139-166) and Jin et al.
     (2017, Google Inc., <https://research.google/pubs/pub46001/>); the Hill
-    saturation curve follows Hill (1910, The Journal of Physiology, 40,
-    iv-vii); Markov attribution follows Anderl et al. (2016)
-    <doi:10.1016/j.ijresmar.2016.03.001>.
+    saturation curve follows Hill (1910)
+    <doi:10.1113/jphysiol.1910.sp001386>; Markov attribution follows Anderl
+    et al. (2016) <doi:10.1016/j.ijresmar.2016.03.001>.
 License: MIT + file LICENSE
 Encoding: UTF-8
 Language: en-GB

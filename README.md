@@ -324,17 +324,19 @@ only; the vignettes also ship with the package.
 Anderl, E., Becker, I., von Wangenheim, F. and Schumann, J. H. (2016).
 Mapping the customer journey: Lessons learned from graph-based online
 attribution modeling. *International Journal of Research in Marketing*,
-33(3), 457–474.
+33(3), 457–474. <https://doi.org/10.1016/j.ijresmar.2016.03.001>
 
 Broadbent, S. (1979). One way TV advertisements work. *Journal of the
 Market Research Society*, 21(3), 139–166.
 
 Hastie, T., Tibshirani, R. and Friedman, J. (2009). *The Elements of
 Statistical Learning* (2nd ed.). Springer.
+<https://doi.org/10.1007/978-0-387-84858-7>
 
 Hill, A. V. (1910). The possible effects of the aggregation of the
 molecules of haemoglobin on its dissociation curves. *The Journal of
 Physiology*, 40, iv–vii.
+<https://doi.org/10.1113/jphysiol.1910.sp001386>
 
 Jin, Y., Wang, Y., Sun, Y., Chan, D. and Koehler, J. (2017). *Bayesian
 methods for media mix modeling with carryover and shape effects.* Google

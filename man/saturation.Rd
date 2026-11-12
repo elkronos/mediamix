@@ -115,7 +115,7 @@ round(saturate(spend, type = "hill", half_max = 100), 3)
 \references{
 Hill, A. V. (1910). The possible effects of the aggregation of the molecules
 of haemoglobin on its dissociation curves. \emph{The Journal of Physiology},
-40(Suppl), iv--vii.
+40(Suppl), iv--vii. \doi{10.1113/jphysiol.1910.sp001386}
 }
 \seealso{
 \code{\link[=media_transform]{media_transform()}}, \code{\link[=response_curve]{response_curve()}}, and \code{\link[=step_saturation]{step_saturation()}}

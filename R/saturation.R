@@ -59,7 +59,7 @@
 #' @references
 #' Hill, A. V. (1910). The possible effects of the aggregation of the molecules
 #' of haemoglobin on its dissociation curves. *The Journal of Physiology*,
-#' 40(Suppl), iv--vii.
+#' 40(Suppl), iv--vii. \doi{10.1113/jphysiol.1910.sp001386}
 #'
 #' @seealso [media_transform()], [response_curve()], and [step_saturation()]
 #'   for a \pkg{recipes} pipeline.

@@ -372,9 +372,12 @@ saturation and a model penalty, use the recipe steps in
 
 Bergmeir, C. and Benítez, J. M. (2012). On the use of cross-validation for
 time series predictor evaluation. *Information Sciences*, 191, 192–213.
+<https://doi.org/10.1016/j.ins.2011.12.028>
 
 Breiman, L., Friedman, J., Olshen, R. and Stone, C. (1984). *Classification and
 Regression Trees*. Wadsworth.
+<https://doi.org/10.1201/9781315139470>
 
 Hastie, T., Tibshirani, R. and Friedman, J. (2009). *The Elements of
 Statistical Learning* (2nd ed.). Springer.
+<https://doi.org/10.1007/978-0-387-84858-7>

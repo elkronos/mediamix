@@ -259,19 +259,23 @@ modeling. *International Journal of Research in Marketing*, 33(3), 457–474.
 
 Bergmeir, C. and Benítez, J. M. (2012). On the use of cross-validation for
 time series predictor evaluation. *Information Sciences*, 191, 192–213.
+<https://doi.org/10.1016/j.ins.2011.12.028>
 
 Breiman, L., Friedman, J., Olshen, R. and Stone, C. (1984). *Classification and
 Regression Trees*. Wadsworth.
+<https://doi.org/10.1201/9781315139470>
 
 Broadbent, S. (1979). One way TV advertisements work. *Journal of the Market
 Research Society*, 21(3), 139–166.
 
 Hastie, T., Tibshirani, R. and Friedman, J. (2009). *The Elements of
 Statistical Learning* (2nd ed.). Springer.
+<https://doi.org/10.1007/978-0-387-84858-7>
 
 Hill, A. V. (1910). The possible effects of the aggregation of the molecules of
 haemoglobin on its dissociation curves. *The Journal of Physiology*, 40,
 iv–vii.
+<https://doi.org/10.1113/jphysiol.1910.sp001386>
 
 Jin, Y., Wang, Y., Sun, Y., Chan, D. and Koehler, J. (2017). *Bayesian methods
 for media mix modeling with carryover and shape effects.* Google Inc.
@@ -282,8 +286,10 @@ North-Holland.
 
 Künsch, H. R. (1989). The jackknife and the bootstrap for general stationary
 observations. *The Annals of Statistics*, 17(3), 1217–1241.
+<https://doi.org/10.1214/aos/1176347265>
 
 Lahiri, S. N. (2003). *Resampling Methods for Dependent Data.* Springer.
+<https://doi.org/10.1007/978-1-4757-3803-2>
 
 Politis, D. N. and Romano, J. P. (1992). A circular block-resampling
 procedure for stationary data. In R. LePage and L. Billard (eds.), *Exploring
@@ -291,3 +297,4 @@ the Limits of Bootstrap*, 263–270. Wiley.
 
 Tashman, L. J. (2000). Out-of-sample tests of forecasting accuracy: an analysis
 and review. *International Journal of Forecasting*, 16(4), 437–450.
+<https://doi.org/10.1016/S0169-2070(00)00065-0>

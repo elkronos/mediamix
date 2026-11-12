@@ -419,3 +419,4 @@ reproducible. That is worth a great deal. It is not incrementality.
 Anderl, E., Becker, I., von Wangenheim, F. and Schumann, J. H. (2016). Mapping
 the customer journey: Lessons learned from graph-based online attribution
 modeling. *International Journal of Research in Marketing*, 33(3), 457–474.
+<https://doi.org/10.1016/j.ijresmar.2016.03.001>
