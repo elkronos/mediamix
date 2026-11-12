@@ -76,9 +76,9 @@ adstock_weights <- function(max_lag, decay, normalise = TRUE) {
 #' but the rate of decay can itself change over time. The kernel is the
 #' running product of these values rather than the Weibull survival function
 #' \eqn{1 - F(i)}, and its tail falls away much faster. The construction is
-#' the one Robyn calls `"weibull_cdf"`; Robyn, however, expresses `scale` as a
-#' quantile of the window length rather than in periods, so its fitted scale
-#' values are not directly comparable with this function's.
+#' the one Robyn calls `"weibull_cdf"`. Robyn expresses `scale` as a
+#' quantile of the series length rather than in periods; [from_robyn()]
+#' converts it.
 #'
 #' The `"pdf"` form uses the Weibull density directly, \eqn{w_i \propto f(i)}.
 #' This is the form that permits a delayed peak, and it is the reason to reach
@@ -360,7 +360,7 @@ adstock_weibull <- function(x, shape, scale, max_lag,
 
 #' Delayed adstock
 #'
-#' The delayed-peak geometric kernel of Jin et al. (2017),
+#' The delayed-peak kernel of Jin et al. (2017),
 #' \eqn{w_l = \theta^{(l - \delta)^2}} for lags \eqn{l = 0, \ldots, L-1},
 #' where \eqn{\theta} is the retention rate and \eqn{\delta} the lag at which
 #' the effect peaks. With `peak = 0` the weights fall off as

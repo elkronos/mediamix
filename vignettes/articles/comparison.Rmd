@@ -67,11 +67,16 @@ with no compiled code and no Python:
 - Geometric decay means the same thing everywhere, but mediamix normalises the
   kernel by default and Robyn does not. Use `normalise = FALSE` to reproduce
   Robyn's adstocked series; the decay itself is unchanged.
-- Robyn's Weibull `scale` is a quantile of the window length, not a number of
-  periods, so it does not transfer directly to `adstock_weibull()`.
-- Hill `half_max` is in the units of the adstocked media. Robyn's `gamma` and
-  `step_saturation()`'s `half_max` are fractions of a column's range or
-  maximum instead, so neither transfers as it stands.
+- Robyn's Weibull `scale` is a quantile of the series length, not a number of
+  periods. `from_robyn()` converts it for Robyn's CDF form, which
+  `adstock_weibull(type = "cdf", normalise = FALSE)` then reproduces. Robyn
+  rescales its PDF form's weights differently, so that form has no exact
+  counterpart in `adstock_weibull()`.
+- Hill `half_max` is in the units of the adstocked media. Robyn's `gamma` is a
+  fraction of the adstocked series' maximum (Robyn 3.12.0 and later) or a
+  point within its range (3.7.0 to 3.11.1), and `from_robyn()` converts either
+  given the series. `step_saturation()`'s `half_max` is a fraction of each
+  column's reference level in the training data, its maximum by default.
 - For `order = 1`, `markov_removal()` and `ChannelAttribution::markov_model()`
   implement the same removal-effect definition, and the package's tests compare
   the two whenever ChannelAttribution is installed; small differences come from

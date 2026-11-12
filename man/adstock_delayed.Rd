@@ -68,7 +68,7 @@ length \code{max_lag} ordered from the current period outward.
 the same order, with the names and time-series attributes of \code{x}.
 }
 \description{
-The delayed-peak geometric kernel of Jin et al. (2017),
+The delayed-peak kernel of Jin et al. (2017),
 \eqn{w_l = \theta^{(l - \delta)^2}} for lags \eqn{l = 0, \ldots, L-1},
 where \eqn{\theta} is the retention rate and \eqn{\delta} the lag at which
 the effect peaks. With \code{peak = 0} the weights fall off as

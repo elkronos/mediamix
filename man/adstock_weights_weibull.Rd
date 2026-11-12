@@ -58,9 +58,9 @@ form \emph{generalises} geometric decay. It is always monotonically decreasing,
 but the rate of decay can itself change over time. The kernel is the
 running product of these values rather than the Weibull survival function
 \eqn{1 - F(i)}, and its tail falls away much faster. The construction is
-the one Robyn calls \code{"weibull_cdf"}; Robyn, however, expresses \code{scale} as a
-quantile of the window length rather than in periods, so its fitted scale
-values are not directly comparable with this function's.
+the one Robyn calls \code{"weibull_cdf"}. Robyn expresses \code{scale} as a
+quantile of the series length rather than in periods; \code{\link[=from_robyn]{from_robyn()}}
+converts it.
 
 The \code{"pdf"} form uses the Weibull density directly, \eqn{w_i \propto f(i)}.
 This is the form that permits a delayed peak, and it is the reason to reach
