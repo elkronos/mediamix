@@ -25,6 +25,11 @@ journey, which happens under \code{split_on = "none"} or \code{"gap"}.}
 \item{\code{conversions_unattributable}}{Converting journeys that lost every
 touchpoint to a direct-traffic rule, and so cannot be credited to any
 channel. That number should be reported, not absorbed.}
+\item{\code{journeys_before_filtering}}{Journeys found before post-conversion
+touches, direct traffic, the lookback and null paths were removed.}
+\item{\code{duplicate_events}}{Exact duplicate events dropped before
+journeys were built (see the \code{dedupe} argument of \code{\link[=build_paths]{build_paths()}}).
+\code{direct_events} and \code{conversion_events} count what remained.}
 }
 
 On a subset of a journey table the construction counts no longer apply, and

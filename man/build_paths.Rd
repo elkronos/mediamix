@@ -19,7 +19,9 @@ build_paths(
   keep_null_paths = TRUE,
   direct = c("keep", "drop", "label"),
   direct_labels = c("direct", "(direct)", "none", "(none)", "(not set)", "unknown", ""),
-  tz = "UTC"
+  tz = "UTC",
+  timestamp_format = NULL,
+  dedupe = TRUE
 )
 }
 \arguments{
@@ -30,17 +32,20 @@ build_paths(
 \item{channel}{Name of the column naming the marketing channel, as a string.}
 
 \item{timestamp}{Name of the column holding the event time, as a string. May
-be \code{POSIXct}, \code{Date}, or numeric (a period index).}
+be \code{POSIXct}, \code{Date}, numeric (a period index), or character. See
+\emph{Timestamps} for how character and numeric values are read.}
 
 \item{conversion}{Name of a column flagging conversion events, as a string,
-or \code{NULL}. Logical, or numeric where non-zero means converted.}
+or \code{NULL}. Logical, numeric where non-zero means converted, or character
+holding numbers or \code{"true"}/\code{"false"}, \code{"yes"}/\code{"no"}, \code{"t"}/\code{"f"},
+\code{"y"}/\code{"n"}. Any other character value is an error.}
 
 \item{value}{Name of a column holding conversion value (revenue), as a
 string, or \code{NULL}. Only read on rows where \code{conversion} is true.}
 
 \item{lookback}{Maximum age of a touchpoint relative to the end of its
-journey. Touches older than this are dropped. \code{NULL} (the default) keeps
-everything. Numeric, interpreted in \code{units}, or a \code{difftime}.}
+journey. Touches older than this are dropped. \code{NULL} (the default) or
+\code{Inf} keeps everything. Numeric, interpreted in \code{units}, or a \code{difftime}.}
 
 \item{split_on}{How to divide a customer's events into journeys. Any of
 \code{"conversion"} (a new journey begins after each conversion),
@@ -60,8 +65,13 @@ plain numbers; the unit of the returned \code{time_to_conversion} column and of
 from \code{"days"} to \code{"hours"} for a gap will shorten a time-decay half-life
 by a factor of 24 unless \code{period} is changed to match.
 
-For a numeric \code{timestamp} column the index is taken at face value and
-\code{units} has no effect; passing a \code{difftime} against a numeric index is an
+Durations are exact, so a day is 86,400 seconds and a week 604,800. In a
+time zone with daylight saving, a seven-day \code{lookback} that spans the
+change therefore reaches back to a wall-clock time one hour off.
+
+For a numeric \code{timestamp} column the index is taken at face value, \code{units}
+has no effect (supplying it gives a warning) and the table records its
+units as \code{"index"}; passing a \code{difftime} against a numeric index is an
 error, since a calendar duration has no meaning there.}
 
 \item{collapse_repeats}{Collapse runs of the same channel
@@ -81,7 +91,18 @@ all cannot be indexed or reported on; every other label is left untouched.}
 case-insensitively after trimming whitespace. Missing channel values are
 always treated as direct.}
 
-\item{tz}{Time zone used when coercing a character \code{timestamp} column.}
+\item{tz}{Time zone used when reading a character \code{timestamp} column.
+Values that carry their own UTC offset keep it; \code{tz} applies to the rest.}
+
+\item{timestamp_format}{A \code{\link[=strptime]{strptime()}} format for a character \code{timestamp}
+column, such as \code{"\%d/\%m/\%Y \%H:\%M"}, or \code{NULL} (the default) to accept ISO
+8601 dates and date-times only. Every value must match the whole format.}
+
+\item{dedupe}{Drop exact duplicate events before building journeys? Defaults
+to \code{TRUE}. Two rows are duplicates when they share the customer, channel,
+timestamp, conversion flag and conversion value, as when a tracking pixel
+fires twice; without this a duplicated conversion row becomes a second
+converting journey. \code{\link[=path_summary]{path_summary()}} reports how many rows were dropped.}
 }
 \value{
 An object of class \code{mm_paths}, a data frame with one row per retained
@@ -136,11 +157,17 @@ choice moves the numbers, so it is explicit.
 one exposure recorded three times. \code{collapse_repeats = TRUE} keeps the
 \emph{first} touch of each run, which preserves when the channel entered the
 journey. If you are using \code{\link[=credit_time_decay]{credit_time_decay()}}, consider \code{FALSE}: keeping
-the first of a run pushes each channel's apparent recency backward.
+the first of a run pushes each channel's apparent recency backward. Exact
+duplicate rows are a different case: they are one event logged twice, and
+\code{dedupe = TRUE} drops them before journeys are built, so a conversion
+recorded twice is one conversion.
 
 \strong{Deterministic ordering.} Events sharing a timestamp are broken by their
-original row order, so the same input always yields the same journeys. Ties
-are common in logs written at second resolution, and a non-deterministic
+original row order, so the same input always yields the same journeys. The
+one exception is a conversion, which sorts after every touch sharing its
+timestamp: a touch logged in the same second as a sale belongs to the
+journey that sale closes, wherever the two rows sit in the file. Ties are
+common in logs written at second resolution, and a non-deterministic
 tie-break makes first-touch and last-touch results unreproducible.
 
 \strong{Accounting.} A direct-traffic rule can strip a converting journey of every
@@ -165,6 +192,27 @@ events, they belong to the next journey -- split on conversion.
 
 Journeys with no remaining touchpoints are dropped entirely, and any
 conversion they carried is reported as unattributable rather than as absent.
+}
+
+\section{Timestamps}{
+
+A character \code{timestamp} column is parsed completely or not at all. Without
+\code{timestamp_format}, every value must be an ISO 8601 date such as
+\code{"2024-05-01"} or date-time such as \code{"2024-05-01 09:30"},
+\code{"2024-05-01T09:30:15.250Z"} or \code{"2024-05-01T11:30:15+02:00"}; a \code{/} may
+replace the \code{-} in the date, and a trailing \code{UTC} or \code{GMT} reads as offset
+zero. A value with a UTC offset is that instant. A value without one is read
+in \code{tz}, and a date alone is midnight in \code{tz}. A column that mixes dates with
+date-times is an error, because reading \code{"2024-05-01"} as midnight would
+place it before every touch logged later that day. Any other text, such as
+\code{"05/01/2024"}, is an error that names values which did not parse; give
+\code{timestamp_format}, or convert the column with \code{\link[=as.POSIXct]{as.POSIXct()}} first.
+
+A numeric \code{timestamp} column is a period index taken at face value:
+\code{lookback}, \code{gap} and \code{time_to_conversion} are all in index units, and
+\code{units} has no effect. Values that look like Unix epoch time give a
+warning, since seconds since 1970 read as an index make \code{lookback = 30}
+thirty seconds.
 }
 
 \section{On what these numbers mean}{

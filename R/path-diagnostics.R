@@ -21,6 +21,11 @@
 #'     \item{`conversions_unattributable`}{Converting journeys that lost every
 #'       touchpoint to a direct-traffic rule, and so cannot be credited to any
 #'       channel. That number should be reported, not absorbed.}
+#'     \item{`journeys_before_filtering`}{Journeys found before post-conversion
+#'       touches, direct traffic, the lookback and null paths were removed.}
+#'     \item{`duplicate_events`}{Exact duplicate events dropped before
+#'       journeys were built (see the `dedupe` argument of [build_paths()]).
+#'       `direct_events` and `conversion_events` count what remained.}
 #'   }
 #'
 #'   On a subset of a journey table the construction counts no longer apply, and
@@ -38,28 +43,29 @@ path_summary <- function(paths) {
   .mm_check_paths(paths)
   cnt <- attr(paths, "mm_counts")
   if (is.null(cnt)) {
-    cnt <- list(events_in = NA_integer_, events_out = nrow(paths),
-                direct_events = NA_integer_,
+    cnt <- list(events_out = nrow(paths),
                 journeys = length(unique(paths$path_id)),
-                converting_journeys = length(unique(paths$path_id[paths$converted])),
-                conversion_events = NA_integer_,
-                conversions_observed = NA_integer_,
-                conversions_unattributable = NA_integer_)
+                converting_journeys = length(unique(paths$path_id[paths$converted])))
   }
+  # A count the object does not carry, from a subset or from an older version
+  # of the package, is NA rather than a missing column.
+  get <- function(nm) if (is.null(cnt[[nm]])) NA_integer_ else cnt[[nm]]
   lens <- if (nrow(paths) == 0L) numeric(0) else
     vapply(split(paths$touch_n, paths$path_id), function(z) z[1L], numeric(1))
   data.frame(
-    events_in = cnt$events_in,
-    events_out = cnt$events_out,
-    journeys = cnt$journeys,
-    converting_journeys = cnt$converting_journeys,
+    events_in = get("events_in"),
+    events_out = get("events_out"),
+    journeys = get("journeys"),
+    converting_journeys = get("converting_journeys"),
     mean_length = if (length(lens)) mean(lens) else NA_real_,
     median_length = if (length(lens)) stats::median(lens) else NA_real_,
     max_length = if (length(lens)) max(lens) else NA_real_,
-    direct_events = cnt$direct_events,
-    conversion_events = cnt$conversion_events,
-    conversions_observed = cnt$conversions_observed,
-    conversions_unattributable = cnt$conversions_unattributable,
+    direct_events = get("direct_events"),
+    conversion_events = get("conversion_events"),
+    conversions_observed = get("conversions_observed"),
+    conversions_unattributable = get("conversions_unattributable"),
+    journeys_before_filtering = get("journeys_before_filtering"),
+    duplicate_events = get("duplicate_events"),
     stringsAsFactors = FALSE
   )
 }

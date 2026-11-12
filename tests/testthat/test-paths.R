@@ -241,6 +241,224 @@ test_that("a missing or misnamed column errors with a message naming the column"
   )
 })
 
+# ---- character timestamps ------------------------------------------------------
+
+test_that("ISO 8601 date-times with T, offsets and fractions parse completely", {
+  ev <- data.frame(id = "a", ch = c("display", "search", "email"),
+                   ts = c("2024-05-01T18:00:00Z", "2024-05-01T09:00:00Z",
+                          "2024-05-01T12:00:00Z"),
+                   conv = c(0, 0, 1))
+  p <- build_paths(ev, id = "id", channel = "ch", timestamp = "ts",
+                   conversion = "conv")
+  # display came after the sale, so it starts a second journey; first-touch
+  # credit for the sale goes to search, not to display.
+  expect_identical(p$channel[p$path_id == "a#1"], c("search", "email"))
+  expect_identical(p$channel[p$path_id == "a#2"], "display")
+  first <- credit_first(p)
+  expect_identical(first$channel[first$credit > 0], "search")
+
+  posix <- ev
+  posix$ts <- as.POSIXct(c("2024-05-01 18:00:00", "2024-05-01 09:00:00",
+                           "2024-05-01 12:00:00"), tz = "UTC")
+  p_posix <- build_paths(posix, id = "id", channel = "ch", timestamp = "ts",
+                         conversion = "conv")
+  expect_identical(as.data.frame(p), as.data.frame(p_posix))
+})
+
+test_that("UTC offsets, fractional seconds and other ISO forms give the right instant", {
+  # Seconds since 1970, so that values read in different zones compare.
+  read <- function(x, tz = "UTC") {
+    as.numeric(mediamix:::.mm_parse_time(x, "ts", tz = tz))
+  }
+  at9 <- as.numeric(as.POSIXct("2024-05-01 09:00:00", tz = "UTC"))
+  expect_equal(read("2024-05-01T11:00:00+02:00"), at9)
+  expect_equal(read("2024-05-01T11:00:00+0200"), at9)
+  expect_equal(read("2024-05-01T11:00+02"), at9)
+  expect_equal(read("2024-05-01T03:30:00-05:30"), at9)
+  expect_equal(read("2024-05-01 09:00:00 UTC"), at9)
+  expect_equal(read("2024-05-01 09:00"), at9)
+  expect_equal(read("2024/05/01 09:00:00"), at9)
+  expect_equal(read("2024-05-01T09:00:00.250Z") - at9, 0.25, tolerance = 1e-6)
+  # Without an offset the value is read in `tz`; with one, `tz` is ignored.
+  expect_equal(read("2024-05-01 11:00:00", tz = "Europe/Paris"), at9)
+  expect_equal(read("2024-05-01T09:00:00Z", tz = "Europe/Paris"), at9)
+  # A plain date is midnight in `tz`.
+  expect_equal(read("2024-05-01", tz = "Europe/Paris"), at9 - 11 * 3600)
+  # Missing and blank values come back as NA for build_paths() to report.
+  expect_true(is.na(read(c("2024-05-01", NA, "  "))[2L]))
+  expect_true(is.na(read(c("2024-05-01", NA, "  "))[3L]))
+})
+
+test_that("unparseable or mixed character timestamps abort instead of truncating", {
+  B <- function(ts, ...) {
+    ev <- data.frame(id = "a", ch = c("x", "y"), ts = ts, conv = c(0, 1))
+    build_paths(ev, id = "id", channel = "ch", timestamp = "ts",
+                conversion = "conv", ...)
+  }
+  expect_error(B(c("05/01/2024", "05/02/2024")), "could not be parsed")
+  expect_error(B(c("05/01/2024", "05/02/2024")), "timestamp_format")
+  expect_error(B(c("2024-05-01", "2024-05-01T09:00:00")), "mixes dates")
+  expect_error(B(c("2024-02-30 09:00", "2024-03-01 09:00")), "not a valid")
+  expect_error(B(c("2024-05-01 09:00", "yesterday")), "yesterday")
+  expect_error(B(c("2024-05-01 09:00", "2024-05-01 10:00 EST")),
+               "could not be parsed")
+  expect_error(B(c("2024-05-01", NA)), "missing values")
+})
+
+test_that("timestamp_format reads other layouts and must match the whole value", {
+  ev <- data.frame(id = "a", ch = c("x", "y"),
+                   ts = c("05/01/2024 09:00", "05/02/2024 10:30"),
+                   conv = c(0, 1))
+  p <- build_paths(ev, id = "id", channel = "ch", timestamp = "ts",
+                   conversion = "conv", timestamp_format = "%m/%d/%Y %H:%M")
+  expect_equal(p$timestamp,
+               as.POSIXct(c("2024-05-01 09:00", "2024-05-02 10:30"),
+                          tz = "UTC"))
+  expect_equal(p$time_to_conversion, c(1 + 1.5 / 24, 0))
+
+  # Trailing text that strptime() would skip is a mismatch.
+  ev$ts[2L] <- "05/02/2024 10:30 extra"
+  expect_error(
+    build_paths(ev, id = "id", channel = "ch", timestamp = "ts",
+                conversion = "conv", timestamp_format = "%m/%d/%Y %H:%M"),
+    "did not parse completely"
+  )
+  expect_error(
+    build_paths(ev, id = "id", channel = "ch", timestamp = "ts",
+                conversion = "conv", timestamp_format = 1),
+    "single string"
+  )
+  ok <- data.frame(id = "a", ch = "x",
+                   ts = as.POSIXct("2024-05-01", tz = "UTC"), conv = 1)
+  expect_warning(
+    build_paths(ok, id = "id", channel = "ch", timestamp = "ts",
+                conversion = "conv", timestamp_format = "%Y"),
+    "ignored"
+  )
+})
+
+# ---- other input handling ------------------------------------------------------
+
+test_that("an exact duplicate conversion row is one conversion, not two journeys", {
+  ev <- data.frame(id = "a", ch = c("search", "direct", "direct"),
+                   ts = c(1, 5, 5), conv = c(0, 1, 1), val = c(NA, 50, 50))
+  expect_message(
+    p <- build_paths(ev, id = "id", channel = "ch", timestamp = "ts",
+                     conversion = "conv", value = "val"),
+    "duplicate conversion"
+  )
+  expect_identical(unique(p$path_id), "a#1")
+  expect_identical(unique(p$conversion_value), 50)
+  s <- path_summary(p)
+  expect_identical(s$duplicate_events, 1L)
+  expect_identical(s$conversion_events, 1L)
+  expect_identical(s$events_in, 3L)
+
+  kept <- build_paths(ev, id = "id", channel = "ch", timestamp = "ts",
+                      conversion = "conv", value = "val", dedupe = FALSE)
+  expect_identical(length(unique(kept$path_id[kept$converted])), 2L)
+  expect_identical(path_summary(kept)$duplicate_events, 0L)
+
+  # Rows differing in value are two events and both stay.
+  ev2 <- ev
+  ev2$val[3L] <- 70
+  p2 <- build_paths(ev2, id = "id", channel = "ch", timestamp = "ts",
+                    conversion = "conv", value = "val")
+  expect_identical(path_summary(p2)$duplicate_events, 0L)
+  expect_error(build_paths(ev, id = "id", channel = "ch", timestamp = "ts",
+                           conversion = "conv", dedupe = NA), "dedupe")
+})
+
+test_that("a touch tied with its conversion stays in the journey the conversion closes", {
+  ev <- data.frame(id = "a", ch = c("direct", "search", "email"),
+                   ts = c(5, 5, 1), conv = c(1, 0, 0))
+  p <- build_paths(ev, id = "id", channel = "ch", timestamp = "ts",
+                   conversion = "conv")
+  expect_identical(unique(p$path_id), "a#1")
+  expect_identical(p$channel, c("email", "search", "direct"))
+  expect_true(all(p$converted))
+  expect_equal(credit_last(p)$credit, c(0, 0, 1))
+})
+
+test_that("numeric timestamps are an index: units are 'index' and misuse warns", {
+  ev <- data.frame(id = "a", ch = c("tv", "search"), ts = c(0, 2), conv = c(0, 1))
+  p <- build_paths(ev, id = "id", channel = "ch", timestamp = "ts",
+                   conversion = "conv")
+  expect_identical(attr(p, "mm_units"), "index")
+  expect_identical(attr(conversion_lag(p), "units"), "index")
+  expect_warning(
+    build_paths(ev, id = "id", channel = "ch", timestamp = "ts",
+                conversion = "conv", units = "hours"),
+    "no effect"
+  )
+  epoch <- ev
+  epoch$ts <- 1714550400 + c(0, 2 * 86400)
+  expect_warning(
+    build_paths(epoch, id = "id", channel = "ch", timestamp = "ts",
+                conversion = "conv", lookback = 30),
+    "epoch"
+  )
+  # Calendar timestamps keep their units.
+  cal <- ev
+  cal$ts <- as.POSIXct("2024-05-01", tz = "UTC") + ev$ts * 3600
+  expect_identical(
+    attr(build_paths(cal, id = "id", channel = "ch", timestamp = "ts",
+                     conversion = "conv", units = "hours"), "mm_units"),
+    "hours"
+  )
+})
+
+test_that("character conversion flags are read as numbers or words, or abort", {
+  B <- function(flag) {
+    ev <- data.frame(id = "a", ch = c("tv", "search"), ts = c(1, 2),
+                     conv = c("0", flag))
+    any(build_paths(ev, id = "id", channel = "ch", timestamp = "ts",
+                    conversion = "conv")$converted)
+  }
+  expect_true(B("1.0"))
+  expect_true(B("2"))
+  expect_true(B(" Yes "))
+  expect_false(B("no"))
+  expect_false(B(""))
+  expect_error(B("purchase"), "purchase")
+  expect_error(B("purchase"), "conversion flag")
+})
+
+test_that("numeric ids keep their digits and value text off conversions is not read", {
+  ev <- data.frame(id = c(100000, 100000, 2.5e6), ch = c("tv", "search", "tv"),
+                   ts = c(1, 2, 1), conv = c(0, 1, 0),
+                   val = c("n/a", "40", "-"))
+  p <- build_paths(ev, id = "id", channel = "ch", timestamp = "ts",
+                   conversion = "conv", value = "val")
+  expect_setequal(unique(p$path_id), c("100000#1", "2500000#1"))
+  expect_identical(unique(p$id), c("100000", "2500000"))
+  expect_identical(unique(p$conversion_value[p$converted]), 40)
+
+  ev$val[2L] <- "forty"
+  expect_error(build_paths(ev, id = "id", channel = "ch", timestamp = "ts",
+                           conversion = "conv", value = "val"),
+               "forty")
+})
+
+test_that("lookback and gap accept Inf, and path_summary reports the pre-filter count", {
+  ev <- data.frame(id = "a", ch = c("x", "y", "z"), ts = c(0, 500, 1000),
+                   conv = c(0, 0, 1))
+  p <- build_paths(ev, id = "id", channel = "ch", timestamp = "ts",
+                   conversion = "conv", lookback = Inf,
+                   split_on = c("conversion", "gap"), gap = Inf)
+  expect_identical(p$channel, c("x", "y", "z"))
+  expect_error(build_paths(ev, id = "id", channel = "ch", timestamp = "ts",
+                           conversion = "conv", lookback = -Inf), "lookback")
+
+  d <- data.frame(id = c("a", "b"), ch = c("direct", "tv"), ts = c(1, 1),
+                  conv = c(1, 0))
+  dropped <- build_paths(d, id = "id", channel = "ch", timestamp = "ts",
+                         conversion = "conv", direct = "drop")
+  s <- path_summary(dropped)
+  expect_identical(s$journeys_before_filtering, 2L)
+  expect_identical(s$journeys, 1L)
+})
+
 # ---- [.mm_paths --------------------------------------------------------------
 
 test_that("[.mm_paths keeps the class on a row subset and drops it when structural columns go", {
