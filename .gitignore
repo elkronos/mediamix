@@ -24,3 +24,12 @@ src/*.dll
 # macOS
 .DS_Store
 docs
+
+# Knitted vignettes, articles and README previews
+vignettes/*.html
+vignettes/*.R
+vignettes/*_files/
+vignettes/articles/*.html
+vignettes/articles/*_files/
+*_cache/
+README.html
