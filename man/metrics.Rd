@@ -4,7 +4,7 @@
 \alias{metrics}
 \alias{rmse}
 \alias{mae}
-\title{Minimal error metrics}
+\title{Root mean squared error and mean absolute error}
 \usage{
 rmse(actual, predicted, na_rm = TRUE)
 
@@ -17,18 +17,20 @@ mae(actual, predicted, na_rm = TRUE)
 \code{actual}.}
 
 \item{na_rm}{Should pairs where either value is missing or non-finite be
-dropped? Defaults to \code{TRUE}.}
+dropped? Defaults to \code{TRUE}. With \code{FALSE}, a missing or infinite value
+carries through to the result.}
 }
 \value{
-A single number. \code{NA_real_} if no complete pairs remain. Empty
-input is an error. \code{rmse()} scales the errors before squaring them, so
-errors near the limits of double precision neither overflow nor vanish.
+A single number. \code{NA_real_} if no finite pairs remain. Empty input,
+input of different lengths and non-numeric input are errors. \code{rmse()}
+scales the errors before squaring them, so errors near the limits of
+double precision neither overflow nor vanish.
 }
 \description{
 Two metrics, provided only so that \code{\link[=tune_carryover]{tune_carryover()}} has a working default
-and a one-line simple case. Any function of \verb{(actual, predicted)} returning a
-single number will do, so use \pkg{yardstick} if you want a real metric
-library.
+(\code{rmse()}) and a one-line simple case. Any function of \verb{(actual, predicted)}
+returning a single number will do, so use \pkg{yardstick} if you want a real
+metric library.
 }
 \examples{
 rmse(c(1, 2, 3), c(1.1, 1.9, 3.2))

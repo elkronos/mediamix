@@ -1,19 +1,21 @@
-#' Minimal error metrics
+#' Root mean squared error and mean absolute error
 #'
 #' Two metrics, provided only so that [tune_carryover()] has a working default
-#' and a one-line simple case. Any function of `(actual, predicted)` returning a
-#' single number will do, so use \pkg{yardstick} if you want a real metric
-#' library.
+#' (`rmse()`) and a one-line simple case. Any function of `(actual, predicted)`
+#' returning a single number will do, so use \pkg{yardstick} if you want a real
+#' metric library.
 #'
 #' @param actual Numeric vector of observed values.
 #' @param predicted Numeric vector of predicted values, the same length as
 #'   `actual`.
 #' @param na_rm Should pairs where either value is missing or non-finite be
-#'   dropped? Defaults to `TRUE`.
+#'   dropped? Defaults to `TRUE`. With `FALSE`, a missing or infinite value
+#'   carries through to the result.
 #'
-#' @return A single number. `NA_real_` if no complete pairs remain. Empty
-#'   input is an error. `rmse()` scales the errors before squaring them, so
-#'   errors near the limits of double precision neither overflow nor vanish.
+#' @return A single number. `NA_real_` if no finite pairs remain. Empty input,
+#'   input of different lengths and non-numeric input are errors. `rmse()`
+#'   scales the errors before squaring them, so errors near the limits of
+#'   double precision neither overflow nor vanish.
 #'
 #' @seealso [tune_carryover()], which takes any such function as `metric_fn`.
 #'
