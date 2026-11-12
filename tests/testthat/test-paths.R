@@ -459,6 +459,44 @@ test_that("lookback and gap accept Inf, and path_summary reports the pre-filter 
   expect_identical(s$journeys, 1L)
 })
 
+test_that("journey facts computed on runs match a per-journey calculation", {
+  set.seed(5)
+  n <- 3000
+  ev <- data.frame(id = sample(sprintf("c%02d", 1:60), n, replace = TRUE),
+                   ts = round(runif(n, 0, 300)),
+                   conv = as.integer(runif(n) < 0.15))
+  ev <- ev[order(ev$id, ev$ts, ev$conv), ]
+  new_id <- c(TRUE, ev$id[-1L] != ev$id[-n])
+  for (split_on in list("conversion", "none", "gap", c("conversion", "gap"))) {
+    starts <- mediamix:::.mm_journey_starts(new_id, ev$conv, ev$ts, split_on,
+                                            gap_num = 20)
+    # Reference: walk each customer's events on their own.
+    ref <- unlist(lapply(split(seq_len(n), ev$id), function(rows) {
+      s <- rep(FALSE, length(rows))
+      s[1L] <- TRUE
+      for (k in seq_along(rows)[-1L]) {
+        prev <- rows[k - 1L]
+        s[k] <- ("conversion" %in% split_on && ev$conv[prev] == 1L) ||
+          ("gap" %in% split_on && ev$ts[rows[k]] - ev$ts[prev] > 20)
+      }
+      s
+    }), use.names = FALSE)
+    expect_identical(starts, ref, info = paste(split_on, collapse = "+"))
+  }
+
+  run <- cumsum(starts)
+  val <- ifelse(ev$conv == 1L, round(runif(n, 1, 50), 2), NA)
+  val[sample(which(ev$conv == 1L), 10)] <- NA
+  got <- mediamix:::.mm_run_sums(val, run, max(run), ev$conv == 1L)
+  ref <- vapply(split(seq_len(n), factor(run, levels = seq_len(max(run)))),
+                function(rows) {
+                  v <- val[rows][ev$conv[rows] == 1L]
+                  v <- v[!is.na(v)]
+                  if (length(v) == 0L) NA_real_ else sum(v)
+                }, numeric(1))
+  expect_identical(got, unname(ref))
+})
+
 # ---- [.mm_paths --------------------------------------------------------------
 
 test_that("[.mm_paths keeps the class on a row subset and drops it when structural columns go", {

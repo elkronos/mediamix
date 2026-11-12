@@ -358,9 +358,13 @@ build_paths <- function(events,
   # Relabelling happens now; *dropping* happens after conversion facts are
   # fixed, so that discarding a direct touch can never erase the conversion it
   # recorded.
+  # Labels are classified once per distinct value, not once per event.
   ch <- dt$channel
-  is_direct <- is.na(ch) |
-    tolower(trimws(ifelse(is.na(ch), "", ch))) %in% tolower(trimws(direct_labels))
+  lab <- unique(ch)
+  code <- match(ch, lab)
+  lab_direct <- is.na(lab) |
+    tolower(trimws(ifelse(is.na(lab), "", lab))) %in% tolower(trimws(direct_labels))
+  is_direct <- lab_direct[code]
   n_direct <- sum(is_direct)
   if (direct == "label") {
     ch[is_direct] <- "(direct)"
@@ -369,8 +373,9 @@ build_paths <- function(events,
     # label is given a name so it can be referred to at all. A channel called
     # "" cannot be indexed by name in a table or a matrix, so leaving it
     # nameless would make the diagnostics unable to talk about it.
-    ch[is.na(ch)] <- "(missing)"
-    ch[trimws(ch) == ""] <- "(blank)"
+    lab[is.na(lab)] <- "(missing)"
+    lab[trimws(lab) == ""] <- "(blank)"
+    ch <- lab[code]
   }
   dt[, "channel" := ch]
   dt[, ".is_direct" := is_direct]
@@ -389,32 +394,42 @@ build_paths <- function(events,
     .mm_time_amount(gap, units, scale, "gap", is_calendar)
   } else NA_real_
 
-  dt[, "journey" := .mm_journey_index(.SD, split_on, gap_num), by = "id"]
-  dt[, "path_id" := paste(id, journey, sep = "#")]
+  # Rows are sorted by customer and time, so each journey is a contiguous run
+  # of rows. `.j` numbers the runs across the whole table and `.jn` within a
+  # customer; journey facts are computed on the runs with vector operations
+  # rather than one R call per group.
+  n <- nrow(dt)
+  new_id <- c(TRUE, dt$id[-1L] != dt$id[-n])
+  starts <- .mm_journey_starts(new_id, dt$conversion, dt$.t, split_on, gap_num)
+  run <- cumsum(starts)
+  dt[, ".j" := run]
+  dt[, ".jn" := run - run[which(new_id)][cumsum(new_id)] + 1L]
+  n_journeys_raw <- run[n]
 
   n_conv_events <- sum(dt$conversion == 1L)
 
   # --- journey-level conversion facts, computed from every event -------------
-  dt[, "conv_t" := {
-    ct <- .t[conversion == 1L]
-    if (length(ct) == 0L) NA_real_ else max(ct)
-  }, by = "path_id"]
-  dt[, "conversion_value" := {
-    v <- value[conversion == 1L]
-    v <- v[!is.na(v)]
-    if (length(v) == 0L) NA_real_ else sum(v)
-  }, by = "path_id"]
-  dt[, "converted" := !is.na(conv_t)]
+  # A journey's conversion time is that of its last conversion row: rows are
+  # in time order, and assigning by run lets the last row of each run win.
+  conv_row <- which(dt$conversion == 1L)
+  conv_t_j <- rep(NA_real_, n_journeys_raw)
+  conv_t_j[run[conv_row]] <- dt$.t[conv_row]
+  converted_j <- !is.na(conv_t_j)
+  dt[, "conv_t" := conv_t_j[run]]
+  dt[, "conversion_value" := .mm_run_sums(dt$value, run, n_journeys_raw,
+                                          dt$conversion == 1L)[run]]
+  dt[, "converted" := converted_j[run]]
 
   # Under split_on = "none" or "gap" one journey can hold several conversion
   # events. The journey is then credited as ONE conversion (with the summed
   # value), so rule-based totals fall short of the conversion count. That is a
   # consequence of the split, not an error, but it should not be silent.
-  multi <- dt[conversion == 1L, .N, by = "path_id"][N > 1L]
-  if (nrow(multi) > 0L) {
-    extra <- sum(multi$N) - nrow(multi)
+  per_journey <- tabulate(run[conv_row], nbins = n_journeys_raw)
+  n_multi <- sum(per_journey > 1L)
+  if (n_multi > 0L) {
+    extra <- sum(per_journey[per_journey > 1L]) - n_multi
     cli::cli_inform(c(
-      "{nrow(multi)} journey{?s} contain{?s/} more than one conversion event.",
+      "{n_multi} journey{?s} contain{?s/} more than one conversion event.",
       i = "Each is credited as a single conversion, so {extra} conversion \\
            event{?s} will not appear in credited totals.",
       i = 'Add {.val conversion} to {.arg split_on} to give each conversion \\
@@ -425,11 +440,12 @@ build_paths <- function(events,
   # The lookback anchor is fixed here, alongside the conversion facts and
   # before any filtering. Computing a non-converting journey's anchor after
   # direct touches were dropped would let `direct = "drop"` slide the window
-  # backwards and readmit touches a lookback had excluded.
-  dt[, "anchor" := if (is.na(conv_t[1L])) max(.t) else conv_t[1L], by = "path_id"]
+  # backwards and readmit touches a lookback had excluded. A non-converting
+  # journey is anchored at its last touch.
+  last_t_j <- dt$.t[c(which(starts)[-1L] - 1L, n)]
+  dt[, "anchor" := ifelse(converted_j, conv_t_j, last_t_j)[run]]
 
-  n_journeys_raw <- data.table::uniqueN(dt$path_id)
-  n_conv_journeys <- data.table::uniqueN(dt$path_id[dt$converted])
+  n_conv_journeys <- sum(converted_j)
 
   # Everything known before filtering. Carried into the early returns so that a
   # configuration which removes every touchpoint still reports how many events
@@ -485,10 +501,14 @@ build_paths <- function(events,
   dt[, "anchor" := NULL]
 
   # --- collapse consecutive duplicates ---------------------------------------
+  # Filtering keeps each journey's rows contiguous and in order, so a row
+  # repeats its predecessor's channel within a journey exactly when both the
+  # channel and the run match.
   if (collapse_repeats) {
-    dt[, "keep_row" := c(TRUE, channel[-1L] != channel[-.N]), by = "path_id"]
-    dt <- dt[keep_row == TRUE]
-    dt[, "keep_row" := NULL]
+    m <- nrow(dt)
+    keep_row <- c(TRUE, dt$channel[-1L] != dt$channel[-m] |
+                    dt$.j[-1L] != dt$.j[-m])
+    dt <- dt[keep_row]
   }
 
   # --- null paths ------------------------------------------------------------
@@ -499,11 +519,15 @@ build_paths <- function(events,
   }
 
   # --- ranks -----------------------------------------------------------------
-  dt[, "touch_rank" := seq_len(.N), by = "path_id"]
-  dt[, "touch_n" := .N, by = "path_id"]
+  m <- nrow(dt)
+  first <- c(TRUE, dt$.j[-1L] != dt$.j[-m])
+  grp <- cumsum(first)
+  dt[, "touch_rank" := seq_len(m) - which(first)[grp] + 1L]
+  dt[, "touch_n" := tabulate(grp)[grp]]
   dt[, "time_to_conversion" := (conv_t - .t) / scale]
+  dt[, "path_id" := paste(dt$id, dt$.jn, sep = "#")]
 
-  n_conv_attributable <- data.table::uniqueN(dt$path_id[dt$converted])
+  n_conv_attributable <- length(unique(dt$.j[dt$converted]))
 
   keep <- c("path_id", "id", "channel", "timestamp", "touch_rank", "touch_n",
             "converted", "conversion_value", "time_to_conversion")
@@ -842,20 +866,42 @@ print.mm_paths <- function(x, ...) {
   cli::cli_abort("Column {.val {nm}} must be numeric.", call = call)
 }
 
-# Journey index within one customer's time-ordered events.
+# The first row of each journey, for rows sorted by customer and time: each
+# customer's first event and, within a customer, the event after a conversion
+# or after more than `gap_num` of inactivity, as `split_on` asks.
 #' @keywords internal
 #' @noRd
-.mm_journey_index <- function(sd, split_on, gap_num) {
-  n <- nrow(sd)
-  if (n == 0L) return(integer(0))
-  starts <- logical(n)
-  if ("conversion" %in% split_on && n > 1L) {
-    starts[-1L] <- starts[-1L] | (sd$conversion[-n] == 1L)
+.mm_journey_starts <- function(new_id, conversion, t, split_on, gap_num) {
+  n <- length(new_id)
+  starts <- new_id
+  if (n > 1L) {
+    if ("conversion" %in% split_on) {
+      starts[-1L] <- starts[-1L] | conversion[-n] == 1L
+    }
+    if ("gap" %in% split_on) {
+      starts[-1L] <- starts[-1L] | diff(t) > gap_num
+    }
   }
-  if ("gap" %in% split_on && n > 1L) {
-    starts[-1L] <- starts[-1L] | (diff(sd$.t) > gap_num)
+  starts
+}
+
+# Sum of the non-missing `x` on rows where `on` holds, for each of `n_runs`
+# runs; NA for a run with none. A run with one value keeps it as it is and
+# longer runs use sum(), so each total equals summing that run on its own.
+#' @keywords internal
+#' @noRd
+.mm_run_sums <- function(x, run, n_runs, on) {
+  out <- rep(NA_real_, n_runs)
+  rows <- which(on & !is.na(x))
+  if (length(rows) == 0L) return(out)
+  r <- run[rows]
+  several <- r %in% r[duplicated(r)]
+  out[r[!several]] <- x[rows[!several]]
+  if (any(several)) {
+    sums <- vapply(split(x[rows[several]], r[several]), sum, numeric(1))
+    out[as.integer(names(sums))] <- sums
   }
-  cumsum(c(1L, as.integer(starts[-1L])))
+  out
 }
 
 #' @keywords internal
