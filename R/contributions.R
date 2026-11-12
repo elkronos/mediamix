@@ -685,7 +685,8 @@ roi <- function(contributions, spend, by = NULL, index = NULL,
   }
   if (framed && "period" %in% names(contributions) && is.data.frame(spend) &&
       is.null(index) && length(common) > 0L) {
-    .mm_roi_check_counts(contributions$channel, sel, groups)
+    .mm_roi_check_counts(contributions$channel, sel, groups,
+                         grouped = !is.null(by))
   }
   if (length(dropped) > 0L && length(common) > 0L) {
     cli::cli_inform(c(
@@ -783,7 +784,15 @@ roi <- function(contributions, spend, by = NULL, index = NULL,
         i = "Its periods include {.val {utils::head(unique(c_period), 3)}}."
       ), call = call)
     }
-    if (!is.null(s_period)) keep_s <- s_period %in% wanted
+    if (!is.null(s_period)) {
+      keep_s <- s_period %in% wanted
+      if (!any(keep_s)) {
+        cli::cli_abort(c(
+          "No value of {.arg periods} is in {.arg index}.",
+          i = "{.arg index} includes {.val {utils::head(unique(s_period), 3)}}."
+        ), call = call)
+      }
+    }
   }
 
   if (!is.null(by)) {
@@ -910,7 +919,7 @@ roi <- function(contributions, spend, by = NULL, index = NULL,
 # contributions cover in that group.
 #' @keywords internal
 #' @noRd
-.mm_roi_check_counts <- function(channel, sel, groups) {
+.mm_roi_check_counts <- function(channel, sel, groups, grouped) {
   channel <- as.character(channel)
   counts <- vapply(groups, function(g) {
     i <- sel$keep_c & sel$c_group == g
@@ -925,7 +934,7 @@ roi <- function(contributions, spend, by = NULL, index = NULL,
     i = "Pass the rows of {.arg spend} for the periods that were decomposed, \\
          or give {.arg index} to match them period by period."
   )
-  if (identical(groups, "")) {
+  if (!grouped) {
     periods <- counts[1L, 1L]
     rows <- counts[2L, 1L]
     cli::cli_warn(c(

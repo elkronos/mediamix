@@ -378,6 +378,22 @@ test_that("periods keeps the same periods of contributions and spend", {
   east_contrib <- p$contrib[p$contrib$group == "east", ]
   one <- roi(east_contrib, totals, periods = last4)
   expect_equal(one$roi[one$channel == "tv"], roi_by_hand(p, which(east), "tv"))
+  # Spend with none of the periods asked for.
+  expect_error(roi(p$contrib, spend[spend$week < min(last4), ], by = "geo",
+                   index = "week", periods = last4),
+               "No value of `periods` is in `index`")
+})
+
+test_that("a blank group label is a group of its own", {
+  p <- roi_panel()
+  blank <- ifelse(p$d$geo == "east", "", p$d$geo)
+  contrib <- contributions(p$media, p$coefs, by = blank)
+  r <- roi(contrib, p$d[c("tv", "search")], by = blank)
+  expect_identical(unique(r$group), c("", "west"))
+  expect_equal(r$roi[r$group == "" & r$channel == "tv"],
+               roi_by_hand(p, which(blank == ""), "tv"))
+  expect_warning(roi(contrib, p$d[-1, c("tv", "search")], by = blank[-1]),
+                 "In 1 group")
 })
 
 test_that("roi()'s new arguments are validated", {
