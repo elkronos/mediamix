@@ -53,7 +53,9 @@
 #'       sweep changed nothing.}
 #'   }
 #'   plus `scheme`, `aggregate`, `n_splits`, `n_ok`, `n_series` and
-#'   `normalise`, as in [tune_carryover()].
+#'   `normalise`, as in [tune_carryover()]. `as.data.frame()` and `tidy()`
+#'   return `profiles` with logical columns `best` and `best_1se` marking each
+#'   channel's selections.
 #'
 #' @details
 #' The search is coordinate descent: each sweep visits the channels in turn
@@ -326,6 +328,21 @@ print.mm_carryover_joint <- function(x, ...) {
   tab$decay_1se <- x$best_1se$decay
   print(tab, row.names = FALSE, digits = 3)
   invisible(x)
+}
+
+#' @export
+as.data.frame.mm_carryover_joint <- function(x, row.names = NULL,
+                                             optional = FALSE, ...) {
+  out <- x$profiles
+  out$best <- .mm_same_choice(out, x$best)
+  out$best_1se <- .mm_same_choice(out, x$best_1se)
+  if (!is.null(row.names)) rownames(out) <- row.names
+  out
+}
+
+#' @exportS3Method generics::tidy
+tidy.mm_carryover_joint <- function(x, ...) {
+  as.data.frame(x)
 }
 
 # ---- shared model plumbing -----------------------------------------------------

@@ -133,7 +133,9 @@ final sweep, with the other channels held at their selected values:
 sweep changed nothing.}
 }
 plus \code{scheme}, \code{aggregate}, \code{n_splits}, \code{n_ok}, \code{n_series} and
-\code{normalise}, as in \code{\link[=tune_carryover]{tune_carryover()}}.
+\code{normalise}, as in \code{\link[=tune_carryover]{tune_carryover()}}. \code{as.data.frame()} and \code{tidy()}
+return \code{profiles} with logical columns \code{best} and \code{best_1se} marking each
+channel's selections.
 }
 \description{
 The multi-channel counterpart of \code{\link[=tune_carryover]{tune_carryover()}}. Each channel's

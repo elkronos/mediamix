@@ -224,6 +224,22 @@ test_that("cores spreads the joint search without changing it", {
   expect_equal(b$profiles, a$profiles)
 })
 
+# ---- converting the result ---------------------------------------------------------
+
+test_that("the joint result converts to a data frame with the selections marked", {
+  s <- sim_two(4, noise = 80)
+  j <- tune_carryover_joint(s$media, s$y, controls = s$controls,
+                            decays = seq(0.1, 0.9, by = 0.1))
+  df <- as.data.frame(j)
+  expect_s3_class(df, "data.frame")
+  expect_equal(nrow(df), nrow(j$profiles))
+  expect_equal(df$decay[df$best], j$best$decay)
+  expect_equal(df$channel[df$best], j$best$channel)
+  expect_equal(df$decay[df$best_1se], j$best_1se$decay)
+  skip_if_not_installed("generics")
+  expect_identical(generics::tidy(j), df)
+})
+
 # ---- panel data -------------------------------------------------------------------
 
 test_that("the joint tuner adstocks each series on its own", {

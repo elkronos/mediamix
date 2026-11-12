@@ -144,6 +144,8 @@ error of \code{metric} over splits; for \code{aggregate = "mean"} with
 \item{\code{normalise}}{Whether the adstock kernel was normalised, carried
 through so the selected decay can be reapplied on the same footing.}
 }
+\code{as.data.frame()} and \code{tidy()} return \code{results} with two logical columns,
+\code{best} and \code{best_1se}, marking the two selections.
 }
 \description{
 Searches a grid of geometric adstock parameters and returns the pair that

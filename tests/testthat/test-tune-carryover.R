@@ -521,6 +521,26 @@ test_that("one failing element does not fail its neighbours in a parallel worker
   expect_equal(forked$results, serial$results)
 })
 
+# ---- converting the result --------------------------------------------------------------
+
+test_that("the result converts to a data frame with the selections marked", {
+  set.seed(9)
+  n <- 104
+  sp <- pmax(0, rnorm(n, 500, 250))
+  kpi <- 200 + 0.5 * adstock_geometric(sp, decay = 0.5) + rnorm(n, sd = 40)
+  tuned <- suppressWarnings(tune_carryover(sp, kpi,
+                                           decays = seq(0.05, 0.95, 0.05)))
+  df <- as.data.frame(tuned)
+  expect_s3_class(df, "data.frame")
+  expect_equal(nrow(df), nrow(tuned$results))
+  expect_equal(sum(df$best), 1L)
+  expect_equal(sum(df$best_1se), 1L)
+  expect_equal(df$decay[df$best], tuned$best$decay)
+  expect_equal(df$decay[df$best_1se], tuned$best_1se$decay)
+  skip_if_not_installed("generics")
+  expect_identical(generics::tidy(tuned), df)
+})
+
 # ---- panel data ----------------------------------------------------------------------
 
 sim_panel <- function(seed = 1, n = 104, decay = 0.6) {

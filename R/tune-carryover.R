@@ -101,6 +101,8 @@
 #'     \item{`normalise`}{Whether the adstock kernel was normalised, carried
 #'       through so the selected decay can be reapplied on the same footing.}
 #'   }
+#'   `as.data.frame()` and `tidy()` return `results` with two logical columns,
+#'   `best` and `best_1se`, marking the two selections.
 #'
 #' @section What this fixes:
 #' It is tempting to choose carryover parameters by asking which transformed
@@ -396,6 +398,21 @@ print.mm_carryover <- function(x, ...) {
   invisible(x)
 }
 
+#' @export
+as.data.frame.mm_carryover <- function(x, row.names = NULL, optional = FALSE,
+                                       ...) {
+  out <- x$results
+  out$best <- .mm_same_choice(out, x$best)
+  out$best_1se <- .mm_same_choice(out, x$best_1se)
+  if (!is.null(row.names)) rownames(out) <- row.names
+  out
+}
+
+#' @exportS3Method generics::tidy
+tidy.mm_carryover <- function(x, ...) {
+  as.data.frame(x)
+}
+
 # ---- printing helpers ----------------------------------------------------------
 
 #' @keywords internal
@@ -412,6 +429,18 @@ print.mm_carryover <- function(x, ...) {
   if (row$max_lag == 1 || row$decay == 0) return(" (no carryover)")
   if (!is.finite(row$half_life)) return("")
   sprintf(" (half-life %s periods)", format(round(row$half_life, 2)))
+}
+
+# Which rows of a table share a selection's (channel,) max_lag and decay.
+#' @keywords internal
+#' @noRd
+.mm_same_choice <- function(table, chosen) {
+  key <- function(d) {
+    parts <- list(d$max_lag, d$decay)
+    if (!is.null(d$channel)) parts <- c(list(d$channel), parts)
+    do.call(paste, c(parts, list(sep = "\r")))
+  }
+  key(table) %in% key(chosen)
 }
 
 # ---- resampling --------------------------------------------------------------
