@@ -223,3 +223,28 @@ test_that("cores spreads the joint search without changing it", {
   expect_identical(b$best_1se, a$best_1se)
   expect_equal(b$profiles, a$profiles)
 })
+
+# ---- panel data -------------------------------------------------------------------
+
+test_that("the joint tuner adstocks each series on its own", {
+  set.seed(7)
+  n <- 104
+  d <- do.call(rbind, lapply(c("east", "west"), function(g) {
+    a <- pmax(0, rnorm(n, 500, 250))
+    b <- pmax(0, rnorm(n, 300, 150))
+    data.frame(geo = g, week = seq_len(n), a = a, b = b,
+               y = 100 + 0.6 * adstock_geometric(a, 0.7) +
+                 0.9 * adstock_geometric(b, 0.2) + rnorm(n, sd = 10))
+  }))
+  run <- function(d) {
+    tune_carryover_joint(d[c("a", "b")], d$y, by = d$geo, index = d$week,
+                         controls = data.frame(geo = d$geo),
+                         decays = seq(0.1, 0.9, by = 0.1))
+  }
+  j <- run(d)
+  expect_equal(j$best$decay, c(0.7, 0.2))
+  expect_equal(j$n_series, 2)
+  set.seed(1)
+  shuffled <- run(d[sample(nrow(d)), ])
+  expect_equal(shuffled$profiles, j$profiles)
+})

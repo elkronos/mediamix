@@ -22,6 +22,8 @@ tune_carryover(
   aggregate = c("pooled", "mean"),
   controls = NULL,
   warm_start = FALSE,
+  by = NULL,
+  index = NULL,
   se_block = 1L
 )
 }
@@ -104,6 +106,11 @@ than zero, removing the start-up bias of a long carryover. The seed
 averages spend over no more than the first training window, so it uses
 only media that every split trains on.}
 
+\item{by, index}{Panel data. \code{by} assigns each row to a series, as a vector
+or a data frame of key columns, and \code{index} gives each row's period, as a
+number, \link{Date} or \link{POSIXct}. With \code{index} the rows may come in any order.
+\code{by} needs \code{index}. See \emph{Panel data}.}
+
 \item{se_block}{Number of consecutive splits the jackknife leaves out
 together when it computes \code{std_err} and the one-standard-error rule. \code{1},
 the default, treats the splits as independent. Successive forecasts share
@@ -133,6 +140,7 @@ error of \code{metric} over splits; for \code{aggregate = "mean"} with
 \item{\code{n_splits}}{Number of resampling splits formed.}
 \item{\code{n_ok}}{Number of splits every candidate was scored on. See
 \emph{Failed fits}.}
+\item{\code{n_series}}{Number of series, more than 1 only with \code{by}.}
 \item{\code{normalise}}{Whether the adstock kernel was normalised, carried
 through so the selected decay can be reapplied on the same footing.}
 }
@@ -224,6 +232,22 @@ periods or the first training window, whichever is shorter, so the seed
 uses only media that every split trains on. Better still, pass real
 pre-period spend through \code{\link[=adstock_state]{adstock_state()}} and your own \code{fit_fn} when you
 have it.
+}
+
+\section{Panel data}{
+
+With \code{by} and \code{index}, \code{x}, \code{y} and \code{controls} hold several series stacked,
+such as the geographies of \link{mm_weekly}. Each series is adstocked on its own
+in \code{index} order, so carryover never runs from one series into the next.
+Splits are formed on the distinct values of \code{index}: \code{initial}, \code{assess},
+\code{skip} and \code{k} count periods rather than rows, every split trains on the
+same periods of every series, and it assesses the periods that follow. One
+model is fitted to all the series at once and the metric pools their
+forecasts; pass the series as a control to give each its own intercept.
+A series has at most one row per period, and its consecutive rows are
+taken to be consecutive periods. Series may start and end in different
+periods; with \code{warm_start}, a series that starts after the first training
+window is cold-started.
 }
 
 \examples{

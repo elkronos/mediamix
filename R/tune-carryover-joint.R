@@ -52,8 +52,8 @@
 #'     \item{`iterations`, `converged`}{Sweeps run, and whether the last
 #'       sweep changed nothing.}
 #'   }
-#'   plus `scheme`, `aggregate`, `n_splits`, `n_ok` and `normalise`, as in
-#'   [tune_carryover()].
+#'   plus `scheme`, `aggregate`, `n_splits`, `n_ok`, `n_series` and
+#'   `normalise`, as in [tune_carryover()].
 #'
 #' @details
 #' The search is coordinate descent: each sweep visits the channels in turn
@@ -122,6 +122,8 @@ tune_carryover_joint <- function(media, y,
                                  max_iter = 10L,
                                  warm_start = FALSE,
                                  cores = 1L,
+                                 by = NULL,
+                                 index = NULL,
                                  se_block = 1L) {
   scheme <- match.arg(scheme)
   aggregate <- match.arg(aggregate)
@@ -133,6 +135,7 @@ tune_carryover_joint <- function(media, y,
   if (any(lengths(media) != n)) {
     cli::cli_abort("Every column of {.arg media} must have {n} rows, like {.arg y}.")
   }
+  layout <- .mm_tune_layout(n, by, index)
   ctrl <- .mm_control_matrix(controls, n, reserved = make.names(channels))
   model <- .mm_resolve_model(fit_fn, predict_fn)
   if (!is.function(metric_fn)) cli::cli_abort("{.arg metric_fn} must be a function.")
@@ -144,21 +147,25 @@ tune_carryover_joint <- function(media, y,
   se_block <- .mm_check_count(se_block, "se_block", min = 1L)
   cores <- .mm_check_count(cores, "cores", min = 1L)
 
-  splits <- .mm_make_splits(n, scheme = scheme, initial = initial,
-                            assess = assess, skip = skip, k = k,
-                            call = environment())
-  if (length(splits) == 0L) cli::cli_abort("No usable resampling splits.")
-  .mm_check_se_block(se_block, length(splits))
-  warm_periods <- length(splits[[1L]]$train)
+  periods <- .mm_make_splits(layout$n_periods, scheme = scheme,
+                             initial = initial, assess = assess, skip = skip,
+                             k = k, call = environment())
+  if (length(periods) == 0L) cli::cli_abort("No usable resampling splits.")
+  .mm_check_se_block(se_block, length(periods))
+  splits <- .mm_split_rows(periods, layout)
+  warm_periods <- length(periods[[1L]]$train)
   grid <- .mm_tuning_grid(max_lags, decays, normalise, warm_start)
   n_grid <- nrow(grid)
-  ctrl_mat <- if (is.null(ctrl)) NULL else as.matrix(ctrl)
+
+  y_cv <- .mm_cv_rows(y, layout)
+  ctrl_cv <- if (is.null(ctrl)) NULL else .mm_cv_rows(ctrl, layout)
+  ctrl_mat <- if (is.null(ctrl)) NULL else as.matrix(ctrl_cv)
 
   # Every channel's adstocked series at every grid point, computed once.
   cache <- lapply(media, function(x) {
     lapply(seq_len(n_grid), function(g) {
       .mm_adstock_cv(x, grid$decay[g], grid$max_lag[g], normalise,
-                     warm_start, warm_periods)
+                     warm_start, warm_periods, layout)
     })
   })
 
@@ -174,14 +181,15 @@ tune_carryover_joint <- function(media, y,
     if (model$default) {
       X <- do.call(cbind, cols)
       if (!is.null(ctrl_mat)) X <- cbind(X, ctrl_mat)
-      return(.mm_cv_ols(X, y, splits))
+      return(.mm_cv_ols(X, y_cv, splits))
     }
     X <- as.data.frame(cols)
-    if (!is.null(ctrl)) X <- cbind(X, ctrl)
-    .mm_cv_general(X, y, splits, model$fit, model$predict)
+    if (!is.null(ctrl_cv)) X <- cbind(X, ctrl_cv)
+    .mm_cv_general(X, y_cv, splits, model$fit, model$predict)
   }
   compare <- function(sets, se = FALSE) {
-    .mm_cv_compare(sets, y, splits, metric_fn, aggregate, se_block, se = se)
+    .mm_cv_compare(sets, y_cv, splits, metric_fn, aggregate, se_block,
+                   se = se)
   }
 
   profiles <- list()
@@ -290,7 +298,7 @@ tune_carryover_joint <- function(media, y,
          metric = metric, metric_name = metric_name,
          iterations = iter, converged = converged, scheme = scheme,
          aggregate = aggregate, n_splits = length(splits), n_ok = n_ok,
-         normalise = normalise),
+         n_series = layout$n_series, normalise = normalise),
     class = "mm_carryover_joint"
   )
 }
@@ -298,10 +306,13 @@ tune_carryover_joint <- function(media, y,
 #' @export
 print.mm_carryover_joint <- function(x, ...) {
   cli::cli_h3("Joint carryover tuning")
+  series <- if (isTRUE(x$n_series > 1L)) {
+    sprintf(" over %d series", x$n_series)
+  } else ""
   scored <- if (isTRUE(x$n_ok < x$n_splits)) {
     sprintf(" (%d scored)", x$n_ok)
   } else ""
-  cli::cli_text("{nrow(x$best)} channel{?s}, {x$scheme} resampling, \\
+  cli::cli_text("{nrow(x$best)} channel{?s}, {x$scheme} resampling{series}, \\
                  {x$n_splits} split{?s}{scored}; {x$iterations} sweep{?s}, \\
                  {if (x$converged) 'converged' else 'not converged'}")
   cli::cli_text("{x$metric_name} ({x$aggregate}) = {signif(x$metric, 6)}")

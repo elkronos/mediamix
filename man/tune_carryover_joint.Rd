@@ -24,6 +24,8 @@ tune_carryover_joint(
   max_iter = 10L,
   warm_start = FALSE,
   cores = 1L,
+  by = NULL,
+  index = NULL,
   se_block = 1L
 )
 }
@@ -100,6 +102,11 @@ seed uses no media from beyond the first training window.}
 \item{cores}{Number of cores over which each channel's grid points are
 scored. See \code{\link[=tune_carryover]{tune_carryover()}}.}
 
+\item{by, index}{Panel data. \code{by} assigns each row to a series, as a vector
+or a data frame of key columns, and \code{index} gives each row's period, as a
+number, \link{Date} or \link{POSIXct}. With \code{index} the rows may come in any order.
+\code{by} needs \code{index}. See \emph{Panel data}.}
+
 \item{se_block}{Number of consecutive splits the jackknife leaves out
 together when it computes \code{std_err} and the one-standard-error rule. \code{1},
 the default, treats the splits as independent. Successive forecasts share
@@ -125,8 +132,8 @@ final sweep, with the other channels held at their selected values:
 \item{\code{iterations}, \code{converged}}{Sweeps run, and whether the last
 sweep changed nothing.}
 }
-plus \code{scheme}, \code{aggregate}, \code{n_splits}, \code{n_ok} and \code{normalise}, as in
-\code{\link[=tune_carryover]{tune_carryover()}}.
+plus \code{scheme}, \code{aggregate}, \code{n_splits}, \code{n_ok}, \code{n_series} and
+\code{normalise}, as in \code{\link[=tune_carryover]{tune_carryover()}}.
 }
 \description{
 The multi-channel counterpart of \code{\link[=tune_carryover]{tune_carryover()}}. Each channel's

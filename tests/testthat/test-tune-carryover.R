@@ -520,3 +520,89 @@ test_that("one failing element does not fail its neighbours in a parallel worker
   forked <- tune_carryover(x, y, decays = c(0.2, 0.3, 0.5), cores = 2)
   expect_equal(forked$results, serial$results)
 })
+
+# ---- panel data ----------------------------------------------------------------------
+
+sim_panel <- function(seed = 1, n = 104, decay = 0.6) {
+  set.seed(seed)
+  geos <- c("a", "b", "c")
+  do.call(rbind, lapply(seq_along(geos), function(g) {
+    x <- pmax(0, rnorm(n, 500, 250))
+    data.frame(geo = geos[g], week = seq_len(n), x = x,
+               y = 100 * g + 0.5 * adstock_geometric(x, decay) +
+                 rnorm(n, sd = 10))
+  }))
+}
+
+test_that("by and index adstock each series on its own and split by period", {
+  d <- sim_panel()
+  lay <- .mm_tune_layout(nrow(d), d$geo, d$week)
+  splits <- .mm_split_rows(
+    .mm_make_splits(104, "rolling_origin", NULL, 1L, 0L, 5L), lay)
+  week <- d$week[lay$cv_order]
+  # The first split trains on weeks 1 to 52 of every series and assesses
+  # week 53 of every series.
+  expect_equal(sort(week[splits[[1]]$train]), rep(1:52, each = 3))
+  expect_equal(week[splits[[1]]$test], rep(53, 3))
+  # Adstock restarts at the start of each series.
+  z <- .mm_adstock_cv(d$x, 0.6, Inf, TRUE, FALSE, 52L, lay)
+  by_geo <- unsplit(lapply(split(d$x, d$geo), adstock_geometric, decay = 0.6),
+                    d$geo)
+  expect_equal(z, by_geo[lay$cv_order])
+
+  tuned <- tune_carryover(d$x, d$y, by = d$geo, index = d$week,
+                          decays = seq(0.1, 0.9, by = 0.1),
+                          controls = data.frame(geo = d$geo))
+  expect_equal(tuned$best$decay, 0.6)
+  expect_equal(tuned$n_splits, 52)
+  expect_equal(tuned$n_series, 3)
+})
+
+test_that("panel results do not depend on row order", {
+  d <- sim_panel(2)
+  set.seed(9)
+  o <- sample(nrow(d))
+  run <- function(d) {
+    tune_carryover(d$x, d$y, by = d$geo, index = d$week,
+                   decays = seq(0.1, 0.9, by = 0.1),
+                   controls = data.frame(geo = d$geo), warm_start = TRUE)
+  }
+  expect_equal(run(d[o, ])$results, run(d)$results)
+  # One series with an index is the series without one.
+  a <- d[d$geo == "a", ]
+  expect_equal(
+    tune_carryover(a$x[o[o <= 104]], a$y[o[o <= 104]],
+                   index = a$week[o[o <= 104]],
+                   decays = seq(0.1, 0.9, by = 0.1))$results,
+    tune_carryover(a$x, a$y, decays = seq(0.1, 0.9, by = 0.1))$results
+  )
+})
+
+test_that("a series that starts after the first training window is cold-started", {
+  set.seed(3)
+  a <- data.frame(geo = "a", week = 1:104, x = pmax(0, rnorm(104, 500, 250)))
+  b <- data.frame(geo = "b", week = 60:104, x = pmax(0, rnorm(45, 500, 250)))
+  d <- rbind(a, b)
+  lay <- .mm_tune_layout(nrow(d), d$geo, d$week)
+  z <- .mm_adstock_cv(d$x, 0.8, Inf, TRUE, TRUE, 52L, lay)
+  # Series a is seeded from its first effective_window(0.8) = 11 weeks, all
+  # inside the 52-week first training window; series b has no week there.
+  za <- adstock_geometric(a$x, 0.8,
+                          state = adstock_steady_state(a$x, 0.8, periods = 11))
+  zb <- adstock_geometric(b$x, 0.8)
+  expect_equal(z, c(za, zb)[lay$cv_order])
+})
+
+test_that("panel arguments are validated", {
+  d <- sim_panel()
+  expect_error(tune_carryover(d$x, d$y, by = d$geo, decays = 0.5),
+               class = "rlang_error", regexp = "index")
+  expect_error(tune_carryover(d$x, d$y, index = d$week, decays = 0.5),
+               class = "rlang_error", regexp = "repeats a period")
+  expect_error(tune_carryover(d$x, d$y, by = d$geo[-1], index = d$week,
+                              decays = 0.5),
+               class = "rlang_error", regexp = "one value per row")
+  expect_error(tune_carryover(d$x, d$y, by = d$geo,
+                              index = as.character(d$week), decays = 0.5),
+               class = "rlang_error", regexp = "index")
+})

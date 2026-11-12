@@ -65,6 +65,10 @@
 #'   split and averages, which is the \pkg{tune} convention. With
 #'   `assess = 1` a per-split RMSE is an absolute error, so the mean of them is
 #'   a mean absolute error whatever `metric_fn` is called.
+#' @param by,index Panel data. `by` assigns each row to a series, as a vector
+#'   or a data frame of key columns, and `index` gives each row's period, as a
+#'   number, [Date] or [POSIXct]. With `index` the rows may come in any order.
+#'   `by` needs `index`. See *Panel data*.
 #' @param se_block Number of consecutive splits the jackknife leaves out
 #'   together when it computes `std_err` and the one-standard-error rule. `1`,
 #'   the default, treats the splits as independent. Successive forecasts share
@@ -93,6 +97,7 @@
 #'     \item{`n_splits`}{Number of resampling splits formed.}
 #'     \item{`n_ok`}{Number of splits every candidate was scored on. See
 #'       *Failed fits*.}
+#'     \item{`n_series`}{Number of series, more than 1 only with `by`.}
 #'     \item{`normalise`}{Whether the adstock kernel was normalised, carried
 #'       through so the selected decay can be reapplied on the same footing.}
 #'   }
@@ -171,6 +176,20 @@
 #' pre-period spend through [adstock_state()] and your own `fit_fn` when you
 #' have it.
 #'
+#' @section Panel data:
+#' With `by` and `index`, `x`, `y` and `controls` hold several series stacked,
+#' such as the geographies of [mm_weekly]. Each series is adstocked on its own
+#' in `index` order, so carryover never runs from one series into the next.
+#' Splits are formed on the distinct values of `index`: `initial`, `assess`,
+#' `skip` and `k` count periods rather than rows, every split trains on the
+#' same periods of every series, and it assesses the periods that follow. One
+#' model is fitted to all the series at once and the metric pools their
+#' forecasts; pass the series as a control to give each its own intercept.
+#' A series has at most one row per period, and its consecutive rows are
+#' taken to be consecutive periods. Series may start and end in different
+#' periods; with `warm_start`, a series that starts after the first training
+#' window is cold-started.
+#'
 #' @references
 #' Breiman, L., Friedman, J., Olshen, R. and Stone, C. (1984).
 #' *Classification and Regression Trees*. Wadsworth.
@@ -237,6 +256,8 @@ tune_carryover <- function(x, y,
                            aggregate = c("pooled", "mean"),
                            controls = NULL,
                            warm_start = FALSE,
+                           by = NULL,
+                           index = NULL,
                            se_block = 1L) {
   scheme <- match.arg(scheme)
   aggregate <- match.arg(aggregate)
@@ -260,50 +281,54 @@ tune_carryover <- function(x, y,
       i = "A series that never changes carries no information about carryover."
     ))
   }
+  layout <- .mm_tune_layout(n, by, index)
   ctrl <- .mm_control_matrix(controls, n, reserved = "media")
 
   max_lags <- .mm_check_lag_grid(max_lags)
   decays <- .mm_check_decay_grid(decays)
   se_block <- .mm_check_count(se_block, "se_block", min = 1L)
 
-  splits <- .mm_make_splits(n, scheme = scheme, initial = initial,
-                            assess = assess, skip = skip, k = k,
-                            call = environment())
-  if (length(splits) == 0L) {
+  periods <- .mm_make_splits(layout$n_periods, scheme = scheme,
+                             initial = initial, assess = assess, skip = skip,
+                             k = k, call = environment())
+  if (length(periods) == 0L) {
     cli::cli_abort(c(
       "No usable resampling splits.",
-      i = "The series has {n} observation{?s}; {.arg initial} and \\
+      i = "The series has {layout$n_periods} period{?s}; {.arg initial} and \\
            {.arg assess} leave nothing to assess on."
     ))
   }
-  .mm_check_se_block(se_block, length(splits))
-  warm_periods <- length(splits[[1L]]$train)
+  .mm_check_se_block(se_block, length(periods))
+  splits <- .mm_split_rows(periods, layout)
+  warm_periods <- length(periods[[1L]]$train)
   grid <- .mm_tuning_grid(max_lags, decays, normalise, warm_start)
 
   default_model <- identical(fit_fn, fit_ols) &&
     identical(predict_fn, stats::predict)
   fast <- default_model && is.null(ctrl)
-  ctrl_mat <- if (is.null(ctrl)) NULL else as.matrix(ctrl)
+  y_cv <- .mm_cv_rows(y, layout)
+  ctrl_cv <- if (is.null(ctrl)) NULL else .mm_cv_rows(ctrl, layout)
+  ctrl_mat <- if (is.null(ctrl)) NULL else as.matrix(ctrl_cv)
 
   eval_one <- function(i) {
     z <- .mm_adstock_cv(x, grid$decay[i], grid$max_lag[i], normalise,
-                        warm_start, warm_periods)
-    folds <- if (fast) .mm_cv_fast(z, y, splits) else NULL
+                        warm_start, warm_periods, layout)
+    folds <- if (fast) .mm_cv_fast(z, y_cv, splits) else NULL
     if (!is.null(folds)) return(folds)
     # The fast path declined this grid point as numerically unsafe, or a
     # model other than the bare default is in use.
     if (default_model && !is.null(ctrl)) {
-      return(.mm_cv_ols(cbind(media = z, ctrl_mat), y, splits))
+      return(.mm_cv_ols(cbind(media = z, ctrl_mat), y_cv, splits))
     }
-    design <- if (is.null(ctrl)) z else cbind(data.frame(media = z), ctrl)
-    .mm_cv_general(design, y, splits, fit_fn, predict_fn)
+    design <- if (is.null(ctrl)) z else cbind(data.frame(media = z), ctrl_cv)
+    .mm_cv_general(design, y_cv, splits, fit_fn, predict_fn)
   }
 
   raw <- .mm_maybe_parallel(seq_len(nrow(grid)), eval_one, cores,
                             call = environment())
   sets <- .mm_worker_failures(raw, length(splits))
   .mm_warn_worker_failures(sets)
-  sc <- .mm_cv_compare(sets$folds, y, splits, metric_fn, aggregate,
+  sc <- .mm_cv_compare(sets$folds, y_cv, splits, metric_fn, aggregate,
                        se_block)
   .mm_check_scores(sc)
   .mm_warn_lost_splits(sc$lost, sc$n_ok, sc$first_error)
@@ -333,7 +358,8 @@ tune_carryover <- function(x, y,
     list(best = best, best_1se = best_1se, results = results,
          metric = best$metric, metric_name = metric_name,
          aggregate = aggregate, scheme = scheme,
-         n_splits = length(splits), n_ok = sc$n_ok, normalise = normalise),
+         n_splits = length(splits), n_ok = sc$n_ok,
+         n_series = layout$n_series, normalise = normalise),
     class = "mm_carryover"
   )
 }
@@ -344,8 +370,11 @@ print.mm_carryover <- function(x, ...) {
   scored <- if (isTRUE(x$n_ok < x$n_splits)) {
     sprintf(" (%d scored)", x$n_ok)
   } else ""
-  cli::cli_text("{x$scheme} resampling, {x$n_splits} split{?s}{scored}, \\
-                 {nrow(x$results)} grid point{?s}")
+  series <- if (isTRUE(x$n_series > 1L)) {
+    sprintf(" over %d series", x$n_series)
+  } else ""
+  cli::cli_text("{x$scheme} resampling{series}, {x$n_splits} split{?s}\\
+                 {scored}, {nrow(x$results)} grid point{?s}")
   b <- x$best
   b_note <- .mm_carry_note(b)
   b_lag <- .mm_lag_text(b)
@@ -450,27 +479,156 @@ print.mm_carryover <- function(x, ...) {
   invisible(se_block)
 }
 
-# One candidate's adstocked media.
+# Rows of each split once the data are in `.mm_cv_rows()` order. Splits are
+# formed on periods; this turns each one into the rows of every series that
+# fall in those periods. Rows are sorted by period, so a training set is
+# always a prefix of the rows, which the prefix-sum fast path relies on.
+#' @keywords internal
+#' @noRd
+.mm_split_rows <- function(splits, layout) {
+  if (is.null(layout$period)) return(splits)
+  last <- cumsum(tabulate(layout$period, nbins = layout$n_periods))
+  lapply(splits, function(s) {
+    first_test <- s$test[1L]
+    from <- if (first_test > 1L) last[first_test - 1L] + 1L else 1L
+    list(train = seq_len(last[s$train[length(s$train)]]),
+         test = from:last[s$test[length(s$test)]])
+  })
+}
+
+# How the rows of a single series or a panel line up in time. Without `index`
+# the rows are the periods. With it, `ad_order` sorts each series by period for
+# the adstock, `cv_order` sorts all rows by period for resampling, and
+# `period` is the rank of each row's period in `cv_order`.
+#' @keywords internal
+#' @noRd
+.mm_tune_layout <- function(n, by, index, call = parent.frame()) {
+  if (is.null(by) && is.null(index)) {
+    return(list(n_periods = n, n_series = 1L, by = NULL, ad_order = NULL,
+                cv_order = NULL, period = NULL))
+  }
+  if (is.null(index)) {
+    cli::cli_abort(c(
+      "{.arg by} needs {.arg index}.",
+      i = "Splits are formed on the periods every series shares, so the \\
+           tuner has to know which rows fall in the same period."
+    ), call = call)
+  }
+  if (!is.null(by)) {
+    if (is.data.frame(by)) {
+      by <- do.call(paste, c(lapply(by, as.character), list(sep = "\x1f")))
+    }
+    if (!is.atomic(by) || length(by) != n) {
+      cli::cli_abort("{.arg by} must have one value per row ({n}), not \\
+                      {length(by)}.", call = call)
+    }
+    if (anyNA(by)) {
+      cli::cli_abort("{.arg by} must not contain missing values.", call = call)
+    }
+    by <- as.character(by)
+  }
+  if (!(is.numeric(index) || inherits(index, c("Date", "POSIXct"))) ||
+      is.matrix(index)) {
+    cli::cli_abort("{.arg index} must be a numeric, {.cls Date} or \\
+                    {.cls POSIXct} vector, not {.obj_type_friendly {index}}.",
+                   call = call)
+  }
+  if (length(index) != n) {
+    cli::cli_abort("{.arg index} must have one value per row ({n}), not \\
+                    {length(index)}.", call = call)
+  }
+  t <- as.numeric(index)
+  if (anyNA(t) || any(!is.finite(t))) {
+    cli::cli_abort("{.arg index} must not contain missing or infinite values.",
+                   call = call)
+  }
+  key <- if (is.null(by)) character(n) else by
+  ad_order <- order(key, t)
+  ks <- key[ad_order]
+  ts <- t[ad_order]
+  same <- which(c(FALSE, ks[-1L] == ks[-n] & ts[-1L] == ts[-n]))
+  if (length(same) > 0L) {
+    row <- ad_order[same[1L]]
+    where <- if (is.null(by)) "" else
+      sprintf(" of series %s", gsub("\x1f", " / ", key[row], fixed = TRUE))
+    cli::cli_abort(c(
+      "{.arg index} repeats a period{where}.",
+      x = "Row {row} has the same period as an earlier row.",
+      i = "Each series needs one row per period. Aggregate to one row per \\
+           period, or separate the series with {.arg by}."
+    ), call = call)
+  }
+  cv_order <- order(t, key)
+  periods <- sort(unique(t))
+  list(n_periods = length(periods), n_series = length(unique(key)), by = by,
+       ad_order = ad_order, cv_order = cv_order,
+       period = match(t[cv_order], periods),
+       ad_period = match(t[ad_order], periods))
+}
+
+# Rows of a vector or data frame in resampling order.
+#' @keywords internal
+#' @noRd
+.mm_cv_rows <- function(v, layout) {
+  o <- layout$cv_order
+  if (is.null(o)) return(v)
+  if (is.data.frame(v)) {
+    out <- v[o, , drop = FALSE]
+    rownames(out) <- NULL
+    return(out)
+  }
+  v[o]
+}
+
+# One candidate's adstocked media, in resampling order. Each series is
+# filtered on its own, in time order, so carryover never crosses from one
+# series into another.
 #' @keywords internal
 #' @noRd
 .mm_adstock_cv <- function(x, decay, max_lag, normalise, warm_start,
-                           warm_periods) {
-  st <- if (warm_start) .mm_warm_state(x, decay, max_lag, warm_periods) else 0
-  adstock_geometric(x, decay = decay, max_lag = max_lag,
-                    normalise = normalise, state = st)
+                           warm_periods, layout) {
+  o <- layout$ad_order
+  xs <- if (is.null(o)) x else x[o]
+  bys <- if (is.null(layout$by)) NULL else layout$by[o]
+  st <- if (warm_start) {
+    .mm_warm_state(xs, decay, max_lag, warm_periods, by = bys,
+                   period = layout$ad_period)
+  } else 0
+  z <- adstock_geometric(xs, decay = decay, max_lag = max_lag,
+                         normalise = normalise, state = st, by = bys)
+  if (is.null(o)) return(z)
+  out <- numeric(length(z))
+  out[o] <- z
+  out[layout$cv_order]
 }
 
 # A steady-state seed that looks no further ahead than the first training
 # window, which every split trains on. adstock_steady_state() alone averages
-# the first effective window, which can reach past it on a short series.
+# the first effective window, which can reach past it on a short series. For
+# a panel, `period` gives each row's period, so a series that starts late is
+# seeded only from its rows inside that window, and cold-started when it has
+# none.
 #' @keywords internal
 #' @noRd
-.mm_warm_state <- function(x, decay, max_lag, horizon) {
+.mm_warm_state <- function(x, decay, max_lag, horizon, by = NULL,
+                           period = NULL) {
   window <- if (decay == 0) 1 else if (decay < 1) {
     ceiling(log(1 - 0.9) / log(decay))
   } else Inf
-  adstock_steady_state(x, decay, max_lag = max_lag,
-                       periods = min(window, horizon))
+  if (is.null(by)) {
+    return(adstock_steady_state(x, decay, max_lag = max_lag,
+                                periods = min(window, horizon)))
+  }
+  groups <- unique(by)
+  out <- lapply(groups, function(g) {
+    rows <- which(by == g)
+    inside <- sum(period[rows] <= horizon)
+    if (inside == 0L) return(0)
+    adstock_steady_state(x[rows], decay, max_lag = max_lag,
+                         periods = min(window, inside))
+  })
+  names(out) <- groups
+  out
 }
 
 # The candidate grid, without the points that cannot be evaluated: an
