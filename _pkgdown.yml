@@ -74,13 +74,14 @@ reference:
   - response_curve
   - block_bootstrap
 - title: Plots
-  desc: A `plot()` method for each result, in one consistent style.
+  desc: "`plot()` methods for the main results, in one consistent style."
   contents:
   - plot_carryover
   - plot.mm_bootstrap
   - plot.mm_contributions
   - plot.mm_response_curve
   - plot.mm_attribution
+  - plot.mm_diagnosis
   - mm_palette
 - title: tidymodels integration
   contents:
