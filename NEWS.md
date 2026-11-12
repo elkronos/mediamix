@@ -1,4 +1,18 @@
-# mediamix (development version)
+# mediamix 0.4.0.9000
+
+## Breaking changes
+
+* `diagnose_media()`'s CPM table names its row column `row` (it was `period`,
+  but held a row number) and gains a `group` column when `by` is supplied.
+* `tune_carryover()` pools out-of-sample forecasts by default
+  (`aggregate = "pooled"`), so its reported RMSE is a root mean squared
+  forecast error. `aggregate = "mean"` restores the previous averaging of
+  per-split metrics.
+* `contributions()`, `response_curve()` and `attribute()` return subclassed
+  data frames (`mm_contributions`, `mm_response_curve`, `mm_attribution`) so
+  that `plot()` dispatches. Code that tests `class(x)` exactly needs updating.
+* `mm_weekly` spend and half-saturation points are rescaled by 1/20, so
+  coefficients and ROIs computed from it differ from 0.4.0.
 
 ## Bug fixes
 
@@ -68,7 +82,8 @@
   references article and a comparison with other tools, deployed to GitHub
   Pages by a new workflow.
 * `mm_weekly` spend is rescaled so that average ROIs are between about 1 and
-  4 rather than 0.07; revenue, decays and shapes are unchanged.
+  4 rather than 0.07. Decays and shapes are unchanged, and revenue moves only
+  through rounding of the rescaled spend.
 * README and vignette claims about other packages corrected: the README no
   longer says Robyn is not a CRAN package or that no other package builds
   journeys, and the normalised adstock kernel is now credited as the Jin et
