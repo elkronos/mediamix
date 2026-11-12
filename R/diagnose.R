@@ -4,8 +4,9 @@
 #' None of them are about the model; all of them are about whether the data
 #' contains the information the model will be asked to find. Run this first.
 #'
-#' @param data A data frame containing the media columns.
-#' @param media Character vector naming the media columns.
+#' @param data A data frame containing the media columns. A tibble or
+#'   data.table is read as a plain data frame.
+#' @param media Character vector naming the media columns, each once.
 #' @param spend,impressions Optional character vectors of matching spend and
 #'   impression columns, in the same order, for the cost-per-mille consistency
 #'   check.
@@ -15,7 +16,8 @@
 #'   coefficient of variation, the highest share of dark periods. Pooling
 #'   geographies that differ mainly in scale would manufacture correlation that
 #'   exists in no single series, so `by` is worth supplying whenever the rows
-#'   are a panel.
+#'   are a panel. Groups set with `dplyr::group_by()` are not used in its place;
+#'   a message says so and names the `by` to pass.
 #' @param vif_threshold Variance inflation factor above which a channel is
 #'   flagged.
 #' @param cv_threshold Coefficient of variation below which a channel is flagged
@@ -24,9 +26,10 @@
 #'   *adstocked* media: a single number for every channel, or a named vector
 #'   with one per channel (unnamed channels are left raw). Adstock smooths each
 #'   series, and smoothed series are usually more correlated than the raw
-#'   spend, so this is the collinearity the model will actually face. Rows
-#'   must be in time order within each group. Variation and flighting are
-#'   always reported on the raw spend.
+#'   spend, so this is the collinearity the model will face. Rows must be in
+#'   time order within each group. Missing spend is treated as zero for the
+#'   adstock, and a message counts the values affected. Variation and
+#'   flighting are always reported on the raw spend.
 #'
 #' @return An object of class `mm_diagnosis`: a named list with elements
 #'   \describe{
@@ -53,6 +56,9 @@
 #'       was measured on adstocked media.}
 #'   }
 #'
+#'   `as.data.frame()` and `tidy()` return the per-channel table: one row per
+#'   channel, with the `variation` and `collinearity` columns side by side.
+#'
 #' @details
 #' Four things sink marketing mix projects, and all four are visible before a
 #' model is fitted.
@@ -77,7 +83,10 @@
 #' **Spend and impression inconsistency** -- a wildly varying implied cost per
 #' mille -- almost always means a data-join error upstream rather than a real
 #' change in media pricing. It is worth catching before it becomes a modelling
-#' puzzle.
+#' puzzle. A period is flagged when its CPM is more than five median absolute
+#' deviations from its series' median. When more than half of a series' CPMs
+#' are identical the median absolute deviation is zero, and a period is
+#' flagged instead when its CPM is at least twice or at most half the median.
 #'
 #' @seealso [adstock_geometric()], [contributions()]
 #'
@@ -93,7 +102,7 @@
 #' d$variation
 #' d$collinearity
 #'
-#' # Collinearity after adstocking is what the model actually sees
+#' # Collinearity after adstocking is what the model sees
 #' diagnose_media(mm_weekly, media = channels, by = "geo",
 #'                decay = attr(mm_weekly, "truth")$decay)$collinearity
 #'
@@ -112,14 +121,25 @@ diagnose_media <- function(data, media, spend = NULL, impressions = NULL,
     cli::cli_abort("{.arg media} must be a non-empty character vector of \\
                     column names.")
   }
+  if (anyDuplicated(media)) {
+    cli::cli_abort(c(
+      "{.arg media} must name each column once.",
+      x = "Repeated: {.val {unique(media[duplicated(media)])}}."
+    ))
+  }
   .mm_assert_cols(data, c(media, spend, impressions, by))
   vif_threshold <- .mm_check_scalar(vif_threshold, "vif_threshold", lower = 1)
   cv_threshold <- .mm_check_scalar(cv_threshold, "cv_threshold", lower = 0)
+  .mm_note_dplyr_groups(data, by, "diagnose_media")
+  # A data.table reads a character index as a join, and a grouped tibble
+  # carries groups this function does not use; a plain data frame has neither.
+  data <- as.data.frame(data)
 
   grp <- .mm_step_groups(data, by)
-  m <- as.data.frame(lapply(data[media], function(z) .mm_as_number(z, "media")),
-                     check.names = FALSE)
-  names(m) <- media
+  here <- environment()
+  m <- as.data.frame(lapply(stats::setNames(media, media), function(cn) {
+    .mm_as_number(data[[cn]], cn, call = here)
+  }), check.names = FALSE)
 
   # A column with no usable values cannot take part in any regression, and
   # leaving it in would make `complete.cases()` empty out every other column's
@@ -165,7 +185,18 @@ diagnose_media <- function(data, media, spend = NULL, impressions = NULL,
   live <- m[, usable, drop = FALSE]
   decays <- .mm_diag_decays(decay, media)
   if (!is.null(decays)) {
-    for (cn in intersect(names(decays), names(live))) {
+    adstocked <- intersect(names(decays), names(live))
+    gaps <- vapply(live[adstocked], function(z) sum(is.na(z)), integer(1))
+    if (any(gaps > 0L)) {
+      gaps <- gaps[gaps > 0L]
+      by_channel <- paste0(names(gaps), " (", gaps, ")", collapse = ", ")
+      cli::cli_inform(c(
+        "Missing spend was treated as zero when adstocking for the \\
+         collinearity check.",
+        i = "Missing values by channel: {by_channel}."
+      ))
+    }
+    for (cn in adstocked) {
       for (rows in grp) {
         v <- live[[cn]][rows]
         live[[cn]][rows] <- adstock_geometric(v, decay = decays[[cn]],
@@ -190,7 +221,8 @@ diagnose_media <- function(data, media, spend = NULL, impressions = NULL,
   collinearity <- .mm_collinearity_table(per_group_stats, media, cors,
                                          vif_threshold)
   cpm <- .mm_cpm_table(data, spend, impressions, grp,
-                       grouped = !is.null(by) && length(by) > 0L)
+                       grouped = !is.null(by) && length(by) > 0L,
+                       call = environment())
 
   flags <- character(0)
   if (length(dead) > 0L) {
@@ -260,6 +292,44 @@ print.mm_diagnosis <- function(x, ...) {
   cli::cli_text("")
   cli::cli_text("{.emph Inspect $variation, $collinearity, $correlations.}")
   invisible(x)
+}
+
+#' @export
+as.data.frame.mm_diagnosis <- function(x, row.names = NULL, optional = FALSE,
+                                       ...) {
+  v <- x$variation
+  co <- x$collinearity
+  out <- cbind(v, co[match(v$channel, co$channel),
+                     setdiff(names(co), "channel"), drop = FALSE])
+  rownames(out) <- NULL
+  out
+}
+
+#' @exportS3Method generics::tidy
+tidy.mm_diagnosis <- function(x, ...) {
+  as.data.frame(x)
+}
+
+# dplyr groups are not used as `by`: grouping does not survive every route a
+# data frame takes, so a panel is named explicitly. A grouped frame passed
+# without `by` gets a message naming the `by` to pass.
+#' @keywords internal
+#' @noRd
+.mm_note_dplyr_groups <- function(data, by, fn) {
+  if (!is.null(by) || !inherits(data, "grouped_df")) return(invisible(NULL))
+  vars <- setdiff(names(attr(data, "groups", exact = TRUE)), ".rows")
+  if (length(vars) == 0L) return(invisible(NULL))
+  code <- if (length(vars) == 1L) {
+    sprintf('by = "%s"', vars)
+  } else {
+    sprintf("by = c(%s)", paste0('"', vars, '"', collapse = ", "))
+  }
+  cli::cli_inform(c(
+    "{.arg data} is grouped by {.val {vars}}, but {.fn {fn}} does not use \\
+     dplyr groups: the rows are treated as one series.",
+    i = "Pass {.code {code}} to treat each group as its own series."
+  ))
+  invisible(NULL)
 }
 
 #' @keywords internal
@@ -365,28 +435,36 @@ print.mm_diagnosis <- function(x, ...) {
 #' @keywords internal
 #' @noRd
 .mm_cpm_table <- function(data, spend, impressions, grp = NULL,
-                          grouped = FALSE) {
+                          grouped = FALSE, call = parent.frame()) {
   if (is.null(spend) || is.null(impressions)) return(NULL)
   if (length(spend) != length(impressions)) {
     cli::cli_abort("{.arg spend} and {.arg impressions} must name the same \\
                     number of columns, in matching order.",
-                   call = parent.frame(2))
+                   call = call)
   }
   if (is.null(grp)) grp <- list(".all" = seq_len(nrow(data)))
   # The median and MAD are computed within each series. Pooled across
-  # geographies, a region that simply buys media at a different price would
-  # be flagged as a stream of join errors.
+  # geographies, a region that buys media at a different price would be
+  # flagged as a stream of join errors.
   rows <- lapply(seq_along(spend), function(i) {
-    s <- as.numeric(data[[spend[i]]])
-    imp <- as.numeric(data[[impressions[i]]])
+    s <- .mm_as_number(data[[spend[i]]], spend[i], call = call)
+    imp <- .mm_as_number(data[[impressions[i]]], impressions[i], call = call)
     cpm_all <- ifelse(imp > 0, s / imp * 1000, NA_real_)
     do.call(rbind, lapply(names(grp), function(g) {
       r <- grp[[g]]
       cpm <- cpm_all[r]
       med <- stats::median(cpm, na.rm = TRUE)
       madv <- stats::mad(cpm, na.rm = TRUE)
-      outlier <- !is.na(cpm) & is.finite(madv) & madv > 0 &
-        abs(cpm - med) > 5 * madv
+      # When more than half the CPMs are identical the MAD is zero, and a rule
+      # in MADs flags nothing however far a period strays. A factor of two
+      # either side of the median is the fallback.
+      outlier <- if (is.finite(madv) && madv > 0) {
+        !is.na(cpm) & abs(cpm - med) > 5 * madv
+      } else if (is.finite(med) && med > 0) {
+        !is.na(cpm) & (cpm >= 2 * med | cpm <= med / 2)
+      } else {
+        rep(FALSE, length(cpm))
+      }
       out <- data.frame(channel = spend[i], row = r, cpm = cpm,
                         median_cpm = med, outlier = outlier,
                         stringsAsFactors = FALSE)

@@ -16,9 +16,10 @@ diagnose_media(
 )
 }
 \arguments{
-\item{data}{A data frame containing the media columns.}
+\item{data}{A data frame containing the media columns. A tibble or
+data.table is read as a plain data frame.}
 
-\item{media}{Character vector naming the media columns.}
+\item{media}{Character vector naming the media columns, each once.}
 
 \item{spend, impressions}{Optional character vectors of matching spend and
 impression columns, in the same order, for the cost-per-mille consistency
@@ -30,7 +31,8 @@ variance inflation factor, the strongest absolute correlation, the lowest
 coefficient of variation, the highest share of dark periods. Pooling
 geographies that differ mainly in scale would manufacture correlation that
 exists in no single series, so \code{by} is worth supplying whenever the rows
-are a panel.}
+are a panel. Groups set with \code{dplyr::group_by()} are not used in its place;
+a message says so and names the \code{by} to pass.}
 
 \item{vif_threshold}{Variance inflation factor above which a channel is
 flagged.}
@@ -42,9 +44,10 @@ as insufficiently varying.}
 \emph{adstocked} media: a single number for every channel, or a named vector
 with one per channel (unnamed channels are left raw). Adstock smooths each
 series, and smoothed series are usually more correlated than the raw
-spend, so this is the collinearity the model will actually face. Rows
-must be in time order within each group. Variation and flighting are
-always reported on the raw spend.}
+spend, so this is the collinearity the model will face. Rows must be in
+time order within each group. Missing spend is treated as zero for the
+adstock, and a message counts the values affected. Variation and
+flighting are always reported on the raw spend.}
 }
 \value{
 An object of class \code{mm_diagnosis}: a named list with elements
@@ -71,6 +74,9 @@ should be dealt with. Empty when nothing was found.}
 series examined, whether \code{by} was supplied, and whether collinearity
 was measured on adstocked media.}
 }
+
+\code{as.data.frame()} and \code{tidy()} return the per-channel table: one row per
+channel, with the \code{variation} and \code{collinearity} columns side by side.
 }
 \description{
 Runs the checks that decide whether a marketing mix model can work at all.
@@ -101,7 +107,10 @@ because carryover across dark periods is where transform bugs hide.
 \strong{Spend and impression inconsistency} -- a wildly varying implied cost per
 mille -- almost always means a data-join error upstream rather than a real
 change in media pricing. It is worth catching before it becomes a modelling
-puzzle.
+puzzle. A period is flagged when its CPM is more than five median absolute
+deviations from its series' median. When more than half of a series' CPMs
+are identical the median absolute deviation is zero, and a period is
+flagged instead when its CPM is at least twice or at most half the median.
 }
 \examples{
 data(mm_weekly)
@@ -115,7 +124,7 @@ d
 d$variation
 d$collinearity
 
-# Collinearity after adstocking is what the model actually sees
+# Collinearity after adstocking is what the model sees
 diagnose_media(mm_weekly, media = channels, by = "geo",
                decay = attr(mm_weekly, "truth")$decay)$collinearity
 

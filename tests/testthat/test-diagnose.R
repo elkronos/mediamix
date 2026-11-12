@@ -119,3 +119,84 @@ test_that("print.mm_diagnosis runs without error", {
   diag <- diagnose_media(d, media = c("tv", "search", "social"))
   expect_no_error(capture.output(print(diag)))
 })
+
+test_that("a CPM outlier is flagged even when most CPMs are identical", {
+  set.seed(7)
+  d <- data.frame(tv = runif(10), search = runif(10), social = runif(10),
+                  imp = 1000, spend = c(rep(5, 9), 500))
+  diag <- diagnose_media(d, media = c("tv", "search", "social"),
+                         spend = "spend", impressions = "imp")
+  expect_identical(which(diag$cpm$outlier), 10L)
+  expect_true(any(grepl("CPM", diag$flags)))
+  d$spend[10] <- 6   # a 20% price change is not a join error
+  calm <- diagnose_media(d, media = c("tv", "search", "social"),
+                         spend = "spend", impressions = "imp")
+  expect_false(any(calm$cpm$outlier))
+})
+
+test_that("spend is read as numbers, and errors name diagnose_media()", {
+  set.seed(8)
+  d <- data.frame(tv = runif(10), search = runif(10), social = runif(10),
+                  imp = factor(rep(1000, 10)), spend = factor(rep(5, 10)))
+  diag <- diagnose_media(d, media = c("tv", "search", "social"),
+                         spend = "spend", impressions = "imp")
+  expect_equal(diag$cpm$cpm, rep(5, 10))
+  d$spend <- c(rep("5", 9), "1,000")
+  expect_error(diagnose_media(d, media = c("tv", "search"), spend = "spend",
+                              impressions = "imp"), "\"spend\"")
+  err <- tryCatch(diagnose_media(d, media = "tv", spend = c("spend", "imp"),
+                                 impressions = "imp"), error = identity)
+  expect_identical(conditionCall(err)[[1]], as.name("diagnose_media"))
+})
+
+test_that("data.table input gives the same diagnosis as a data frame", {
+  data(mm_weekly, package = "mediamix", envir = environment())
+  ch <- c("tv", "search", "social")
+  dt <- data.table::as.data.table(mm_weekly)
+  expect_equal(unclass(diagnose_media(dt, media = ch, by = "geo")),
+               unclass(diagnose_media(mm_weekly, media = ch, by = "geo")))
+  expect_equal(unclass(diagnose_media(dt, media = ch)),
+               unclass(diagnose_media(mm_weekly, media = ch)))
+})
+
+test_that("a dplyr-grouped frame without by is diagnosed as one series, with a message", {
+  set.seed(9)
+  d <- data.frame(geo = rep(c("a", "b"), each = 20), tv = runif(40),
+                  search = runif(40))
+  fake <- structure(d, class = c("grouped_df", "data.frame"),
+                    groups = data.frame(geo = c("a", "b")))
+  expect_message(grouped <- diagnose_media(fake, media = c("tv", "search")),
+                 'by = "geo"')
+  expect_equal(unclass(grouped),
+               unclass(diagnose_media(d, media = c("tv", "search"))))
+  expect_no_message(diagnose_media(fake, media = c("tv", "search"),
+                                   by = "geo"))
+})
+
+test_that("duplicate media names are refused", {
+  d <- data.frame(tv = runif(10), search = runif(10))
+  expect_error(diagnose_media(d, media = c("tv", "tv", "search")),
+               "each column once")
+})
+
+test_that("missing spend under decay is reported", {
+  set.seed(10)
+  d <- data.frame(tv = runif(60), search = runif(60), social = runif(60))
+  d$tv[c(5, 9)] <- NA
+  expect_message(diagnose_media(d, media = c("tv", "search", "social"),
+                                decay = 0.5), "tv \\(2\\)")
+  expect_no_message(diagnose_media(d, media = c("tv", "search", "social")))
+})
+
+test_that("as.data.frame() and tidy() give one row per channel", {
+  set.seed(11)
+  d <- data.frame(tv = runif(60), search = runif(60), social = runif(60))
+  diag <- diagnose_media(d, media = c("tv", "search", "social"))
+  out <- as.data.frame(diag)
+  expect_identical(out$channel, c("tv", "search", "social"))
+  expect_true(all(c("cv", "zero_share", "vif", "identified") %in% names(out)))
+  expect_equal(out$vif[out$channel == "search"],
+               diag$collinearity$vif[diag$collinearity$channel == "search"])
+  skip_if_not_installed("generics")
+  expect_identical(generics::tidy(diag), out)
+})
