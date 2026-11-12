@@ -11,30 +11,36 @@ adstock_geometric(
   normalise = TRUE,
   state = 0,
   by = NULL,
-  na_action = c("error", "zero", "keep")
+  na_action = c("error", "zero", "keep"),
+  missing_state = c("error", "cold")
 )
 }
 \arguments{
 \item{x}{Numeric vector of media spend (or impressions, or GRPs) in time
 order. \code{x} must already be sorted by time and evenly spaced; the function
 has no index argument and cannot check this for you. Use \code{\link[=step_adstock]{step_adstock()}}
-if you want the time index validated.}
+if you want the time index validated. Infinite values are an error, since
+one would turn every later value into \code{NaN}; missing values are handled by
+\code{na_action}.}
 
 \item{decay}{Geometric decay coefficient in \verb{[0, 1]}. See
 \code{\link[=decay_from_half_life]{decay_from_half_life()}} for the half-life vocabulary.}
 
 \item{max_lag}{Number of periods the kernel spans. The default \code{Inf} uses the
-infinite (recursive) form; a finite value truncates the kernel. See
-\emph{Details}.}
+infinite (recursive) form; a finite value truncates the kernel. See the
+\emph{Infinite versus truncated kernels} section of \code{\link[=adstock_geometric]{adstock_geometric()}}.}
 
 \item{normalise}{Should the kernel sum to 1? Defaults to \code{TRUE}. See the
-\emph{Normalisation} section.}
+\emph{Normalisation} section of \code{\link[=adstock_geometric]{adstock_geometric()}}.}
 
 \item{state}{Carryover already in flight at the start of \code{x}, for chaining
 calls across contiguous chunks of a series. The default \code{0} is a cold
 start, meaning no media ran before \code{x} began. For the infinite kernel this
 is a single number; for a finite \code{max_lag} it is the preceding
-\code{max_lag - 1} values of \code{x}. Obtain it from \code{\link[=adstock_state]{adstock_state()}}.
+\code{max_lag - 1} values of \code{x}. Obtain it from \code{\link[=adstock_state]{adstock_state()}}, which
+records the \code{max_lag} (and, for the infinite kernel, the \code{decay}) it was
+computed for, so that a state from another kernel is refused rather than
+used. A plain numeric vector of the right length is accepted too.
 
 When \code{by} is supplied, pass either the scalar \code{0} (or \code{NULL}) to cold-start
 every group, or a named list with one entry per group -- which is the shape
@@ -45,17 +51,24 @@ is an error rather than a silent cold start for that group.}
 same length as \code{x}. Adstock is applied independently within each group,
 which is what geo-level and panel models need. Never rely on
 \code{dplyr::group_by()} for this: grouping metadata does not reliably survive
-into every context where this function is called.}
+into every context where this function is called. Missing values are an
+error, in a vector or in any column of a data frame.}
 
 \item{na_action}{What to do about missing values in \code{x}. \code{"error"} (the
 default) refuses to guess. \code{"zero"} treats missing media as no media, which
 is usually right for spend but is a substantive assumption. \code{"keep"} lets
 \code{NA} propagate through the filter, which for the recursive form poisons
 every subsequent value.}
+
+\item{missing_state}{What to do when \code{state} is a per-group list with no
+entry for a group in \code{by}. \code{"error"} (the default) refuses; \code{"cold"}
+cold-starts those groups, as \code{\link[=step_adstock]{step_adstock()}} does for groups it did not
+see at \code{prep()} time.}
 }
 \value{
-A numeric vector the same length as \code{x}, in the same order. Row count
-and order are preserved unconditionally.
+A numeric vector the same length as \code{x}, in the same order, with the
+names and time-series attributes of \code{x}. Row count and order are
+preserved unconditionally.
 }
 \description{
 Spreads each period's media forward in time with geometric decay, the
@@ -97,7 +110,10 @@ storing any training rows.
 A finite \code{max_lag} truncates to a finite impulse response, which needs the
 preceding \code{max_lag - 1} observations as state. Truncation is a modelling
 choice, not an approximation to be minimised: use \code{\link[=effective_window]{effective_window()}} to see
-how much of the kernel a given \code{max_lag} retains.
+how much of the kernel a given \code{max_lag} retains. A \code{max_lag} longer than
+the series costs no more than one as long as the series: from a cold start
+only the lags the series can reach are computed, and the normalising total
+comes from the closed form of the geometric series.
 
 Note that \code{decay = 1} with \code{normalise = TRUE} and \code{max_lag = Inf} is an
 error, not an edge case: an undecaying infinite kernel has infinite mass and

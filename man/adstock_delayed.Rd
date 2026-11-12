@@ -15,7 +15,8 @@ adstock_delayed(
   normalise = TRUE,
   state = 0,
   by = NULL,
-  na_action = c("error", "zero", "keep")
+  na_action = c("error", "zero", "keep"),
+  missing_state = c("error", "cold")
 )
 }
 \arguments{
@@ -35,7 +36,9 @@ peak falls on a whole period.}
 \item{x}{Numeric vector of media spend (or impressions, or GRPs) in time
 order. \code{x} must already be sorted by time and evenly spaced; the function
 has no index argument and cannot check this for you. Use \code{\link[=step_adstock]{step_adstock()}}
-if you want the time index validated.}
+if you want the time index validated. Infinite values are an error, since
+one would turn every later value into \code{NaN}; missing values are handled by
+\code{na_action}.}
 
 \item{state}{The preceding \code{max_lag - 1} values of \code{x}, oldest first, or
 \code{0} for a cold start; a named list of them when \code{by} is supplied.}
@@ -44,18 +47,25 @@ if you want the time index validated.}
 same length as \code{x}. Adstock is applied independently within each group,
 which is what geo-level and panel models need. Never rely on
 \code{dplyr::group_by()} for this: grouping metadata does not reliably survive
-into every context where this function is called.}
+into every context where this function is called. Missing values are an
+error, in a vector or in any column of a data frame.}
 
 \item{na_action}{What to do about missing values in \code{x}. \code{"error"} (the
 default) refuses to guess. \code{"zero"} treats missing media as no media, which
 is usually right for spend but is a substantive assumption. \code{"keep"} lets
 \code{NA} propagate through the filter, which for the recursive form poisons
 every subsequent value.}
+
+\item{missing_state}{What to do when \code{state} is a per-group list with no
+entry for a group in \code{by}. \code{"error"} (the default) refuses; \code{"cold"}
+cold-starts those groups, as \code{\link[=step_adstock]{step_adstock()}} does for groups it did not
+see at \code{prep()} time.}
 }
 \value{
 \code{adstock_weights_delayed()} returns the kernel, ordered from the
 current period outward. \code{adstock_delayed()} returns a numeric vector the
-same length as \code{x}, in the same order.
+same length as \code{x}, in the same order, with the names and time-series
+attributes of \code{x}.
 }
 \description{
 The delayed-peak geometric kernel of Jin et al. (2017),

@@ -4,36 +4,56 @@
 \alias{adstock_steady_state}
 \title{Steady-state starting value for an adstock filter}
 \usage{
-adstock_steady_state(x, decay, max_lag = Inf, periods = NULL, by = NULL)
+adstock_steady_state(
+  x,
+  decay,
+  max_lag = Inf,
+  periods = NULL,
+  by = NULL,
+  na_action = c("error", "zero", "keep")
+)
 }
 \arguments{
 \item{x}{Numeric vector of media spend (or impressions, or GRPs) in time
 order. \code{x} must already be sorted by time and evenly spaced; the function
 has no index argument and cannot check this for you. Use \code{\link[=step_adstock]{step_adstock()}}
-if you want the time index validated.}
+if you want the time index validated. Infinite values are an error, since
+one would turn every later value into \code{NaN}; missing values are handled by
+\code{na_action}.}
 
-\item{decay}{Geometric decay coefficient in \verb{[0, 1]}. See
-\code{\link[=decay_from_half_life]{decay_from_half_life()}} for the half-life vocabulary.}
+\item{decay}{Geometric decay coefficient in \verb{[0, 1]}. Required for the
+infinite kernel; a finite kernel's steady state does not depend on it, so
+there it is used only to choose the default \code{periods} and can be left out.}
 
-\item{max_lag}{Number of periods the kernel spans. The default \code{Inf} uses the
-infinite (recursive) form; a finite value truncates the kernel. See
-\emph{Details}.}
+\item{max_lag}{Number of periods the kernel spans. \code{Inf} gives the recursive
+form, whose state is a single number.}
 
 \item{periods}{Number of leading periods to average. Defaults to the
-geometric kernel's 90\% effective window, capped at the series length,
-since that is how far back the start of the series "remembers".}
+geometric kernel's 90\% effective window, and for a finite \code{max_lag} to at
+most the \code{max_lag - 1} periods the kernel's state covers, capped at the
+series length, since that is how far back the start of the series
+"remembers".}
 
 \item{by}{Optional grouping vector, or data frame of grouping vectors, the
 same length as \code{x}. Adstock is applied independently within each group,
 which is what geo-level and panel models need. Never rely on
 \code{dplyr::group_by()} for this: grouping metadata does not reliably survive
-into every context where this function is called.}
+into every context where this function is called. Missing values are an
+error, in a vector or in any column of a data frame.}
+
+\item{na_action}{What to do about missing values in \code{x}. \code{"error"} (the
+default) refuses to guess. \code{"zero"} treats missing media as no media, which
+is usually right for spend but is a substantive assumption. \code{"keep"} lets
+\code{NA} propagate through the filter, which for the recursive form poisons
+every subsequent value.}
 }
 \value{
 A state in the form \code{\link[=adstock_geometric]{adstock_geometric()}}, \code{\link[=adstock_filter]{adstock_filter()}} and
 friends accept: a single raw accumulator for \code{max_lag = Inf}, the
 \code{max_lag - 1} preceding values for a finite kernel, or a named list of
-these when \code{by} is supplied.
+these when \code{by} is supplied, in order of first appearance. These are
+plain numeric vectors, so they carry no record of the kernel and are
+checked only for their length when used.
 }
 \description{
 A filter started from zero assumes no media ran before the series began, so
@@ -53,6 +73,9 @@ The seed uses the series' own early \emph{media}, never the KPI, so it does not
 leak outcome information into a cross-validation. It does assume the
 pre-period looked like the first few observed periods; when you have the
 real pre-period spend, pass \code{\link[=adstock_state]{adstock_state()}} of it instead.
+
+Missing values follow \code{na_action}, as in \code{\link[=adstock_state]{adstock_state()}}: an error by
+default, zeros with \code{"zero"}, and a missing state with \code{"keep"}.
 }
 \examples{
 x <- rep(100, 10)
