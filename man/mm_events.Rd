@@ -41,8 +41,9 @@ chance from a six-channel sampler.
 one; 261 events have a genuinely missing channel.
 \item \strong{Non-converters.} 62\% of customers never convert. They are the null paths
 that Markov removal effects are computed against.
-\item \strong{Timestamp ties.} 624 events share a customer and a timestamp exactly, so
-journey order depends on a deterministic tie-break.
+\item \strong{Timestamp ties.} 624 pairs of events (1,248 events) share a customer
+and a timestamp exactly, so journey order depends on a deterministic
+tie-break.
 \item \strong{Channels with positional roles.} Display and social tend to open
 journeys, paid search and email to close them, so first-touch and
 last-touch attribution genuinely disagree about them -- which is what makes

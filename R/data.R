@@ -9,7 +9,7 @@
 #' \describe{
 #'   \item{date}{Week commencing, `Date`.}
 #'   \item{geo}{Geography: `"north"`, `"central"` or `"south"`.}
-#'   \item{tv, video, search, display, social}{Media spend for the week.}
+#'   \item{tv, video, search, social, display}{Media spend for the week.}
 #'   \item{price}{Average unit price.}
 #'   \item{seasonality}{Underlying seasonal index used to generate the data.}
 #'   \item{holiday}{1 in December weeks, 0 otherwise.}
@@ -32,10 +32,18 @@
 #' Channels are flighted, so several contain runs of zero-spend weeks: dark
 #' periods are the normal case in media data, not an edge case.
 #'
-#' Geographies differ by a single multiplicative scale factor applied to spend,
-#' half-saturation points, coefficients and baseline, so a correctly specified
-#' pooled model can fit them together and a per-geography model should recover
-#' the same decay parameters in each.
+#' The scalar elements of `"truth"` (`decay`, `half_max`, `shape`, `beta`,
+#' `baseline`, `price_beta`, `trend`, `noise_sd`) describe north. Each
+#' geography has a scale factor, stored as `geo_scale` (north 1, central 0.72,
+#' south 1.35), that multiplies its spend, half-saturation points,
+#' coefficients, baseline, trend, December uplift (`holiday_uplift` at scale 1)
+#' and price effect; the noise standard deviation is multiplied by the square
+#' root of the scale. Seasonality moves revenue by `season_amplitude` times the
+#' scaled baseline, and price enters centred on its mean within the geography.
+#' `by_geo` lists every channel's decay, half-saturation point, shape and
+#' coefficient for each geography, which is the table to check a
+#' per-geography model against. Decays and shapes are the same everywhere, so
+#' a per-geography model should recover the same carryover in each.
 #'
 #' @source Simulated. See `data-raw/make_mm_weekly.R` in the package sources.
 #'
@@ -45,8 +53,11 @@
 #' data(mm_weekly)
 #' str(mm_weekly)
 #'
-#' # The parameters the data was generated from
+#' # The parameters the data was simulated from
 #' attr(mm_weekly, "truth")$decay
+#'
+#' # Per-geography parameters, for checking a model fitted to one geography
+#' subset(attr(mm_weekly, "truth")$by_geo, geo == "south")
 #'
 #' # Flighting: several channels go dark for weeks at a time
 #' north <- mm_weekly[mm_weekly$geo == "north", ]
@@ -84,8 +95,9 @@
 #'   one; 261 events have a genuinely missing channel.
 #' - **Non-converters.** 62% of customers never convert. They are the null paths
 #'   that Markov removal effects are computed against.
-#' - **Timestamp ties.** 624 events share a customer and a timestamp exactly, so
-#'   journey order depends on a deterministic tie-break.
+#' - **Timestamp ties.** 624 pairs of events (1,248 events) share a customer
+#'   and a timestamp exactly, so journey order depends on a deterministic
+#'   tie-break.
 #' - **Channels with positional roles.** Display and social tend to open
 #'   journeys, paid search and email to close them, so first-touch and
 #'   last-touch attribution genuinely disagree about them -- which is what makes
