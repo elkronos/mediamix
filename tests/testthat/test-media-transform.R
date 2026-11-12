@@ -107,3 +107,90 @@ test_that("media_transform() validates its list arguments and kernel/type values
   expect_error(media_transform(spend, saturation = list(type = "bogus")),
                class = "rlang_error")
 })
+
+test_that("by inside the adstock list is honoured, and by given twice is an error", {
+  spend <- c(100, 50, 25, 200, 100, 50)
+  geo <- rep(c("north", "south"), each = 3)
+  per_group <- adstock_geometric(spend, decay = 0.5, by = geo)
+  # This used to pool the two geographies: 50 50 37.5 118.75 109.375 79.69.
+  expect_equal(media_transform(spend, adstock = list(decay = 0.5, by = geo)),
+               per_group)
+  expect_equal(media_transform(spend, adstock = list(decay = 0.5), by = geo),
+               per_group)
+  expect_error(media_transform(spend, adstock = list(decay = 0.5, by = geo),
+                               by = geo),
+               class = "rlang_error", regexp = "twice")
+  expect_error(media_transform(spend, adstock = list(decay = 0.5, by = geo[1:2])),
+               class = "rlang_error", regexp = "same length")
+})
+
+test_that("an x inside either list is an error rather than silently replaced", {
+  spend <- c(100, 50, 25)
+  expect_error(media_transform(spend, adstock = list(decay = 0.5, x = 1:3)),
+               class = "rlang_error", regexp = "must not contain")
+  expect_error(media_transform(spend, saturation = list(half_max = 10, x = 1:3)),
+               class = "rlang_error", regexp = "must not contain")
+})
+
+test_that("the reverse-order warning gives the reason that applies", {
+  spend <- c(0, 500, 800, 300, 0, 0, 1200, 400)
+  warning_text <- function(...) {
+    tryCatch(media_transform(spend, ..., saturation = list(half_max = 300),
+                             order = "saturate_then_adstock"),
+             warning = conditionMessage)
+  }
+  normalised <- warning_text(adstock = list(decay = 0.9))
+  expect_match(normalised, "accumulated media pressure")
+  expect_no_match(normalised, "past the ceiling")
+  raw <- warning_text(adstock = list(decay = 0.9, normalise = FALSE))
+  expect_match(raw, "past the ceiling")
+
+  # The claims behind the two messages: a normalised kernel keeps the
+  # saturate-first result under the ceiling, an unnormalised one does not.
+  set.seed(7)
+  x <- stats::rexp(200, 1 / 1000)
+  first <- function(normalise) {
+    suppressWarnings(media_transform(
+      x, adstock = list(decay = 0.9, normalise = normalise),
+      saturation = list(half_max = 500), order = "saturate_then_adstock"))
+  }
+  expect_lt(max(first(TRUE)), 1)
+  expect_gt(max(first(FALSE)), 1)
+})
+
+test_that("errors from either step name the transform and keep the call short", {
+  x <- c(1, NA, rep(3, 20000))
+  err <- tryCatch(media_transform(x, adstock = list(decay = 0.5)),
+                  error = identity)
+  expect_identical(deparse(conditionCall(err)[[1L]]), "adstock_geometric")
+  expect_lt(nchar(paste(deparse(conditionCall(err)), collapse = " ")), 200L)
+
+  err <- tryCatch(media_transform(c(1, -2), adstock = NULL,
+                                  saturation = list(half_max = 1)),
+                  error = identity)
+  expect_identical(deparse(conditionCall(err)[[1L]]), "saturate_hill")
+})
+
+test_that("adstock = NULL means no carryover, and the default still adstocks", {
+  spend <- c(0, 500, 800, 300, 0, 0, 1200, 400)
+  expect_equal(media_transform(spend, adstock = NULL,
+                               saturation = list(half_max = 300)),
+               saturate_hill(spend, half_max = 300))
+  # The documented default: saturation alone still gets decay 0.5 carryover.
+  expect_equal(media_transform(spend, saturation = list(half_max = 300)),
+               saturate_hill(adstock_geometric(spend, decay = 0.5), half_max = 300))
+  expect_equal(media_transform(spend, adstock = list(decay = 0.5),
+                               saturation = NULL),
+               adstock_geometric(spend, decay = 0.5))
+})
+
+test_that("media_transform() keeps names and time-series attributes", {
+  x <- c(w1 = 100, w2 = 0, w3 = 50)
+  out <- media_transform(x, adstock = list(decay = 0.5),
+                         saturation = list(half_max = 100))
+  expect_named(out, names(x))
+  tx <- stats::ts(c(100, 0, 50, 0), frequency = 12, start = c(2024, 6))
+  out_ts <- media_transform(tx, adstock = list(decay = 0.5))
+  expect_s3_class(out_ts, "ts")
+  expect_equal(stats::tsp(out_ts), stats::tsp(tx))
+})

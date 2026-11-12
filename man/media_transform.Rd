@@ -18,7 +18,13 @@ media_transform(
 \item{adstock}{A named list of arguments for the carryover step, including a
 \code{kernel} element of \code{"geometric"} (the default), \code{"weibull"},
 \code{"delayed"} or \code{"none"}. Remaining elements are passed to
-\code{\link[=adstock_geometric]{adstock_geometric()}}, \code{\link[=adstock_weibull]{adstock_weibull()}} or \code{\link[=adstock_delayed]{adstock_delayed()}}.}
+\code{\link[=adstock_geometric]{adstock_geometric()}}, \code{\link[=adstock_weibull]{adstock_weibull()}} or \code{\link[=adstock_delayed]{adstock_delayed()}}. The list
+may carry \code{by} in place of the \code{by} argument, but not both, and it may not
+carry \code{x}.
+
+The default applies geometric carryover at \code{decay = 0.5}, including when
+only \code{saturation} is given. Pass \code{adstock = NULL}, or
+\code{list(kernel = "none")}, for saturation alone.}
 
 \item{saturation}{A named list of arguments for the saturation step,
 including a \code{type} element of \code{"hill"}, \code{"exponential"},
@@ -28,7 +34,8 @@ to the corresponding \verb{saturate_*()} function -- for \code{"hill"} that mean
 on the scale of your spend.
 
 Saturation defaults to \code{"none"}, so calling \code{media_transform()} with only
-an \code{adstock} argument applies carryover alone.}
+an \code{adstock} argument applies carryover alone. \code{saturation = NULL} does
+the same.}
 
 \item{by}{Optional grouping vector, or data frame of grouping vectors, the
 same length as \code{x}.}
@@ -38,7 +45,8 @@ the default. \code{"saturate_then_adstock"} is permitted but warns, because it
 is nearly always a mistake rather than a choice.}
 }
 \value{
-A numeric vector the same length as \code{x}, in the same order.
+A numeric vector the same length as \code{x}, in the same order, with the
+names and time-series attributes of \code{x}.
 }
 \description{
 Composes a carryover transform with a saturation curve to produce a single
@@ -47,11 +55,14 @@ first, saturation second.
 }
 \details{
 The order is not arbitrary. Saturation represents a ceiling on what a given
-weight of media can achieve in a period. Applying it before adstock caps each
-period's spend in isolation and then lets carryover accumulate those capped
-values past the cap, so the composed transform is no longer bounded by the
-ceiling you specified. Applying it after adstock caps the \emph{total media
-pressure} in each period, which is what a saturation curve is meant to mean.
+weight of media can achieve in a period. Applying it after adstock caps the
+\emph{total media pressure} in each period, carryover included, which is what a
+saturation curve is meant to mean. Applying it before adstock puts each
+period's spend through the curve in isolation, so carryover from earlier
+periods never counts towards saturation. With the default normalised
+kernel the weights sum to one and the result stays under the ceiling; with
+\code{normalise = FALSE} they sum to more than one, and carryover also
+accumulates the saturated values past the ceiling you specified.
 
 This function will do it backwards if you insist, but it will not do it
 backwards quietly.
@@ -68,6 +79,10 @@ round(media_transform(
   adstock = list(decay = decay_from_half_life(2)),
   saturation = list(half_max = 300)
 ), 4)
+
+# Saturation alone needs the carryover switched off explicitly
+round(media_transform(spend, adstock = NULL,
+                      saturation = list(half_max = 300)), 4)
 
 # A delayed-peak kernel with an S-shaped response
 round(media_transform(
