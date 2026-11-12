@@ -322,7 +322,10 @@ plot.mm_carryover <- function(x, truth = NULL, ...) {
                  "x$results")
   .mm_plot_needs(x$best, c("max_lag", "decay"), "tune_carryover", "x$best")
   dots <- list(...)
-  metric <- if (is.null(x$metric)) "metric" else x$metric
+  # `metric` holds the score and `metric_name` the function's name; results
+  # from before that split carried the name in `metric`.
+  metric <- if (is.character(x$metric_name)) x$metric_name else
+    if (is.character(x$metric)) x$metric else "metric"
   xl <- .mm_lim(r$decay, what = "decays")
   yl <- .mm_lim(r$metric, c(0.04, 0.08), "metric values")
   lc <- .mm_lag_colours(.mm_lag_rank(r, x$best), dots[["col"]])
