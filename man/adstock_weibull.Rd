@@ -81,5 +81,6 @@ round(adstock_weibull(spend, shape = 2, scale = 3, max_lag = 8,
                       type = "cdf"), 2)
 }
 \seealso{
-\code{\link[=adstock_geometric]{adstock_geometric()}}, \code{\link[=adstock_weights_weibull]{adstock_weights_weibull()}}
+\code{\link[=adstock_geometric]{adstock_geometric()}}, \code{\link[=adstock_weights_weibull]{adstock_weights_weibull()}}, and
+\code{\link[=adstock_delayed]{adstock_delayed()}} for a delayed peak set directly in periods.
 }

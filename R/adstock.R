@@ -37,8 +37,8 @@ adstock_weights <- function(max_lag, decay, normalise = TRUE) {
 
 #' Weibull adstock weights
 #'
-#' A two-parameter kernel that, in its `"pdf"` form and unlike the geometric
-#' kernel, can place its peak *after* the period in which the money was spent.
+#' A two-parameter kernel whose `"pdf"` form, unlike the geometric kernel, can
+#' place its peak *after* the period in which the money was spent.
 #' Television, cinema and out-of-home often behave this way: the response
 #' builds for a week or two before it turns over. A geometric kernel cannot
 #' represent that shape at any decay rate. The default `"cdf"` form decays
@@ -132,10 +132,10 @@ adstock_weights_weibull <- function(max_lag, shape, scale,
 #' @param decay Geometric decay coefficient in `[0, 1]`. See
 #'   [decay_from_half_life()] for the half-life vocabulary.
 #' @param max_lag Number of periods the kernel spans. The default `Inf` uses the
-#'   infinite (recursive) form; a finite value truncates the kernel. See the
-#'   *Infinite versus truncated kernels* section of [adstock_geometric()].
-#' @param normalise Should the kernel sum to 1? Defaults to `TRUE`. See the
-#'   *Normalisation* section of [adstock_geometric()].
+#'   infinite (recursive) form; a finite value truncates the kernel. See
+#'   *Infinite versus truncated kernels* below.
+#' @param normalise Should the kernel sum to 1? Defaults to `TRUE`. See
+#'   *Normalisation* below.
 #' @param state Carryover already in flight at the start of `x`, for chaining
 #'   calls across contiguous chunks of a series. The default `0` is a cold
 #'   start, meaning no media ran before `x` began. For the infinite kernel this
@@ -224,7 +224,8 @@ adstock_weights_weibull <- function(max_lag, shape, scale,
 #' *Journal of the Market Research Society*, 21(3), 139--166.
 #'
 #' Jin, Y., Wang, Y., Sun, Y., Chan, D. and Koehler, J. (2017). Bayesian
-#' methods for media mix modeling with carryover and shape effects. Google Inc.
+#' methods for media mix modeling with carryover and shape effects. Google
+#' Inc. <https://research.google/pubs/pub46001/>
 #'
 #' @examples
 #' spend <- c(100, 0, 0, 0, 0, 0)
@@ -310,7 +311,8 @@ adstock_geometric <- function(x, decay, max_lag = Inf, normalise = TRUE,
 #' @return A numeric vector the same length as `x`, in the same order, with the
 #'   names and time-series attributes of `x`.
 #'
-#' @seealso [adstock_geometric()], [adstock_weights_weibull()]
+#' @seealso [adstock_geometric()], [adstock_weights_weibull()], and
+#'   [adstock_delayed()] for a delayed peak set directly in periods.
 #'
 #' @examples
 #' spend <- c(100, 0, 0, 0, 0, 0, 0, 0)

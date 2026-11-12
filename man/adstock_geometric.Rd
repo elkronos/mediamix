@@ -27,11 +27,11 @@ handled by \code{na_action}.}
 \code{\link[=decay_from_half_life]{decay_from_half_life()}} for the half-life vocabulary.}
 
 \item{max_lag}{Number of periods the kernel spans. The default \code{Inf} uses the
-infinite (recursive) form; a finite value truncates the kernel. See the
-\emph{Infinite versus truncated kernels} section of \code{\link[=adstock_geometric]{adstock_geometric()}}.}
+infinite (recursive) form; a finite value truncates the kernel. See
+\emph{Infinite versus truncated kernels} below.}
 
-\item{normalise}{Should the kernel sum to 1? Defaults to \code{TRUE}. See the
-\emph{Normalisation} section of \code{\link[=adstock_geometric]{adstock_geometric()}}.}
+\item{normalise}{Should the kernel sum to 1? Defaults to \code{TRUE}. See
+\emph{Normalisation} below.}
 
 \item{state}{Carryover already in flight at the start of \code{x}, for chaining
 calls across contiguous chunks of a series. The default \code{0} is a cold
@@ -158,7 +158,8 @@ Broadbent, S. (1979). One way TV advertisements work.
 \emph{Journal of the Market Research Society}, 21(3), 139--166.
 
 Jin, Y., Wang, Y., Sun, Y., Chan, D. and Koehler, J. (2017). Bayesian
-methods for media mix modeling with carryover and shape effects. Google Inc.
+methods for media mix modeling with carryover and shape effects. Google
+Inc. \url{https://research.google/pubs/pub46001/}
 }
 \seealso{
 \code{\link[=adstock_weibull]{adstock_weibull()}} and \code{\link[=adstock_delayed]{adstock_delayed()}} for delayed peaks,

@@ -37,8 +37,8 @@ A numeric vector of length \code{max_lag}, ordered from the current period
 to the most distant lag.
 }
 \description{
-A two-parameter kernel that, in its \code{"pdf"} form and unlike the geometric
-kernel, can place its peak \emph{after} the period in which the money was spent.
+A two-parameter kernel whose \code{"pdf"} form, unlike the geometric kernel, can
+place its peak \emph{after} the period in which the money was spent.
 Television, cinema and out-of-home often behave this way: the response
 builds for a week or two before it turns over. A geometric kernel cannot
 represent that shape at any decay rate. The default \code{"cdf"} form decays
