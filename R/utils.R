@@ -34,8 +34,9 @@
   lo_ok <- if (inclusive[1L]) x >= lower else x > lower
   hi_ok <- if (inclusive[2L]) x <= upper else x < upper
   if (!lo_ok || !hi_ok) {
-    lb <- if (inclusive[1L]) "[" else "("
-    rb <- if (inclusive[2L]) "]" else ")"
+    # An infinite bound is closed only when infinite values are accepted.
+    lb <- if (inclusive[1L] && (is.finite(lower) || allow_inf)) "[" else "("
+    rb <- if (inclusive[2L] && (is.finite(upper) || allow_inf)) "]" else ")"
     shown <- .mm_format_num(x)
     cli::cli_abort(
       "{.arg {arg}} must be in {lb}{lower}, {upper}{rb}, not {shown}.",
@@ -70,10 +71,10 @@
   int_max <- .Machine$integer.max
   if (x > int_max) {
     cli::cli_abort(c(
-      "{.arg {arg}} is too large to be a period count.",
+      "{.arg {arg}} is too large.",
       x = "{.val {x}} exceeds the largest representable integer \\
            ({.val {int_max}}).",
-      i = "Use {.code Inf} for an unbounded kernel."
+      i = if (allow_inf) "Use {.code Inf} for an unbounded kernel."
     ), call = call)
   }
   if (x > max) {
@@ -111,7 +112,7 @@
       )
     }
     .mm_check_key_columns(by, "by", call = call)
-    return(.mm_paste_key(by))
+    return(.mm_paste_key(by, call = call))
   }
   if (length(by) != n) {
     cli::cli_abort(
@@ -204,8 +205,8 @@
 
 # Join several key columns into one grouping label. The separator is the
 # ASCII unit separator, a control character that text read from a file almost
-# never contains, so distinct key combinations collide into one group only
-# when a key value itself contains it.
+# never contains. A key value that does contain it could make two distinct
+# combinations join to the same label, so .mm_join_key() refuses it.
 #' @keywords internal
 #' @noRd
 .mm_key_sep <- function() "\x1f"
@@ -214,8 +215,29 @@
 # `collapse` cannot be taken for an argument of paste().
 #' @keywords internal
 #' @noRd
-.mm_paste_key <- function(cols) {
-  parts <- unname(lapply(cols, .mm_key_values))
+.mm_paste_key <- function(cols, call = parent.frame()) {
+  .mm_join_key(unname(lapply(cols, .mm_key_values)), names(cols), call = call)
+}
+
+# `parts` is a list of character vectors of equal length, one per key column.
+#' @keywords internal
+#' @noRd
+.mm_join_key <- function(parts, cols = NULL, call = parent.frame()) {
+  parts <- unname(parts)
+  if (length(parts) > 1L) {
+    bad <- vapply(parts, function(p) any(grepl(.mm_key_sep(), p, fixed = TRUE)),
+                  logical(1))
+    if (any(bad)) {
+      shown <- if (is.null(cols)) which(bad) else cols[bad]
+      cli::cli_abort(c(
+        "Grouping values must not contain the ASCII unit separator \\
+         ({.code \\x1f}).",
+        x = "Found in {.val {shown}}.",
+        i = "It joins several grouping columns into one key, so a value \\
+             containing it could merge two groups."
+      ), call = call)
+    }
+  }
   do.call(paste, c(parts, list(sep = .mm_key_sep())))
 }
 

@@ -64,12 +64,13 @@
   if (is.null(by) || length(by) == 0L) {
     return(list(".all" = seq_len(nrow(data))))
   }
-  # The parts are joined with a control character that cannot occur in text
-  # read from a file. A printable separator would let two distinct key
-  # combinations collide into one group, silently, and a collided group
-  # warm-starts the second series off the first series' carryover.
+  # The parts are joined with a control character that text read from a file
+  # almost never contains, and values that contain it are refused. A printable
+  # separator would let two distinct key combinations collide into one group,
+  # silently, and a collided group warm-starts the second series off the first
+  # series' carryover.
   parts <- lapply(by, function(col) .mm_key_part(data[[col]], col, call))
-  key <- do.call(paste, c(parts, list(sep = .mm_key_sep())))
+  key <- .mm_join_key(parts, by, call = call)
   split(seq_len(nrow(data)), factor(key, levels = unique(key)))
 }
 
