@@ -63,10 +63,14 @@ reference:
   - adstock_steady_state
   - decay_vocabulary
 - title: Saturation
-  desc: Diminishing returns, composing them with carryover in the right order, and converting Robyn's hyperparameters to these arguments.
+  desc: Diminishing returns as media pressure grows.
   contents:
   - saturation
+- title: Composing transforms
+  desc: Apply carryover then saturation to one channel or to every channel of a plan, and convert Robyn's hyperparameters to these arguments.
+  contents:
   - media_transform
+  - transform_plan
   - from_robyn
 - title: Choosing carryover parameters
   desc: Score candidate decays and lags by how well a model predicts held-out KPI, with seasonality terms as controls.
@@ -97,6 +101,13 @@ reference:
   contents:
   - block_bootstrap
   - plot.mm_bootstrap
+- title: Budget planning
+  desc: Simulate a plan through the fitted transforms, move budget between channels, and split a total budget across channels.
+  contents:
+  - simulate_plan
+  - reallocate
+  - allocate_budget
+  - plot.mm_allocation
 - title: Journey construction
   desc: Turn a raw event log into customer journeys, and combine or subset them.
   contents:
