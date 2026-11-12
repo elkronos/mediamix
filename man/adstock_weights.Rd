@@ -8,14 +8,14 @@ adstock_weights(max_lag, decay, normalise = TRUE)
 }
 \arguments{
 \item{max_lag}{Number of periods the kernel spans, including the current
-period. \code{max_lag = 1} means no carryover.}
+period. Must be finite. \code{max_lag = 1} means no carryover.}
 
 \item{decay}{Geometric decay coefficient in \verb{[0, 1]}. See
 \code{\link[=decay_from_half_life]{decay_from_half_life()}}.}
 
-\item{normalise}{Should the weights sum to 1? See the \emph{Normalisation}
-section of \code{\link[=adstock_geometric]{adstock_geometric()}} for what this does to the interpretation
-of a downstream coefficient.}
+\item{normalise}{Should the weights sum to 1? Defaults to \code{TRUE}. See the
+\emph{Normalisation} section of \code{\link[=adstock_geometric]{adstock_geometric()}} for what this does to the
+interpretation of a downstream coefficient.}
 }
 \value{
 A numeric vector of length \code{max_lag}, ordered from the current period
@@ -23,9 +23,10 @@ to the most distant lag.
 }
 \description{
 The finite geometric kernel \eqn{w_i = \theta^i} for lags
-\eqn{i = 0, 1, \ldots, L-1}. \code{\link[=adstock_geometric]{adstock_geometric()}} calls this internally when
-\code{max_lag} is finite; it is exported because the weights themselves are often
-what you want to plot or report.
+\eqn{i = 0, 1, \ldots, L-1}, divided by its sum unless \code{normalise = FALSE}.
+\code{\link[=adstock_geometric]{adstock_geometric()}} applies the same weights when \code{max_lag} is finite;
+this function is exported because the weights themselves are often what you
+want to plot or report.
 }
 \examples{
 adstock_weights(max_lag = 5, decay = 0.5)

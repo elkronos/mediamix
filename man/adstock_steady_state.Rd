@@ -18,21 +18,23 @@ adstock_steady_state(
 order. \code{x} must already be sorted by time and evenly spaced; the function
 has no index argument and cannot check this for you. Use \code{\link[=step_adstock]{step_adstock()}}
 if you want the time index validated. Infinite values are an error, since
-one would turn every later value into \code{NaN}; missing values are handled by
-\code{na_action}.}
+the filter would carry them into later periods; missing values are
+handled by \code{na_action}.}
 
 \item{decay}{Geometric decay coefficient in \verb{[0, 1]}. Required for the
-infinite kernel; a finite kernel's steady state does not depend on it, so
+infinite kernel, and below 1 there, since an undecaying kernel has no
+steady state. A finite kernel's steady state does not depend on it, so
 there it is used only to choose the default \code{periods} and can be left out.}
 
-\item{max_lag}{Number of periods the kernel spans. \code{Inf} gives the recursive
-form, whose state is a single number.}
+\item{max_lag}{Number of periods the kernel spans. \code{Inf}, the default, gives
+the recursive form, whose state is a single number.}
 
-\item{periods}{Number of leading periods to average. Defaults to the
-geometric kernel's 90\% effective window, and for a finite \code{max_lag} to at
-most the \code{max_lag - 1} periods the kernel's state covers, capped at the
-series length, since that is how far back the start of the series
-"remembers".}
+\item{periods}{Number of leading periods to average, capped at the length
+of the series (of each group, with \code{by}). Defaults to the geometric
+kernel's 90\% effective window, \code{effective_window(decay, 0.9)}, since that
+is how far back the start of the series "remembers". For a finite
+\code{max_lag} the default is at most the \code{max_lag - 1} periods the kernel's
+state covers, and exactly that when \code{decay} is left out.}
 
 \item{by}{Optional grouping vector, or data frame of grouping vectors, the
 same length as \code{x}. Adstock is applied independently within each group,
@@ -53,15 +55,16 @@ friends accept: a single raw accumulator for \code{max_lag = Inf}, the
 \code{max_lag - 1} preceding values for a finite kernel, or a named list of
 these when \code{by} is supplied, in order of first appearance. These are
 plain numeric vectors, so they carry no record of the kernel and are
-checked only for their length when used.
+checked only for their length and for missing or infinite values when
+used.
 }
 \description{
 A filter started from zero assumes no media ran before the series began, so
 the first periods of a long-carryover channel are understated: at
 \code{decay = 0.85} a constant spend reaches only 15\% of its steady-state adstock
 in the first period. This function returns the state the filter would hold
-had the average spend of the first \code{periods} been running forever, which is
-the usual remedy when real pre-period spend is not available.
+had the average spend of the first \code{periods} been running forever. Use it
+when real pre-period spend is not available.
 }
 \details{
 For the recursive kernel the raw accumulator under constant spend \eqn{m} is
@@ -75,7 +78,8 @@ pre-period looked like the first few observed periods; when you have the
 real pre-period spend, pass \code{\link[=adstock_state]{adstock_state()}} of it instead.
 
 Missing values follow \code{na_action}, as in \code{\link[=adstock_state]{adstock_state()}}: an error by
-default, zeros with \code{"zero"}, and a missing state with \code{"keep"}.
+default, zeros with \code{"zero"}, and with \code{"keep"} a missing state when one
+falls in the averaged periods.
 }
 \examples{
 x <- rep(100, 10)

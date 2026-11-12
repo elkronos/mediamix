@@ -20,8 +20,8 @@ adstock_geometric(
 order. \code{x} must already be sorted by time and evenly spaced; the function
 has no index argument and cannot check this for you. Use \code{\link[=step_adstock]{step_adstock()}}
 if you want the time index validated. Infinite values are an error, since
-one would turn every later value into \code{NaN}; missing values are handled by
-\code{na_action}.}
+the filter would carry them into later periods; missing values are
+handled by \code{na_action}.}
 
 \item{decay}{Geometric decay coefficient in \verb{[0, 1]}. See
 \code{\link[=decay_from_half_life]{decay_from_half_life()}} for the half-life vocabulary.}
@@ -36,14 +36,15 @@ infinite (recursive) form; a finite value truncates the kernel. See the
 \item{state}{Carryover already in flight at the start of \code{x}, for chaining
 calls across contiguous chunks of a series. The default \code{0} is a cold
 start, meaning no media ran before \code{x} began. For the infinite kernel this
-is a single number; for a finite \code{max_lag} it is the preceding
-\code{max_lag - 1} values of \code{x}. Obtain it from \code{\link[=adstock_state]{adstock_state()}}, which
-records the \code{max_lag} (and, for the infinite kernel, the \code{decay}) it was
-computed for, so that a state from another kernel is refused rather than
-used. A plain numeric vector of the right length is accepted too.
+is a single number, the raw (unnormalised) accumulator; for a finite
+\code{max_lag} it is the \code{max_lag - 1} values that came before \code{x}, oldest
+first. Obtain it from \code{\link[=adstock_state]{adstock_state()}}, which records the \code{max_lag} (and,
+for the infinite kernel, the \code{decay}) it was computed for, so that a state
+from another kernel is refused rather than used. A plain numeric vector of
+the right length is accepted too.
 
 When \code{by} is supplied, pass either the scalar \code{0} (or \code{NULL}) to cold-start
-every group, or a named list with one entry per group -- which is the shape
+every group, or a named list with one entry per group, which is the shape
 \code{\link[=adstock_state]{adstock_state()}} returns when it is given \code{by}. A list with a \code{NULL} entry
 is an error rather than a silent cold start for that group.}
 
@@ -62,29 +63,29 @@ every subsequent value.}
 
 \item{missing_state}{What to do when \code{state} is a per-group list with no
 entry for a group in \code{by}. \code{"error"} (the default) refuses; \code{"cold"}
-cold-starts those groups, as \code{\link[=step_adstock]{step_adstock()}} does for groups it did not
-see at \code{prep()} time.}
+cold-starts those groups, as \code{\link[=step_adstock]{step_adstock()}} does by default for groups
+it did not see at \code{prep()} time.}
 }
 \value{
 A numeric vector the same length as \code{x}, in the same order, with the
-names and time-series attributes of \code{x}. Row count and order are
-preserved unconditionally.
+names and time-series attributes of \code{x}.
 }
 \description{
 Spreads each period's media forward in time with geometric decay, the
 standard representation of advertising carryover. This is the forward-facing
 half of the package's spine; \code{\link[=credit_time_decay]{credit_time_decay()}} is the same kernel run
-backward.
+backward (see \code{vignette("spine")}).
 }
 \section{Normalisation}{
 
-This is the argument that most often changes an answer without anyone
-noticing, so it is explicit rather than implied.
+This argument can change an answer without anyone noticing, so it is
+explicit rather than implied.
 
 With \code{normalise = TRUE} the kernel weights sum to 1. A constant spend of
-\eqn{c} adstocks to \eqn{c}, the series level is preserved, and a downstream
-regression coefficient reads as the effect of \emph{one unit of media}, directly
-comparable to the coefficient on untransformed spend.
+\eqn{c} adstocks to \eqn{c} after the burn-in from a cold start, the series
+level is preserved, and a downstream regression coefficient reads as the
+effect of \emph{one unit of media}, directly comparable to the coefficient on
+untransformed spend.
 
 With \code{normalise = FALSE} you get raw Koyck accumulation,
 \eqn{a_t = x_t + \theta a_{t-1}}. A constant spend of \eqn{c} accumulates to
@@ -103,29 +104,28 @@ from trading off against each other during fitting.
 \section{Infinite versus truncated kernels}{
 
 \code{max_lag = Inf} runs the recursive filter, an infinite impulse response. Its
-entire memory is one number per series, which is what makes
-\code{\link[=step_adstock]{step_adstock()}} able to warm-start across a train/test boundary without
-storing any training rows.
+entire memory is one number per series, the accumulator that
+\code{\link[=adstock_state]{adstock_state()}} returns.
 
 A finite \code{max_lag} truncates to a finite impulse response, which needs the
 preceding \code{max_lag - 1} observations as state. Truncation is a modelling
-choice, not an approximation to be minimised: use \code{\link[=effective_window]{effective_window()}} to see
-how much of the kernel a given \code{max_lag} retains. A \code{max_lag} longer than
-the series costs no more than one as long as the series: from a cold start
-only the lags the series can reach are computed, and the normalising total
-comes from the closed form of the geometric series.
+choice, not an approximation to be minimised: use \code{\link[=effective_window]{effective_window()}} to
+find the \code{max_lag} that keeps a given share of the kernel. A \code{max_lag}
+longer than the series costs no more than one as long as the series: from a
+cold start only the lags the series can reach are computed, and the
+normalising total comes from the closed form of the geometric series.
 
-Note that \code{decay = 1} with \code{normalise = TRUE} and \code{max_lag = Inf} is an
-error, not an edge case: an undecaying infinite kernel has infinite mass and
-cannot be normalised.
+\code{decay = 1} with \code{normalise = TRUE} and \code{max_lag = Inf} is an error: an
+undecaying infinite kernel has infinite mass and cannot be normalised.
 }
 
 \section{Causality}{
 
-The filter is strictly causal. \code{adstock_geometric(x)[1:m]} is identical to
-\code{adstock_geometric(x[1:m])} for every \code{m}, so no future spend can leak into a
-past adstock value. This is what makes it safe to adstock a full series once
-and then slice it into cross-validation folds, as \code{\link[=tune_carryover]{tune_carryover()}} does.
+The filter is strictly causal. \code{adstock_geometric(x, decay)[1:m]} is
+identical to \code{adstock_geometric(x[1:m], decay)} for every \code{m}, so no future
+spend can leak into a past adstock value. This is what makes it safe to
+adstock a full series once and then slice it into cross-validation folds, as
+\code{\link[=tune_carryover]{tune_carryover()}} does.
 }
 
 \examples{
@@ -161,7 +161,7 @@ Jin, Y., Wang, Y., Sun, Y., Chan, D. and Koehler, J. (2017). Bayesian
 methods for media mix modeling with carryover and shape effects. Google Inc.
 }
 \seealso{
-\code{\link[=adstock_weibull]{adstock_weibull()}} for delayed peaks, \code{\link[=adstock_state]{adstock_state()}} for
-chaining, \code{\link[=media_transform]{media_transform()}} to compose with saturation,
-\code{\link[=credit_time_decay]{credit_time_decay()}} for the mirrored backward kernel.
+\code{\link[=adstock_weibull]{adstock_weibull()}} and \code{\link[=adstock_delayed]{adstock_delayed()}} for delayed peaks,
+\code{\link[=adstock_state]{adstock_state()}} for chaining, \code{\link[=media_transform]{media_transform()}} to compose with
+saturation, \code{\link[=credit_time_decay]{credit_time_decay()}} for the mirrored backward kernel.
 }

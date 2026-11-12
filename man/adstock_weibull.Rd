@@ -22,8 +22,8 @@ adstock_weibull(
 order. \code{x} must already be sorted by time and evenly spaced; the function
 has no index argument and cannot check this for you. Use \code{\link[=step_adstock]{step_adstock()}}
 if you want the time index validated. Infinite values are an error, since
-one would turn every later value into \code{NaN}; missing values are handled by
-\code{na_action}.}
+the filter would carry them into later periods; missing values are
+handled by \code{na_action}.}
 
 \item{shape, scale}{Weibull shape and scale, both positive. \code{scale} is in
 periods.}
@@ -31,17 +31,17 @@ periods.}
 \item{max_lag}{Number of periods the kernel spans. Required and finite:
 the Weibull kernel has no recursive form.}
 
-\item{type}{Either \code{"cdf"} (monotone decay) or \code{"pdf"} (permits a delayed
-peak).}
+\item{type}{Either \code{"cdf"} (the default, monotone decay) or \code{"pdf"}
+(permits a delayed peak).}
 
-\item{normalise}{Should the kernel sum to 1? Defaults to \code{TRUE}. See the
-\emph{Normalisation} section of \code{\link[=adstock_geometric]{adstock_geometric()}}.}
+\item{normalise}{Should the kernel sum to 1? Defaults to \code{TRUE}. When
+\code{FALSE} the largest weight is 1, as in \code{\link[=adstock_weights_weibull]{adstock_weights_weibull()}}.}
 
-\item{state}{The preceding \code{max_lag - 1} values of \code{x}, oldest first, or \code{0}
-for a cold start. When \code{by} is supplied, a named list with one entry per
-group. \code{\link[=adstock_state]{adstock_state()}} produces one of the right shape when called with
-the same \code{max_lag}; for a finite kernel the state is simply the tail of
-\code{x}, so \code{utils::tail(x, max_lag - 1)} works too.}
+\item{state}{The \code{max_lag - 1} values that came before \code{x}, oldest first, or
+\code{0} for a cold start. When \code{by} is supplied, a named list with one entry
+per group. \code{\link[=adstock_state]{adstock_state()}} produces one of the right shape when called
+with the same \code{max_lag}; for a finite kernel the state is the tail of the
+earlier series, so \code{utils::tail(x_previous, max_lag - 1)} works too.}
 
 \item{by}{Optional grouping vector, or data frame of grouping vectors, the
 same length as \code{x}. Adstock is applied independently within each group,
@@ -58,16 +58,16 @@ every subsequent value.}
 
 \item{missing_state}{What to do when \code{state} is a per-group list with no
 entry for a group in \code{by}. \code{"error"} (the default) refuses; \code{"cold"}
-cold-starts those groups, as \code{\link[=step_adstock]{step_adstock()}} does for groups it did not
-see at \code{prep()} time.}
+cold-starts those groups, as \code{\link[=step_adstock]{step_adstock()}} does by default for groups
+it did not see at \code{prep()} time.}
 }
 \value{
 A numeric vector the same length as \code{x}, in the same order, with the
 names and time-series attributes of \code{x}.
 }
 \description{
-Adstock with a Weibull kernel, which can place its peak after the period of
-spend. See \code{\link[=adstock_weights_weibull]{adstock_weights_weibull()}} for the two parameterisations.
+Adstock with a Weibull kernel, whose \code{"pdf"} form can place its peak after
+the period of spend. See \code{\link[=adstock_weights_weibull]{adstock_weights_weibull()}} for the two forms.
 }
 \examples{
 spend <- c(100, 0, 0, 0, 0, 0, 0, 0)

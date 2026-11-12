@@ -28,19 +28,21 @@ values stretch the kernel over more periods.}
 
 \item{type}{Either \code{"cdf"} (default) or \code{"pdf"}. See \emph{Details}.}
 
-\item{normalise}{Should the weights sum to 1? When \code{FALSE}, weights are
-scaled so the largest is 1, matching the unnormalised geometric convention.}
+\item{normalise}{Should the weights sum to 1? Defaults to \code{TRUE}. When
+\code{FALSE}, weights are scaled so the largest is 1, matching the unnormalised
+geometric convention.}
 }
 \value{
 A numeric vector of length \code{max_lag}, ordered from the current period
 to the most distant lag.
 }
 \description{
-A two-parameter kernel that, unlike the geometric kernel, can place its peak
-\emph{after} the period in which the money was spent. Television, cinema and
-out-of-home routinely behave this way: the response builds for a week or two
-before it turns over. A geometric kernel cannot represent that shape at any
-decay rate.
+A two-parameter kernel that, in its \code{"pdf"} form and unlike the geometric
+kernel, can place its peak \emph{after} the period in which the money was spent.
+Television, cinema and out-of-home often behave this way: the response
+builds for a week or two before it turns over. A geometric kernel cannot
+represent that shape at any decay rate. The default \code{"cdf"} form decays
+monotonically.
 }
 \details{
 The two forms answer different questions.
@@ -49,16 +51,16 @@ The \code{"cdf"} form builds the kernel as a cumulative product of Weibull
 survival values. Numbering lags from 1 so that \eqn{w_1} is the period of
 spend, \eqn{w_i = \prod_{j<i} (1 - F(j))}, where \eqn{F} is the Weibull
 distribution function, so \eqn{w_1 = 1} and each later weight is the
-previous one times \eqn{1 - F(j)}. Read \eqn{1 - F(j)} as a time-varying
-retention rate: it plays the role that the constant \eqn{\theta} plays in
-the geometric kernel, which is the sense in which this form \emph{generalises}
-geometric decay. It is always monotonically decreasing, but the rate of
-decay can itself change over time. The kernel is the running product of
-these values, so it falls faster than the Weibull survival function
-\eqn{1 - F(i)}. The construction is the one Robyn calls
-\code{"weibull_cdf"}; Robyn, however, expresses \code{scale} as a quantile of the
-window length rather than in periods, so its fitted scale values are not
-directly comparable with this function's.
+previous one times \eqn{1 - F(i - 1)}. Read \eqn{1 - F(j)} as a
+time-varying retention rate: it plays the role that the constant
+\eqn{\theta} plays in the geometric kernel, which is the sense in which this
+form \emph{generalises} geometric decay. It is always monotonically decreasing,
+but the rate of decay can itself change over time. The kernel is the
+running product of these values rather than the Weibull survival function
+\eqn{1 - F(i)}, and its tail falls away much faster. The construction is
+the one Robyn calls \code{"weibull_cdf"}; Robyn, however, expresses \code{scale} as a
+quantile of the window length rather than in periods, so its fitted scale
+values are not directly comparable with this function's.
 
 The \code{"pdf"} form uses the Weibull density directly, \eqn{w_i \propto f(i)}.
 This is the form that permits a delayed peak, and it is the reason to reach
@@ -67,9 +69,11 @@ monotone decay. Lags are numbered from 1 here too, so the period of spend
 carries \eqn{f(1)} and the next period \eqn{f(2)}, and the kernel peaks
 after the period of spend only when \eqn{f(2) > f(1)}. That needs
 \code{shape > 1} and a Weibull mode, \code{scale * ((shape - 1) / shape)^(1 / shape)},
-of roughly 1.5 or more. With \code{shape = 2}, \code{scale = 2} puts the mode at 1.41
-and the kernel still peaks in the period of spend; \code{scale = 3} moves the
-peak one period later.
+of roughly 1.5 or more (1.47 at \code{shape = 2}, rising towards 2 as \code{shape}
+grows). With \code{shape = 2}, \code{scale = 2} puts the mode at 1.41 and the kernel
+still peaks in the period of spend; \code{scale = 3} moves the peak one period
+later. A density that is numerically zero at every lag, with all its mass
+beyond \code{max_lag} or before the first lag, is an error.
 }
 \examples{
 # Monotone decay, a flexible generalisation of geometric

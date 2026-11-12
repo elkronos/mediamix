@@ -1,17 +1,18 @@
 #' Geometric adstock weights
 #'
 #' The finite geometric kernel \eqn{w_i = \theta^i} for lags
-#' \eqn{i = 0, 1, \ldots, L-1}. [adstock_geometric()] calls this internally when
-#' `max_lag` is finite; it is exported because the weights themselves are often
-#' what you want to plot or report.
+#' \eqn{i = 0, 1, \ldots, L-1}, divided by its sum unless `normalise = FALSE`.
+#' [adstock_geometric()] applies the same weights when `max_lag` is finite;
+#' this function is exported because the weights themselves are often what you
+#' want to plot or report.
 #'
 #' @param max_lag Number of periods the kernel spans, including the current
-#'   period. `max_lag = 1` means no carryover.
+#'   period. Must be finite. `max_lag = 1` means no carryover.
 #' @param decay Geometric decay coefficient in `[0, 1]`. See
 #'   [decay_from_half_life()].
-#' @param normalise Should the weights sum to 1? See the *Normalisation*
-#'   section of [adstock_geometric()] for what this does to the interpretation
-#'   of a downstream coefficient.
+#' @param normalise Should the weights sum to 1? Defaults to `TRUE`. See the
+#'   *Normalisation* section of [adstock_geometric()] for what this does to the
+#'   interpretation of a downstream coefficient.
 #'
 #' @return A numeric vector of length `max_lag`, ordered from the current period
 #'   to the most distant lag.
@@ -36,11 +37,12 @@ adstock_weights <- function(max_lag, decay, normalise = TRUE) {
 
 #' Weibull adstock weights
 #'
-#' A two-parameter kernel that, unlike the geometric kernel, can place its peak
-#' *after* the period in which the money was spent. Television, cinema and
-#' out-of-home routinely behave this way: the response builds for a week or two
-#' before it turns over. A geometric kernel cannot represent that shape at any
-#' decay rate.
+#' A two-parameter kernel that, in its `"pdf"` form and unlike the geometric
+#' kernel, can place its peak *after* the period in which the money was spent.
+#' Television, cinema and out-of-home often behave this way: the response
+#' builds for a week or two before it turns over. A geometric kernel cannot
+#' represent that shape at any decay rate. The default `"cdf"` form decays
+#' monotonically.
 #'
 #' @param max_lag Number of periods the kernel spans, including the current
 #'   period. Unlike the geometric kernel, Weibull adstock has no infinite form:
@@ -53,8 +55,9 @@ adstock_weights <- function(max_lag, decay, normalise = TRUE) {
 #' @param scale Weibull scale parameter, positive, measured in periods. Larger
 #'   values stretch the kernel over more periods.
 #' @param type Either `"cdf"` (default) or `"pdf"`. See *Details*.
-#' @param normalise Should the weights sum to 1? When `FALSE`, weights are
-#'   scaled so the largest is 1, matching the unnormalised geometric convention.
+#' @param normalise Should the weights sum to 1? Defaults to `TRUE`. When
+#'   `FALSE`, weights are scaled so the largest is 1, matching the unnormalised
+#'   geometric convention.
 #'
 #' @return A numeric vector of length `max_lag`, ordered from the current period
 #'   to the most distant lag.
@@ -66,16 +69,16 @@ adstock_weights <- function(max_lag, decay, normalise = TRUE) {
 #' survival values. Numbering lags from 1 so that \eqn{w_1} is the period of
 #' spend, \eqn{w_i = \prod_{j<i} (1 - F(j))}, where \eqn{F} is the Weibull
 #' distribution function, so \eqn{w_1 = 1} and each later weight is the
-#' previous one times \eqn{1 - F(j)}. Read \eqn{1 - F(j)} as a time-varying
-#' retention rate: it plays the role that the constant \eqn{\theta} plays in
-#' the geometric kernel, which is the sense in which this form *generalises*
-#' geometric decay. It is always monotonically decreasing, but the rate of
-#' decay can itself change over time. The kernel is the running product of
-#' these values, so it falls faster than the Weibull survival function
-#' \eqn{1 - F(i)}. The construction is the one Robyn calls
-#' `"weibull_cdf"`; Robyn, however, expresses `scale` as a quantile of the
-#' window length rather than in periods, so its fitted scale values are not
-#' directly comparable with this function's.
+#' previous one times \eqn{1 - F(i - 1)}. Read \eqn{1 - F(j)} as a
+#' time-varying retention rate: it plays the role that the constant
+#' \eqn{\theta} plays in the geometric kernel, which is the sense in which this
+#' form *generalises* geometric decay. It is always monotonically decreasing,
+#' but the rate of decay can itself change over time. The kernel is the
+#' running product of these values rather than the Weibull survival function
+#' \eqn{1 - F(i)}, and its tail falls away much faster. The construction is
+#' the one Robyn calls `"weibull_cdf"`; Robyn, however, expresses `scale` as a
+#' quantile of the window length rather than in periods, so its fitted scale
+#' values are not directly comparable with this function's.
 #'
 #' The `"pdf"` form uses the Weibull density directly, \eqn{w_i \propto f(i)}.
 #' This is the form that permits a delayed peak, and it is the reason to reach
@@ -84,9 +87,11 @@ adstock_weights <- function(max_lag, decay, normalise = TRUE) {
 #' carries \eqn{f(1)} and the next period \eqn{f(2)}, and the kernel peaks
 #' after the period of spend only when \eqn{f(2) > f(1)}. That needs
 #' `shape > 1` and a Weibull mode, `scale * ((shape - 1) / shape)^(1 / shape)`,
-#' of roughly 1.5 or more. With `shape = 2`, `scale = 2` puts the mode at 1.41
-#' and the kernel still peaks in the period of spend; `scale = 3` moves the
-#' peak one period later.
+#' of roughly 1.5 or more (1.47 at `shape = 2`, rising towards 2 as `shape`
+#' grows). With `shape = 2`, `scale = 2` puts the mode at 1.41 and the kernel
+#' still peaks in the period of spend; `scale = 3` moves the peak one period
+#' later. A density that is numerically zero at every lag, with all its mass
+#' beyond `max_lag` or before the first lag, is an error.
 #'
 #' @seealso [adstock_weibull()], [adstock_weights()]
 #'
@@ -116,14 +121,14 @@ adstock_weights_weibull <- function(max_lag, shape, scale,
 #' Spreads each period's media forward in time with geometric decay, the
 #' standard representation of advertising carryover. This is the forward-facing
 #' half of the package's spine; [credit_time_decay()] is the same kernel run
-#' backward.
+#' backward (see `vignette("spine")`).
 #'
 #' @param x Numeric vector of media spend (or impressions, or GRPs) in time
 #'   order. `x` must already be sorted by time and evenly spaced; the function
 #'   has no index argument and cannot check this for you. Use [step_adstock()]
 #'   if you want the time index validated. Infinite values are an error, since
-#'   one would turn every later value into `NaN`; missing values are handled by
-#'   `na_action`.
+#'   the filter would carry them into later periods; missing values are
+#'   handled by `na_action`.
 #' @param decay Geometric decay coefficient in `[0, 1]`. See
 #'   [decay_from_half_life()] for the half-life vocabulary.
 #' @param max_lag Number of periods the kernel spans. The default `Inf` uses the
@@ -134,14 +139,15 @@ adstock_weights_weibull <- function(max_lag, shape, scale,
 #' @param state Carryover already in flight at the start of `x`, for chaining
 #'   calls across contiguous chunks of a series. The default `0` is a cold
 #'   start, meaning no media ran before `x` began. For the infinite kernel this
-#'   is a single number; for a finite `max_lag` it is the preceding
-#'   `max_lag - 1` values of `x`. Obtain it from [adstock_state()], which
-#'   records the `max_lag` (and, for the infinite kernel, the `decay`) it was
-#'   computed for, so that a state from another kernel is refused rather than
-#'   used. A plain numeric vector of the right length is accepted too.
+#'   is a single number, the raw (unnormalised) accumulator; for a finite
+#'   `max_lag` it is the `max_lag - 1` values that came before `x`, oldest
+#'   first. Obtain it from [adstock_state()], which records the `max_lag` (and,
+#'   for the infinite kernel, the `decay`) it was computed for, so that a state
+#'   from another kernel is refused rather than used. A plain numeric vector of
+#'   the right length is accepted too.
 #'
 #'   When `by` is supplied, pass either the scalar `0` (or `NULL`) to cold-start
-#'   every group, or a named list with one entry per group -- which is the shape
+#'   every group, or a named list with one entry per group, which is the shape
 #'   [adstock_state()] returns when it is given `by`. A list with a `NULL` entry
 #'   is an error rather than a silent cold start for that group.
 #' @param by Optional grouping vector, or data frame of grouping vectors, the
@@ -157,21 +163,21 @@ adstock_weights_weibull <- function(max_lag, shape, scale,
 #'   every subsequent value.
 #' @param missing_state What to do when `state` is a per-group list with no
 #'   entry for a group in `by`. `"error"` (the default) refuses; `"cold"`
-#'   cold-starts those groups, as [step_adstock()] does for groups it did not
-#'   see at `prep()` time.
+#'   cold-starts those groups, as [step_adstock()] does by default for groups
+#'   it did not see at `prep()` time.
 #'
 #' @return A numeric vector the same length as `x`, in the same order, with the
-#'   names and time-series attributes of `x`. Row count and order are
-#'   preserved unconditionally.
+#'   names and time-series attributes of `x`.
 #'
 #' @section Normalisation:
-#' This is the argument that most often changes an answer without anyone
-#' noticing, so it is explicit rather than implied.
+#' This argument can change an answer without anyone noticing, so it is
+#' explicit rather than implied.
 #'
 #' With `normalise = TRUE` the kernel weights sum to 1. A constant spend of
-#' \eqn{c} adstocks to \eqn{c}, the series level is preserved, and a downstream
-#' regression coefficient reads as the effect of *one unit of media*, directly
-#' comparable to the coefficient on untransformed spend.
+#' \eqn{c} adstocks to \eqn{c} after the burn-in from a cold start, the series
+#' level is preserved, and a downstream regression coefficient reads as the
+#' effect of *one unit of media*, directly comparable to the coefficient on
+#' untransformed spend.
 #'
 #' With `normalise = FALSE` you get raw Koyck accumulation,
 #' \eqn{a_t = x_t + \theta a_{t-1}}. A constant spend of \eqn{c} accumulates to
@@ -188,31 +194,30 @@ adstock_weights_weibull <- function(max_lag, shape, scale,
 #'
 #' @section Infinite versus truncated kernels:
 #' `max_lag = Inf` runs the recursive filter, an infinite impulse response. Its
-#' entire memory is one number per series, which is what makes
-#' [step_adstock()] able to warm-start across a train/test boundary without
-#' storing any training rows.
+#' entire memory is one number per series, the accumulator that
+#' [adstock_state()] returns.
 #'
 #' A finite `max_lag` truncates to a finite impulse response, which needs the
 #' preceding `max_lag - 1` observations as state. Truncation is a modelling
-#' choice, not an approximation to be minimised: use [effective_window()] to see
-#' how much of the kernel a given `max_lag` retains. A `max_lag` longer than
-#' the series costs no more than one as long as the series: from a cold start
-#' only the lags the series can reach are computed, and the normalising total
-#' comes from the closed form of the geometric series.
+#' choice, not an approximation to be minimised: use [effective_window()] to
+#' find the `max_lag` that keeps a given share of the kernel. A `max_lag`
+#' longer than the series costs no more than one as long as the series: from a
+#' cold start only the lags the series can reach are computed, and the
+#' normalising total comes from the closed form of the geometric series.
 #'
-#' Note that `decay = 1` with `normalise = TRUE` and `max_lag = Inf` is an
-#' error, not an edge case: an undecaying infinite kernel has infinite mass and
-#' cannot be normalised.
+#' `decay = 1` with `normalise = TRUE` and `max_lag = Inf` is an error: an
+#' undecaying infinite kernel has infinite mass and cannot be normalised.
 #'
 #' @section Causality:
-#' The filter is strictly causal. `adstock_geometric(x)[1:m]` is identical to
-#' `adstock_geometric(x[1:m])` for every `m`, so no future spend can leak into a
-#' past adstock value. This is what makes it safe to adstock a full series once
-#' and then slice it into cross-validation folds, as [tune_carryover()] does.
+#' The filter is strictly causal. `adstock_geometric(x, decay)[1:m]` is
+#' identical to `adstock_geometric(x[1:m], decay)` for every `m`, so no future
+#' spend can leak into a past adstock value. This is what makes it safe to
+#' adstock a full series once and then slice it into cross-validation folds, as
+#' [tune_carryover()] does.
 #'
-#' @seealso [adstock_weibull()] for delayed peaks, [adstock_state()] for
-#'   chaining, [media_transform()] to compose with saturation,
-#'   [credit_time_decay()] for the mirrored backward kernel.
+#' @seealso [adstock_weibull()] and [adstock_delayed()] for delayed peaks,
+#'   [adstock_state()] for chaining, [media_transform()] to compose with
+#'   saturation, [credit_time_decay()] for the mirrored backward kernel.
 #'
 #' @references
 #' Broadbent, S. (1979). One way TV advertisements work.
@@ -284,21 +289,23 @@ adstock_geometric <- function(x, decay, max_lag = Inf, normalise = TRUE,
 
 #' Weibull adstock
 #'
-#' Adstock with a Weibull kernel, which can place its peak after the period of
-#' spend. See [adstock_weights_weibull()] for the two parameterisations.
+#' Adstock with a Weibull kernel, whose `"pdf"` form can place its peak after
+#' the period of spend. See [adstock_weights_weibull()] for the two forms.
 #'
 #' @inheritParams adstock_geometric
 #' @param shape,scale Weibull shape and scale, both positive. `scale` is in
 #'   periods.
 #' @param max_lag Number of periods the kernel spans. Required and finite:
 #'   the Weibull kernel has no recursive form.
-#' @param type Either `"cdf"` (monotone decay) or `"pdf"` (permits a delayed
-#'   peak).
-#' @param state The preceding `max_lag - 1` values of `x`, oldest first, or `0`
-#'   for a cold start. When `by` is supplied, a named list with one entry per
-#'   group. [adstock_state()] produces one of the right shape when called with
-#'   the same `max_lag`; for a finite kernel the state is simply the tail of
-#'   `x`, so `utils::tail(x, max_lag - 1)` works too.
+#' @param type Either `"cdf"` (the default, monotone decay) or `"pdf"`
+#'   (permits a delayed peak).
+#' @param normalise Should the kernel sum to 1? Defaults to `TRUE`. When
+#'   `FALSE` the largest weight is 1, as in [adstock_weights_weibull()].
+#' @param state The `max_lag - 1` values that came before `x`, oldest first, or
+#'   `0` for a cold start. When `by` is supplied, a named list with one entry
+#'   per group. [adstock_state()] produces one of the right shape when called
+#'   with the same `max_lag`; for a finite kernel the state is the tail of the
+#'   earlier series, so `utils::tail(x_previous, max_lag - 1)` works too.
 #'
 #' @return A numeric vector the same length as `x`, in the same order, with the
 #'   names and time-series attributes of `x`.
@@ -357,27 +364,26 @@ adstock_weibull <- function(x, shape, scale, max_lag,
 #' the effect peaks. With `peak = 0` the weights fall off as
 #' \eqn{\theta^{l^2}}, faster than geometric; with `peak > 0` the response
 #' builds for `peak` periods before it decays, the shape television and
-#' out-of-home often show. It is the delayed form used in Google's Bayesian
-#' MMM work, and a one-parameter-per-idea alternative to the Weibull kernel:
-#' `peak` is read directly in periods.
+#' out-of-home often show. It is a one-parameter-per-idea alternative to the
+#' Weibull kernel: `peak` is read directly in periods.
 #'
 #' @inheritParams adstock_geometric
 #' @param decay Retention rate \eqn{\theta} in `(0, 1)`.
 #' @param peak Lag of the peak effect, in periods, in `[0, max_lag - 1]`. Need
-#'   not be a whole number.
+#'   not be a whole number. Defaults to `0`, a peak in the period of spend.
 #' @param max_lag Number of periods the kernel spans, including the current
 #'   period. Required and finite: the kernel has no recursive form. Jin et al.
 #'   use 13 weeks for weekly data.
-#' @param normalise Should the weights sum to 1? When `FALSE` the weights are
-#'   left as \eqn{\theta^{(l - \delta)^2}}, whose largest value is 1 when the
-#'   peak falls on a whole period.
-#' @param state The preceding `max_lag - 1` values of `x`, oldest first, or
-#'   `0` for a cold start; a named list of them when `by` is supplied.
+#' @param normalise Should the weights sum to 1? Defaults to `TRUE`. When
+#'   `FALSE` the weights are left as \eqn{\theta^{(l - \delta)^2}}, whose
+#'   largest value is 1 when the peak falls on a whole period.
+#' @param state The `max_lag - 1` values that came before `x`, oldest first,
+#'   or `0` for a cold start; a named list of them when `by` is supplied.
 #'
-#' @return `adstock_weights_delayed()` returns the kernel, ordered from the
-#'   current period outward. `adstock_delayed()` returns a numeric vector the
-#'   same length as `x`, in the same order, with the names and time-series
-#'   attributes of `x`.
+#' @return `adstock_weights_delayed()` returns the kernel, a numeric vector of
+#'   length `max_lag` ordered from the current period outward.
+#'   `adstock_delayed()` returns a numeric vector the same length as `x`, in
+#'   the same order, with the names and time-series attributes of `x`.
 #'
 #' @references
 #' Jin, Y., Wang, Y., Sun, Y., Chan, D. and Koehler, J. (2017). Bayesian
@@ -394,8 +400,8 @@ adstock_weibull <- function(x, shape, scale, max_lag,
 #' round(adstock_delayed(spend, decay = 0.6, peak = 2, max_lag = 8), 2)
 #'
 #' # Through media_transform()
-#' media_transform(spend, adstock = list(kernel = "delayed", decay = 0.6,
-#'                                       peak = 2, max_lag = 8))
+#' round(media_transform(spend, adstock = list(kernel = "delayed", decay = 0.6,
+#'                                             peak = 2, max_lag = 8)), 2)
 #' @name adstock_delayed
 NULL
 
@@ -446,23 +452,25 @@ adstock_delayed <- function(x, decay, peak = 0, max_lag, normalise = TRUE,
 #' Adstock with an arbitrary kernel
 #'
 #' Applies a user-supplied weight vector as a causal filter. Use this when you
-#' have a kernel from somewhere else -- an econometric study, a vendor's
-#' published curve, a shape you fitted yourself -- and want the same state
+#' have a kernel from somewhere else (an econometric study, a vendor's
+#' published curve, a shape you fitted yourself) and want the same state
 #' handling, grouping and length guarantees as the built-in transforms.
 #'
 #' @inheritParams adstock_geometric
 #' @param weights Numeric vector of kernel weights, ordered from the current
 #'   period to the most distant lag. Not rescaled: whatever you supply is what
-#'   is applied.
-#' @param state The preceding `length(weights) - 1` values of `x`, oldest first,
-#'   or `0` for a cold start -- that is, `utils::tail(x_previous,
-#'   length(weights) - 1)`.
+#'   is applied. Missing or infinite weights are an error.
+#' @param state The `length(weights) - 1` values that came before `x`, oldest
+#'   first, as `utils::tail(x_previous, length(weights) - 1)` gives them, or
+#'   `0` for a cold start. When `by` is supplied, a named list with one entry
+#'   per group.
 #'
 #' @return A numeric vector the same length as `x`, in the same order, with the
 #'   names and time-series attributes of `x`.
 #'
-#' @seealso [adstock_geometric()] and [adstock_weibull()] for the built-in
-#'   kernels, [adstock_weights()] to build a geometric kernel to pass here,
+#' @seealso [adstock_geometric()], [adstock_weibull()] and [adstock_delayed()]
+#'   for the built-in kernels; [adstock_weights()], [adstock_weights_weibull()]
+#'   and [adstock_weights_delayed()] to build a kernel to pass here;
 #'   [adstock_state()] for chaining.
 #'
 #' @examples
@@ -474,7 +482,8 @@ adstock_delayed <- function(x, decay, peak = 0, max_lag, normalise = TRUE,
 #' adstock_filter(c(100, 100, 100, 100), weights = c(1, 1))
 #'
 #' # Chaining across chunks, and grouping, work as they do for the built-in
-#' # kernels. Use `adstock_state()` with a matching `max_lag` to get the state.
+#' # kernels. The state is the tail of the earlier chunk, as here, or
+#' # `adstock_state()` with a matching `max_lag`.
 #' w <- c(0.5, 0.3, 0.2)
 #' whole <- adstock_filter(c(100, 80, 60, 40, 20), weights = w)
 #' s <- utils::tail(c(100, 80, 60), length(w) - 1L)
@@ -503,22 +512,24 @@ adstock_filter <- function(x, weights, state = 0, by = NULL,
 #' Returns the carryover left in flight at the end of a series, in a form
 #' [adstock_geometric()] and friends accept as their `state` argument. This is
 #' how you continue a filter across contiguous chunks of a series without
-#' re-running it from the beginning, and it is what [step_adstock()] stores at
-#' `prep()` time.
+#' re-running it from the beginning. [step_adstock()] computes it at `prep()`
+#' time and reports it through `tidy()`.
 #'
 #' @inheritParams adstock_geometric
 #' @param decay Geometric decay coefficient in `[0, 1]`. Required for the
 #'   infinite kernel. A finite kernel's state is the tail of `x` and does not
 #'   depend on the decay, so there `decay` can be left out.
-#' @param max_lag Number of periods the kernel spans. `Inf` gives the recursive
-#'   form, whose state is a single number.
+#' @param max_lag Number of periods the kernel spans. `Inf`, the default, gives
+#'   the recursive form, whose state is a single number.
 #'
 #' @return An object of class `mm_adstock_state`, a numeric vector that records
 #'   what it was computed for. For the infinite kernel it holds a single
-#'   number, the raw (unnormalised) accumulator, and records `max_lag` and
-#'   `decay`. For a finite `max_lag` it holds the last `max_lag - 1` values of
-#'   `x`, oldest first, and records `max_lag`. When `by` is supplied, a named
-#'   list of such objects, one per group, in order of first appearance.
+#'   number, the raw (unnormalised) accumulator, and records the kernel,
+#'   `max_lag` and `decay`. For a finite `max_lag` it holds the last
+#'   `max_lag - 1` values of the series, oldest first, and records `max_lag`;
+#'   when `x` is shorter than that, the earlier values come from `state`, or
+#'   are zeros from a cold start. When `by` is supplied, a named list of such
+#'   objects, one per group, in order of first appearance.
 #'
 #' @details
 #' The stored state is always in *raw* units, independent of `normalise`, so a
@@ -530,16 +541,17 @@ adstock_filter <- function(x, weights, state = 0, by = NULL,
 #' `max_lag = Inf`. A finite state is the raw tail of the series, so it serves
 #' every kernel with the same `max_lag`: [adstock_weibull()], [adstock_delayed()]
 #' and [adstock_filter()] accept it as readily as [adstock_geometric()]. A
-#' plain numeric vector is still accepted and is checked only for its length.
+#' plain numeric vector is still accepted and is checked only for its length
+#' and for missing or infinite values.
 #'
-#' The size of this object is the reason [step_adstock()] can survive a
-#' train/test boundary without the leakage and row-count problems that
-#' `recipes::step_lag()` runs into. For the recursive kernel it is one
-#' double per series: no training observations are retained, so there is nothing
-#' to leak and nothing to inflate the size of a fitted workflow.
+#' For the recursive kernel this object is one double per series, so
+#' continuing the filter needs none of the earlier observations.
+#' [step_adstock()] stores the training media as well, so that `bake()` can
+#' also take new data that repeats training periods; see its *Storage*
+#' section.
 #'
 #' @seealso [adstock_geometric()], [adstock_weibull()], [adstock_filter()],
-#'   and [step_adstock()], which stores this state at `prep()` time.
+#'   and [step_adstock()], which reports this state through `tidy()`.
 #'
 #' @examples
 #' first_half <- c(100, 80, 60, 40)
@@ -620,27 +632,30 @@ print.mm_adstock_state <- function(x, ...) {
 #' the first periods of a long-carryover channel are understated: at
 #' `decay = 0.85` a constant spend reaches only 15% of its steady-state adstock
 #' in the first period. This function returns the state the filter would hold
-#' had the average spend of the first `periods` been running forever, which is
-#' the usual remedy when real pre-period spend is not available.
+#' had the average spend of the first `periods` been running forever. Use it
+#' when real pre-period spend is not available.
 #'
 #' @inheritParams adstock_geometric
 #' @param decay Geometric decay coefficient in `[0, 1]`. Required for the
-#'   infinite kernel; a finite kernel's steady state does not depend on it, so
+#'   infinite kernel, and below 1 there, since an undecaying kernel has no
+#'   steady state. A finite kernel's steady state does not depend on it, so
 #'   there it is used only to choose the default `periods` and can be left out.
-#' @param max_lag Number of periods the kernel spans. `Inf` gives the recursive
-#'   form, whose state is a single number.
-#' @param periods Number of leading periods to average. Defaults to the
-#'   geometric kernel's 90% effective window, and for a finite `max_lag` to at
-#'   most the `max_lag - 1` periods the kernel's state covers, capped at the
-#'   series length, since that is how far back the start of the series
-#'   "remembers".
+#' @param max_lag Number of periods the kernel spans. `Inf`, the default, gives
+#'   the recursive form, whose state is a single number.
+#' @param periods Number of leading periods to average, capped at the length
+#'   of the series (of each group, with `by`). Defaults to the geometric
+#'   kernel's 90% effective window, `effective_window(decay, 0.9)`, since that
+#'   is how far back the start of the series "remembers". For a finite
+#'   `max_lag` the default is at most the `max_lag - 1` periods the kernel's
+#'   state covers, and exactly that when `decay` is left out.
 #'
 #' @return A state in the form [adstock_geometric()], [adstock_filter()] and
 #'   friends accept: a single raw accumulator for `max_lag = Inf`, the
 #'   `max_lag - 1` preceding values for a finite kernel, or a named list of
 #'   these when `by` is supplied, in order of first appearance. These are
 #'   plain numeric vectors, so they carry no record of the kernel and are
-#'   checked only for their length when used.
+#'   checked only for their length and for missing or infinite values when
+#'   used.
 #'
 #' @details
 #' For the recursive kernel the raw accumulator under constant spend \eqn{m} is
@@ -654,7 +669,8 @@ print.mm_adstock_state <- function(x, ...) {
 #' real pre-period spend, pass [adstock_state()] of it instead.
 #'
 #' Missing values follow `na_action`, as in [adstock_state()]: an error by
-#' default, zeros with `"zero"`, and a missing state with `"keep"`.
+#' default, zeros with `"zero"`, and with `"keep"` a missing state when one
+#' falls in the averaged periods.
 #'
 #' @seealso [adstock_state()], [adstock_geometric()], [tune_carryover()],
 #'   which accepts `warm_start = TRUE`.

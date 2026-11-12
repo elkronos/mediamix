@@ -19,27 +19,28 @@ adstock_state(
 order. \code{x} must already be sorted by time and evenly spaced; the function
 has no index argument and cannot check this for you. Use \code{\link[=step_adstock]{step_adstock()}}
 if you want the time index validated. Infinite values are an error, since
-one would turn every later value into \code{NaN}; missing values are handled by
-\code{na_action}.}
+the filter would carry them into later periods; missing values are
+handled by \code{na_action}.}
 
 \item{decay}{Geometric decay coefficient in \verb{[0, 1]}. Required for the
 infinite kernel. A finite kernel's state is the tail of \code{x} and does not
 depend on the decay, so there \code{decay} can be left out.}
 
-\item{max_lag}{Number of periods the kernel spans. \code{Inf} gives the recursive
-form, whose state is a single number.}
+\item{max_lag}{Number of periods the kernel spans. \code{Inf}, the default, gives
+the recursive form, whose state is a single number.}
 
 \item{state}{Carryover already in flight at the start of \code{x}, for chaining
 calls across contiguous chunks of a series. The default \code{0} is a cold
 start, meaning no media ran before \code{x} began. For the infinite kernel this
-is a single number; for a finite \code{max_lag} it is the preceding
-\code{max_lag - 1} values of \code{x}. Obtain it from \code{\link[=adstock_state]{adstock_state()}}, which
-records the \code{max_lag} (and, for the infinite kernel, the \code{decay}) it was
-computed for, so that a state from another kernel is refused rather than
-used. A plain numeric vector of the right length is accepted too.
+is a single number, the raw (unnormalised) accumulator; for a finite
+\code{max_lag} it is the \code{max_lag - 1} values that came before \code{x}, oldest
+first. Obtain it from \code{\link[=adstock_state]{adstock_state()}}, which records the \code{max_lag} (and,
+for the infinite kernel, the \code{decay}) it was computed for, so that a state
+from another kernel is refused rather than used. A plain numeric vector of
+the right length is accepted too.
 
 When \code{by} is supplied, pass either the scalar \code{0} (or \code{NULL}) to cold-start
-every group, or a named list with one entry per group -- which is the shape
+every group, or a named list with one entry per group, which is the shape
 \code{\link[=adstock_state]{adstock_state()}} returns when it is given \code{by}. A list with a \code{NULL} entry
 is an error rather than a silent cold start for that group.}
 
@@ -58,23 +59,25 @@ every subsequent value.}
 
 \item{missing_state}{What to do when \code{state} is a per-group list with no
 entry for a group in \code{by}. \code{"error"} (the default) refuses; \code{"cold"}
-cold-starts those groups, as \code{\link[=step_adstock]{step_adstock()}} does for groups it did not
-see at \code{prep()} time.}
+cold-starts those groups, as \code{\link[=step_adstock]{step_adstock()}} does by default for groups
+it did not see at \code{prep()} time.}
 }
 \value{
 An object of class \code{mm_adstock_state}, a numeric vector that records
 what it was computed for. For the infinite kernel it holds a single
-number, the raw (unnormalised) accumulator, and records \code{max_lag} and
-\code{decay}. For a finite \code{max_lag} it holds the last \code{max_lag - 1} values of
-\code{x}, oldest first, and records \code{max_lag}. When \code{by} is supplied, a named
-list of such objects, one per group, in order of first appearance.
+number, the raw (unnormalised) accumulator, and records the kernel,
+\code{max_lag} and \code{decay}. For a finite \code{max_lag} it holds the last
+\code{max_lag - 1} values of the series, oldest first, and records \code{max_lag};
+when \code{x} is shorter than that, the earlier values come from \code{state}, or
+are zeros from a cold start. When \code{by} is supplied, a named list of such
+objects, one per group, in order of first appearance.
 }
 \description{
 Returns the carryover left in flight at the end of a series, in a form
 \code{\link[=adstock_geometric]{adstock_geometric()}} and friends accept as their \code{state} argument. This is
 how you continue a filter across contiguous chunks of a series without
-re-running it from the beginning, and it is what \code{\link[=step_adstock]{step_adstock()}} stores at
-\code{prep()} time.
+re-running it from the beginning. \code{\link[=step_adstock]{step_adstock()}} computes it at \code{prep()}
+time and reports it through \code{tidy()}.
 }
 \details{
 The stored state is always in \emph{raw} units, independent of \code{normalise}, so a
@@ -86,13 +89,14 @@ The recursive accumulator is valid only for the same \code{decay} and
 \code{max_lag = Inf}. A finite state is the raw tail of the series, so it serves
 every kernel with the same \code{max_lag}: \code{\link[=adstock_weibull]{adstock_weibull()}}, \code{\link[=adstock_delayed]{adstock_delayed()}}
 and \code{\link[=adstock_filter]{adstock_filter()}} accept it as readily as \code{\link[=adstock_geometric]{adstock_geometric()}}. A
-plain numeric vector is still accepted and is checked only for its length.
+plain numeric vector is still accepted and is checked only for its length
+and for missing or infinite values.
 
-The size of this object is the reason \code{\link[=step_adstock]{step_adstock()}} can survive a
-train/test boundary without the leakage and row-count problems that
-\code{recipes::step_lag()} runs into. For the recursive kernel it is one
-double per series: no training observations are retained, so there is nothing
-to leak and nothing to inflate the size of a fitted workflow.
+For the recursive kernel this object is one double per series, so
+continuing the filter needs none of the earlier observations.
+\code{\link[=step_adstock]{step_adstock()}} stores the training media as well, so that \code{bake()} can
+also take new data that repeats training periods; see its \emph{Storage}
+section.
 }
 \examples{
 first_half <- c(100, 80, 60, 40)
@@ -115,5 +119,5 @@ try(adstock_geometric(second_half, decay = 0.5, max_lag = 2, state = s))
 }
 \seealso{
 \code{\link[=adstock_geometric]{adstock_geometric()}}, \code{\link[=adstock_weibull]{adstock_weibull()}}, \code{\link[=adstock_filter]{adstock_filter()}},
-and \code{\link[=step_adstock]{step_adstock()}}, which stores this state at \code{prep()} time.
+and \code{\link[=step_adstock]{step_adstock()}}, which reports this state through \code{tidy()}.
 }

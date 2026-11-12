@@ -27,21 +27,21 @@ use 13 weeks for weekly data.}
 \item{decay}{Retention rate \eqn{\theta} in \verb{(0, 1)}.}
 
 \item{peak}{Lag of the peak effect, in periods, in \verb{[0, max_lag - 1]}. Need
-not be a whole number.}
+not be a whole number. Defaults to \code{0}, a peak in the period of spend.}
 
-\item{normalise}{Should the weights sum to 1? When \code{FALSE} the weights are
-left as \eqn{\theta^{(l - \delta)^2}}, whose largest value is 1 when the
-peak falls on a whole period.}
+\item{normalise}{Should the weights sum to 1? Defaults to \code{TRUE}. When
+\code{FALSE} the weights are left as \eqn{\theta^{(l - \delta)^2}}, whose
+largest value is 1 when the peak falls on a whole period.}
 
 \item{x}{Numeric vector of media spend (or impressions, or GRPs) in time
 order. \code{x} must already be sorted by time and evenly spaced; the function
 has no index argument and cannot check this for you. Use \code{\link[=step_adstock]{step_adstock()}}
 if you want the time index validated. Infinite values are an error, since
-one would turn every later value into \code{NaN}; missing values are handled by
-\code{na_action}.}
+the filter would carry them into later periods; missing values are
+handled by \code{na_action}.}
 
-\item{state}{The preceding \code{max_lag - 1} values of \code{x}, oldest first, or
-\code{0} for a cold start; a named list of them when \code{by} is supplied.}
+\item{state}{The \code{max_lag - 1} values that came before \code{x}, oldest first,
+or \code{0} for a cold start; a named list of them when \code{by} is supplied.}
 
 \item{by}{Optional grouping vector, or data frame of grouping vectors, the
 same length as \code{x}. Adstock is applied independently within each group,
@@ -58,14 +58,14 @@ every subsequent value.}
 
 \item{missing_state}{What to do when \code{state} is a per-group list with no
 entry for a group in \code{by}. \code{"error"} (the default) refuses; \code{"cold"}
-cold-starts those groups, as \code{\link[=step_adstock]{step_adstock()}} does for groups it did not
-see at \code{prep()} time.}
+cold-starts those groups, as \code{\link[=step_adstock]{step_adstock()}} does by default for groups
+it did not see at \code{prep()} time.}
 }
 \value{
-\code{adstock_weights_delayed()} returns the kernel, ordered from the
-current period outward. \code{adstock_delayed()} returns a numeric vector the
-same length as \code{x}, in the same order, with the names and time-series
-attributes of \code{x}.
+\code{adstock_weights_delayed()} returns the kernel, a numeric vector of
+length \code{max_lag} ordered from the current period outward.
+\code{adstock_delayed()} returns a numeric vector the same length as \code{x}, in
+the same order, with the names and time-series attributes of \code{x}.
 }
 \description{
 The delayed-peak geometric kernel of Jin et al. (2017),
@@ -74,9 +74,8 @@ where \eqn{\theta} is the retention rate and \eqn{\delta} the lag at which
 the effect peaks. With \code{peak = 0} the weights fall off as
 \eqn{\theta^{l^2}}, faster than geometric; with \code{peak > 0} the response
 builds for \code{peak} periods before it decays, the shape television and
-out-of-home often show. It is the delayed form used in Google's Bayesian
-MMM work, and a one-parameter-per-idea alternative to the Weibull kernel:
-\code{peak} is read directly in periods.
+out-of-home often show. It is a one-parameter-per-idea alternative to the
+Weibull kernel: \code{peak} is read directly in periods.
 }
 \examples{
 # Peak two weeks after the spend
@@ -86,8 +85,8 @@ spend <- c(100, 0, 0, 0, 0, 0, 0, 0)
 round(adstock_delayed(spend, decay = 0.6, peak = 2, max_lag = 8), 2)
 
 # Through media_transform()
-media_transform(spend, adstock = list(kernel = "delayed", decay = 0.6,
-                                      peak = 2, max_lag = 8))
+round(media_transform(spend, adstock = list(kernel = "delayed", decay = 0.6,
+                                            peak = 2, max_lag = 8)), 2)
 }
 \references{
 Jin, Y., Wang, Y., Sun, Y., Chan, D. and Koehler, J. (2017). Bayesian
