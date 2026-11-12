@@ -63,18 +63,20 @@ reference:
   - adstock_steady_state
   - decay_vocabulary
 - title: Saturation
-  desc: Diminishing returns, and composing them with carryover in the right order.
+  desc: Diminishing returns, composing them with carryover in the right order, and converting Robyn's hyperparameters to these arguments.
   contents:
   - saturation
   - media_transform
+  - from_robyn
 - title: Choosing carryover parameters
-  desc: Score candidate decays and lags by how well a model predicts held-out KPI.
+  desc: Score candidate decays and lags by how well a model predicts held-out KPI, with seasonality terms as controls.
   contents:
   - tune_carryover
   - tune_carryover_joint
   - plot_carryover
   - fit_ols
   - metrics
+  - seasonality
 - title: Tuning with tidymodels
   desc: Recipe steps and tuning parameters for tuning carryover, saturation and a model penalty together.
   contents:
