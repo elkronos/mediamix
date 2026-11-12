@@ -287,3 +287,36 @@ test_that("carryover_decay() and carryover_max_lag() are valid dials params usab
   expect_true(all(g$decay >= 0 & g$decay <= 0.95))
   expect_true(all(g$max_lag >= 1 & g$max_lag <= 26))
 })
+
+# ---- shared helpers in R/zzz.R -------------------------------------------------------
+
+test_that(".mm_step_groups orders groups by first appearance, not by locale", {
+  groups <- mediamix:::.mm_step_groups(data.frame(g = c("b", "a", "B", "a")),
+                                       "g")
+  expect_identical(names(groups), c("b", "a", "B"))
+  expect_identical(unname(groups), list(1L, c(2L, 4L), 3L))
+})
+
+test_that("group keys do not depend on storage type or time zone", {
+  key_part <- mediamix:::.mm_key_part
+  expect_identical(key_part(1e5, "geo"), key_part(100000L, "geo"))
+  expect_identical(key_part(c(1e5, 2.5), "geo"), c("100000", "2.5"))
+  utc <- as.POSIXct("2024-01-01 05:00", tz = "UTC")
+  nyc <- as.POSIXct("2024-01-01 00:00", tz = "America/New_York")
+  expect_identical(key_part(utc, "launch"), key_part(nyc, "launch"))
+  expect_error(key_part(c("a", NA), "region"), "\"region\" has 1 missing")
+})
+
+test_that("the missing-column message does not assume a recipe step", {
+  e <- tryCatch(mediamix:::.mm_assert_cols(data.frame(a = 1), c("a", "zz")),
+                error = function(e) conditionMessage(e))
+  expect_match(e, "1 column is not in the data")
+  expect_no_match(e, "step")
+})
+
+test_that("the missing-package message agrees in number", {
+  abort_missing <- mediamix:::.mm_abort_missing_recipes
+  expect_error(abort_missing(c("recipes", "rlang")), "Install them")
+  expect_error(abort_missing("rlang"), "Install it")
+  expect_null(abort_missing(character(0)))
+})
