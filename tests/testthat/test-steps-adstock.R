@@ -654,7 +654,7 @@ test_that("tidy() returns a tibble, with NA for the group of an ungrouped step",
   td <- generics::tidy(rec, number = 1)
   expect_s3_class(td, "tbl_df")
   expect_true(is.na(td$group))
-  expect_equal(td$state, adstock_state(d$x, decay = 0.5))
+  expect_equal(td$state, as.numeric(adstock_state(d$x, decay = 0.5)))
 })
 
 test_that("an empty selection says that nothing matched", {
