@@ -225,7 +225,7 @@ test_that("the paired one-SE rule stays close to a clearly identified truth", {
 
 # ---- diagnose_media(): CPM outliers are judged within each series -----------
 
-test_that("a geography that simply pays more is not flagged as join errors", {
+test_that("a geography that pays more is not flagged as join errors", {
   set.seed(4)
   d <- data.frame(geo = rep(c("cheap", "dear"), each = 30),
                   imp = runif(60, 900, 1100))
