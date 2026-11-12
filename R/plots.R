@@ -87,10 +87,74 @@ mm_palette <- function(n = 8L, role = c("categorical", "ink")) {
   invisible(NULL)
 }
 
+# Tick labels, never in scientific notation. From ten thousand up, a k, M, B
+# or T suffix replaces trailing zeros, using the largest unit at which two
+# decimals still print every tick exactly; failing that, plain numbers.
 #' @keywords internal
 #' @noRd
 .mm_num <- function(v) {
-  format(v, big.mark = ",", scientific = FALSE, trim = TRUE, drop0trailing = TRUE)
+  out <- as.character(v)
+  ok <- is.finite(v)
+  if (!any(ok)) return(out)
+  s <- v[ok]
+  s[abs(s) < 1e-12 * max(abs(s))] <- 0
+  sfx <- ""
+  if (max(abs(s)) >= 1e4) {
+    units <- c(T = 1e12, B = 1e9, M = 1e6, k = 1e3)
+    fits <- units <= max(abs(s)) &
+      vapply(units, function(u) .mm_decimals(s / u) <= 2L, logical(1))
+    if (any(fits)) {
+      sfx <- names(units)[which(fits)[1L]]
+      s <- s / units[[sfx]]
+    }
+  }
+  lab <- formatC(s, format = "f", digits = .mm_decimals(s), big.mark = ",",
+                 drop0trailing = TRUE)
+  out[ok] <- ifelse(s == 0, "0", paste0(lab, sfx))
+  out
+}
+
+# Value labels, such as the figure at the end of a bar: three significant
+# figures, with a k, M, B or T suffix from ten thousand up.
+#' @keywords internal
+#' @noRd
+.mm_short <- function(v, digits = 3L) {
+  out <- as.character(v)
+  ok <- is.finite(v)
+  cut <- c(1e12, 1e9, 1e6, 1e4)
+  div <- c(1e12, 1e9, 1e6, 1e3)
+  sfx <- c("T", "B", "M", "k")
+  out[ok] <- vapply(signif(v[ok], digits), function(z) {
+    i <- which(abs(z) >= cut)[1L]
+    if (is.na(i)) {
+      return(format(z, big.mark = ",", scientific = FALSE, trim = TRUE))
+    }
+    paste0(format(signif(z / div[i], digits), big.mark = ",",
+                  scientific = FALSE, trim = TRUE), sfx[i])
+  }, character(1))
+  out
+}
+
+# Percentage tick labels with the fewest decimals that keep every tick
+# exact, so that 0.5% and 1% are not both printed as 1%.
+#' @keywords internal
+#' @noRd
+.mm_pct <- function(v) {
+  p <- 100 * v
+  p[is.finite(p) & abs(p) < 1e-9] <- 0
+  paste0(formatC(p, format = "f", digits = .mm_decimals(p),
+                 drop0trailing = TRUE), "%")
+}
+
+# The fewest decimals, at most `max`, that print every finite value exactly.
+#' @keywords internal
+#' @noRd
+.mm_decimals <- function(v, max = 6L) {
+  v <- v[is.finite(v)]
+  for (d in 0:max) {
+    if (all(abs(round(v, d) - v) <= 1e-9 * pmax(1, abs(v)))) return(d)
+  }
+  max
 }
 
 #' @keywords internal
@@ -142,22 +206,104 @@ mm_palette <- function(n = 8L, role = c("categorical", "ink")) {
                    text.col = .mm_ink()[["secondary"]], ...)
 }
 
+# A graphical argument passed through `...`, or the method's default.
+#' @keywords internal
+#' @noRd
+.mm_arg <- function(dots, name, default) {
+  v <- dots[[name]]
+  if (is.null(v)) default else v
+}
+
+# The columns a plot method reads, checked before anything is drawn, so an
+# edited object fails with a message naming what is missing rather than with
+# a base graphics error.
+#' @keywords internal
+#' @noRd
+.mm_plot_needs <- function(d, cols, from, where = "x", call = parent.frame()) {
+  if (!is.data.frame(d)) {
+    cli::cli_abort(c(
+      "{.arg {where}} must be a data frame.",
+      i = "Plot the object as {.fn {from}} returned it."
+    ), call = call)
+  }
+  miss <- setdiff(cols, names(d))
+  if (length(miss) > 0L) {
+    cli::cli_abort(c(
+      "{.arg {where}} lacks {length(miss)} column{?s} this plot needs: \\
+       {.field {miss}}.",
+      i = "Plot the object as {.fn {from}} returned it."
+    ), call = call)
+  }
+  if (nrow(d) == 0L) {
+    cli::cli_abort("{.arg {where}} has no rows to plot.", call = call)
+  }
+  invisible(d)
+}
+
+# A finite axis range over `v`, padded below and above by the fractions in
+# `pad`. A range of zero width is widened so the axis still has ticks.
+#' @keywords internal
+#' @noRd
+.mm_lim <- function(v, pad = c(0, 0), what = "values", call = parent.frame()) {
+  v <- v[is.finite(v)]
+  if (length(v) == 0L) {
+    cli::cli_abort("{.arg x} has no finite {what} to plot.", call = call)
+  }
+  r <- range(v)
+  w <- diff(r)
+  if (w == 0) {
+    w <- if (r[1L] == 0) 1 else abs(r[1L]) / 10
+    r <- r + c(-0.5, 0.5) * w
+  }
+  r + c(-pad[1L], pad[2L]) * w
+}
+
+# Category labels for the left axis, shortened with "..." when the longest
+# would take more than 40% of the device width, and the margin in lines they
+# need at the current text size.
+#' @keywords internal
+#' @noRd
+.mm_fit_labels <- function(labels, cex = 0.85) {
+  labels <- as.character(labels)
+  labels[is.na(labels)] <- "NA"
+  width <- function(l) {
+    max(0, graphics::strwidth(l, units = "inches", cex = cex))
+  }
+  room <- 0.4 * graphics::par("din")[1L]
+  n <- max(0L, nchar(labels))
+  while (width(labels) > room && n > 4L) {
+    n <- n - 1L
+    long <- nchar(labels) > n
+    labels[long] <- paste0(substr(labels[long], 1L, n - 3L), "...")
+  }
+  inches <- width(labels)
+  line <- graphics::par("csi") * graphics::par("mex")
+  list(labels = labels, inches = inches, lines = max(4, inches / line + 1.5))
+}
+
 # ---- carryover ------------------------------------------------------------------
 
 #' Plot a carryover cross-validation profile
 #'
-#' The cross-validated error across the decay grid, with the minimum (filled)
-#' and the one-standard-error choice (open) marked. A flat profile is the
-#' finding: the data does not pin carryover down, however precise `best`
-#' looks.
+#' The cross-validated error across the decay grid, one line per `max_lag`,
+#' with the minimum (filled) and the one-standard-error choice (open) marked
+#' on the line they belong to. A flat profile is the finding: the data does
+#' not pin carryover down, however precise `best` looks.
 #'
 #' @param x An object from [tune_carryover()] or [tune_carryover_joint()].
 #' @param truth Optional known decay (a number, or for the joint version a
 #'   vector named by channel), drawn as a muted reference line. Useful on
 #'   simulated data.
-#' @param ... Ignored.
+#' @param ... Graphical arguments: `main`, `xlab` and `ylab` replace the
+#'   titles, and `col` gives the line colours, one per `max_lag` in legend
+#'   order. In the joint version `main` is the overall title and `xlab` and
+#'   `ylab` label every panel. Others are ignored.
 #'
 #' @return `x`, invisibly.
+#'
+#' @details
+#' With more than eight `max_lag` values, the seven with the lowest error keep
+#' a colour each and the others are drawn as thin grey lines, with a message.
 #'
 #' @examples
 #' set.seed(42)
@@ -171,58 +317,127 @@ NULL
 #' @rdname plot_carryover
 #' @export
 plot.mm_carryover <- function(x, truth = NULL, ...) {
+  r <- x$results
+  .mm_plot_needs(r, c("max_lag", "decay", "metric"), "tune_carryover",
+                 "x$results")
+  .mm_plot_needs(x$best, c("max_lag", "decay"), "tune_carryover", "x$best")
+  dots <- list(...)
+  metric <- if (is.null(x$metric)) "metric" else x$metric
+  xl <- .mm_lim(r$decay, what = "decays")
+  yl <- .mm_lim(r$metric, c(0.04, 0.08), "metric values")
+  lc <- .mm_lag_colours(.mm_lag_rank(r, x$best), dots[["col"]])
   op <- .mm_par()
   on.exit(graphics::par(op), add = TRUE)
-  r <- x$results
-  lags <- unique(r$max_lag)
-  if (length(lags) > 8L) lags <- lags[seq_len(8L)]
-  cols <- .mm_cat()[seq_along(lags)]
-  yl <- range(r$metric[r$max_lag %in% lags], na.rm = TRUE)
-  .mm_frame(range(r$decay), yl + c(-0.04, 0.08) * diff(yl),
-            main = sprintf("Cross-validated %s by decay", x$metric),
+  .mm_frame(xl, yl,
+            main = .mm_arg(dots, "main",
+                           sprintf("Cross-validated %s by decay", metric)),
             sub = "Filled: minimum. Open: one-standard-error choice.",
-            xlab = "Decay", ylab = x$metric)
+            xlab = .mm_arg(dots, "xlab", "Decay"),
+            ylab = .mm_arg(dots, "ylab", metric))
   .mm_truth_line(truth)
-  for (i in seq_along(lags)) {
-    s <- r[r$max_lag == lags[i], ]
-    s <- s[order(s$decay), ]
-    graphics::lines(s$decay, s$metric, col = cols[[i]], lwd = 2)
-  }
-  .mm_mark_choice(x$best, x$best_1se, col = cols[[match(x$best$max_lag, lags,
-                                                        nomatch = 1L)]])
-  if (length(lags) > 1L) {
-    .mm_legend("topleft", paste("max_lag", format(lags)), col = cols, lwd = 2)
-  }
+  .mm_profile_lines(r, lc)
+  .mm_mark_choice(x$best, x$best_1se, r, lc)
+  if (length(c(lc$named, lc$other)) > 1L) .mm_lag_legend(lc)
   invisible(x)
 }
 
 #' @rdname plot_carryover
 #' @export
 plot.mm_carryover_joint <- function(x, truth = NULL, ...) {
+  prof <- x$profiles
+  .mm_plot_needs(prof, c("channel", "max_lag", "decay", "metric"),
+                 "tune_carryover_joint", "x$profiles")
+  .mm_plot_needs(x$best, c("channel", "max_lag", "decay"),
+                 "tune_carryover_joint", "x$best")
+  dots <- list(...)
   ch <- x$best$channel
   k <- length(ch)
   nc <- min(3L, k)
+  one_se <- x$best_1se
+  if (!is.data.frame(one_se) || !"channel" %in% names(one_se)) one_se <- NULL
+  lc <- .mm_lag_colours(.mm_lag_rank(prof, x$best), dots[["col"]])
+  xlab <- .mm_arg(dots, "xlab", "Decay")
+  ylab <- .mm_arg(dots, "ylab", "")
   op <- .mm_par(mfrow = c(ceiling(k / nc), nc), oma = c(0, 0, 1.5, 0))
   on.exit(graphics::par(op), add = TRUE)
-  col <- .mm_cat()[["blue"]]
-  for (c0 in ch) {
-    p <- x$profiles[x$profiles$channel == c0, ]
-    p <- p[order(p$decay), ]
-    yl <- range(p$metric, na.rm = TRUE)
-    if (diff(yl) == 0) yl <- yl + c(-1, 1)
-    .mm_frame(range(p$decay), yl + c(-0.05, 0.12) * diff(yl), main = c0,
-              xlab = "Decay", ylab = "")
+  for (i in seq_len(k)) {
+    c0 <- ch[[i]]
+    p <- prof[prof$channel %in% c0, , drop = FALSE]
+    .mm_frame(.mm_lim(p$decay, what = "decays"),
+              .mm_lim(p$metric, c(0.05, 0.12), "metric values"),
+              main = c0, xlab = xlab, ylab = ylab)
     if (!is.null(truth) && c0 %in% names(truth)) .mm_truth_line(truth[[c0]])
-    graphics::lines(p$decay, p$metric, col = col, lwd = 2)
-    .mm_mark_choice(x$best[x$best$channel == c0, ],
-                    x$best_1se[x$best_1se$channel == c0, ], col = col,
-                    metric_of = p)
+    .mm_profile_lines(p, lc)
+    .mm_mark_choice(x$best[x$best$channel %in% c0, , drop = FALSE],
+                    if (!is.null(one_se)) {
+                      one_se[one_se$channel %in% c0, , drop = FALSE]
+                    }, p, lc)
+    if (i == 1L && length(c(lc$named, lc$other)) > 1L) .mm_lag_legend(lc)
   }
-  graphics::mtext(sprintf("Cross-validated %s by channel decay, others held at their selected values",
-                          x$metric_name),
-                  outer = TRUE, side = 3, adj = 0, cex = 0.85,
+  metric <- if (is.null(x$metric_name)) "metric" else x$metric_name
+  main <- .mm_arg(dots, "main", sprintf(
+    "Cross-validated %s by channel decay, others held at their selected values",
+    metric))
+  graphics::mtext(main, outer = TRUE, side = 3, adj = 0, cex = 0.85,
                   col = .mm_ink()[["secondary"]])
   invisible(x)
+}
+
+# max_lag values in order of their lowest error, the selected ones first.
+#' @keywords internal
+#' @noRd
+.mm_lag_rank <- function(profile, best) {
+  ranked <- profile$max_lag[order(profile$metric, na.last = TRUE)]
+  unique(c(intersect(best$max_lag, profile$max_lag), ranked))
+}
+
+# One colour per max_lag, by rank. Past eight values the first seven keep a
+# colour each and the rest share the muted ink, so no line is left out.
+#' @keywords internal
+#' @noRd
+.mm_lag_colours <- function(lags, col = NULL) {
+  named <- if (length(lags) > 8L) lags[seq_len(7L)] else lags
+  other <- lags[!lags %in% named]
+  if (length(other) > 0L) {
+    cli::cli_inform(c(
+      "The plot has {length(lags)} max_lag values; the {length(named)} with \\
+       the lowest error keep a colour each.",
+      i = "The other {length(other)} are drawn as thin grey lines."
+    ))
+  }
+  pal <- unname(rep_len(if (is.null(col)) .mm_cat() else col, length(named)))
+  list(named = named, other = other, col = pal,
+       of = function(lag) {
+         i <- match(lag, named)
+         if (is.na(i)) .mm_ink()[["muted"]] else pal[[i]]
+       })
+}
+
+# One line per max_lag, each in decay order. The best-ranked line is drawn
+# last so it sits on top.
+#' @keywords internal
+#' @noRd
+.mm_profile_lines <- function(profile, lc) {
+  for (lag in c(lc$other, rev(lc$named))) {
+    s <- profile[profile$max_lag %in% lag, , drop = FALSE]
+    s <- s[order(s$decay), , drop = FALSE]
+    graphics::lines(s$decay, s$metric, col = lc$of(lag),
+                    lwd = if (lag %in% lc$named) 2 else 1)
+  }
+}
+
+#' @keywords internal
+#' @noRd
+.mm_lag_legend <- function(lc) {
+  labs <- paste("max_lag", format(lc$named, trim = TRUE, scientific = FALSE))
+  cols <- lc$col
+  lwd <- rep(2, length(lc$named))
+  if (length(lc$other) > 0L) {
+    labs <- c(labs, "other max_lag")
+    cols <- c(cols, .mm_ink()[["muted"]])
+    lwd <- c(lwd, 1)
+  }
+  .mm_legend("topleft", labs, col = cols, lwd = lwd)
 }
 
 #' @keywords internal
@@ -236,24 +451,36 @@ plot.mm_carryover_joint <- function(x, truth = NULL, ...) {
                  col = ink[["muted"]], xpd = TRUE)
 }
 
+# Mark the minimum (filled) and the one-standard-error choice (open) at their
+# height on the profile line they belong to, matched on both max_lag and
+# decay. Any metric stored on the choice rows is ignored, so the markers
+# always sit on the drawn lines.
 #' @keywords internal
 #' @noRd
-.mm_mark_choice <- function(best, one_se, col, metric_of = NULL) {
+.mm_mark_choice <- function(best, one_se, profile, lc) {
   ink <- .mm_ink()
-  get_m <- function(row) {
-    if (!is.null(row$metric)) return(row$metric)
-    metric_of$metric[match(row$decay, metric_of$decay)]
+  on_line <- function(row) {
+    if (!is.data.frame(row) || nrow(row) != 1L ||
+        !all(c("max_lag", "decay") %in% names(row))) {
+      return(NULL)
+    }
+    hit <- which(profile$max_lag %in% row$max_lag &
+                   abs(profile$decay - row$decay) < 1e-9)
+    if (length(hit) == 0L) return(NULL)
+    list(x = row$decay, y = profile$metric[hit[1L]], lag = row$max_lag)
   }
-  mb <- get_m(best)
-  graphics::points(best$decay, mb, pch = 21, bg = col, col = ink[["surface"]],
-                   cex = 1.6, lwd = 2)
-  graphics::text(best$decay, mb, format(best$decay), pos = 3, cex = 0.75,
-                 col = ink[["secondary"]], offset = 0.7)
-  if (!is.null(one_se) && nrow(one_se) == 1L && one_se$decay != best$decay) {
-    m1 <- get_m(one_se)
-    graphics::points(one_se$decay, m1, pch = 21, bg = ink[["surface"]],
-                     col = col, cex = 1.5, lwd = 2)
-    graphics::text(one_se$decay, m1, format(one_se$decay), pos = 3, cex = 0.75,
+  b <- on_line(best)
+  o <- on_line(one_se)
+  if (!is.null(b)) {
+    graphics::points(b$x, b$y, pch = 21, bg = lc$of(b$lag),
+                     col = ink[["surface"]], cex = 1.6, lwd = 2)
+    graphics::text(b$x, b$y, .mm_num(b$x), pos = 3, cex = 0.75,
+                   col = ink[["secondary"]], offset = 0.7)
+  }
+  if (!is.null(o) && !(!is.null(b) && o$lag == b$lag && o$x == b$x)) {
+    graphics::points(o$x, o$y, pch = 21, bg = ink[["surface"]],
+                     col = lc$of(o$lag), cex = 1.5, lwd = 2)
+    graphics::text(o$x, o$y, .mm_num(o$x), pos = 3, cex = 0.75,
                    col = ink[["secondary"]], offset = 0.7)
   }
 }

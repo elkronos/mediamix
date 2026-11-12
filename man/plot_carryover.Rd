@@ -17,16 +17,23 @@
 vector named by channel), drawn as a muted reference line. Useful on
 simulated data.}
 
-\item{...}{Ignored.}
+\item{...}{Graphical arguments: \code{main}, \code{xlab} and \code{ylab} replace the
+titles, and \code{col} gives the line colours, one per \code{max_lag} in legend
+order. In the joint version \code{main} is the overall title and \code{xlab} and
+\code{ylab} label every panel. Others are ignored.}
 }
 \value{
 \code{x}, invisibly.
 }
 \description{
-The cross-validated error across the decay grid, with the minimum (filled)
-and the one-standard-error choice (open) marked. A flat profile is the
-finding: the data does not pin carryover down, however precise \code{best}
-looks.
+The cross-validated error across the decay grid, one line per \code{max_lag},
+with the minimum (filled) and the one-standard-error choice (open) marked
+on the line they belong to. A flat profile is the finding: the data does
+not pin carryover down, however precise \code{best} looks.
+}
+\details{
+With more than eight \code{max_lag} values, the seven with the lowest error keep
+a colour each and the others are drawn as thin grey lines, with a message.
 }
 \examples{
 set.seed(42)
