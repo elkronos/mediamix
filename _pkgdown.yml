@@ -91,6 +91,7 @@ reference:
 - title: Journey construction
   contents:
   - build_paths
+  - bind_paths
   - '`[.mm_paths`'
   - as_channel_paths
 - title: Attribution

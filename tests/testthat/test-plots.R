@@ -252,10 +252,13 @@ test_that("data frame plot methods name the columns they need", {
   expect_error(plot(rc[, c("spend", "response")]), "marginal",
                class = "rlang_error")
 
+  # A column subset of a bootstrap result drops its class, so build an
+  # edited object that keeps the class but lacks the interval columns.
   b <- block_bootstrap(data.frame(a = 1:20 + 0), function(d) c(m = mean(d$a)),
                        times = 10, seed = 1)
-  expect_error(plot(b[, c("term", "estimate")]), "lower",
-               class = "rlang_error")
+  edited <- as.data.frame(b)[, c("term", "estimate")]
+  class(edited) <- c("mm_bootstrap", "data.frame")
+  expect_error(plot(edited), "lower", class = "rlang_error")
 })
 
 test_that("degenerate contributions and response curves plot or fail clearly", {
