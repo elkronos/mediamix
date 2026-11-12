@@ -99,5 +99,6 @@ round(media_transform(spend_panel, adstock = list(decay = 0.5),
                       by = geo), 4)
 }
 \seealso{
-\code{\link[=adstock_geometric]{adstock_geometric()}}, \code{\link[=saturate]{saturate()}}
+\code{\link[=adstock_geometric]{adstock_geometric()}}, \code{\link[=saturate]{saturate()}}, and \code{\link[=transform_plan]{transform_plan()}} to
+transform every channel of a plan, each with its own parameters
 }

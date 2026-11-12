@@ -48,7 +48,8 @@
 #' This function will do it backwards if you insist, but it will not do it
 #' backwards quietly.
 #'
-#' @seealso [adstock_geometric()], [saturate()]
+#' @seealso [adstock_geometric()], [saturate()], and [transform_plan()] to
+#'   transform every channel of a plan, each with its own parameters
 #'
 #' @examples
 #' spend <- c(0, 500, 800, 300, 0, 0, 1200, 400)
