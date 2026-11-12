@@ -391,7 +391,7 @@ test_that("step_adstock enforces its preconditions at bake time too", {
                  "unevenly spaced")
 })
 
-test_that("all_predictors() selects media without tripping the type check", {
+test_that("step_adstock drops index and by columns from a selection before the type check", {
   skip_if_not_installed("recipes")
   data(mm_weekly, package = "mediamix")
   tr <- mm_weekly[mm_weekly$date < as.Date("2025-07-01"), ]

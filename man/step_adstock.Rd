@@ -15,12 +15,13 @@ step_adstock(
   carry_over = c("auto", "warm", "cold"),
   na_action = c("zero", "error"),
   tol = 0.25,
+  period = NULL,
   role = NA,
   trained = FALSE,
   columns = NULL,
   states = NULL,
   last_index = NULL,
-  period = NULL,
+  history = NULL,
   skip = FALSE,
   id = .mm_rand_id("adstock")
 )
@@ -28,18 +29,20 @@ step_adstock(
 \arguments{
 \item{recipe}{A recipe object.}
 
-\item{...}{One or more selector functions choosing the media columns.}
+\item{...}{One or more selector functions choosing the media columns. See
+"Selecting media columns" below.}
 
 \item{index}{Name of the time column, as a string. Required: adstock is a
 time-ordered filter, so the step needs to know the order and the spacing.
 The column is used for ordering and validation and is not itself
-transformed.}
+transformed. It must be numeric, \code{Date} or \code{POSIXct}, with no missing
+values.}
 
 \item{by}{Optional character vector naming grouping columns. Adstock is
 applied independently within each group, which is what geo-level and panel
 models need. This is an explicit argument because \pkg{recipes} has no
 group awareness and a grouped data frame does not reliably survive into
-\code{bake()}.}
+\code{bake()}. Grouping columns must not contain missing values.}
 
 \item{decay}{Geometric decay coefficient in \verb{[0, 1]}. Tunable.}
 
@@ -49,12 +52,12 @@ form. Tunable.}
 \item{normalise}{Should the kernel sum to 1? See \code{\link[=adstock_geometric]{adstock_geometric()}}.}
 
 \item{carry_over}{How to treat state at the start of new data.
-\code{"auto"} (the default) warm-starts when the new data continues the training
-series and cold-starts otherwise, warning when it does. \code{"warm"} errors
-rather than silently cold-starting on a gap or an unseen group; data that
-overlaps the training period still cold-starts, since re-baking data the
-step has already seen should reproduce the prepared output. \code{"cold"} always
-restarts from zero, which reproduces the behaviour of a lag-based step.}
+\code{"auto"} (the default) continues the filter when the new data continues
+or repeats the training series, and otherwise cold-starts with a warning.
+\code{"warm"} errors instead of cold-starting: on a gap, on a start that does
+not line up with the training periods, on an unseen group and when the
+period is unknown. \code{"cold"} always restarts from zero, which reproduces
+the behaviour of a lag-based step.}
 
 \item{na_action}{What to do about missing media values. \code{"zero"} (the
 default) treats missing media as no media, which is usually right for
@@ -63,17 +66,27 @@ stopping. It is still a substantive assumption -- an \code{NA} becomes a real
 number in the output -- so \code{"error"} is available when you would rather
 find out. Note this differs from \code{\link[=adstock_geometric]{adstock_geometric()}}, whose default is
 \code{"error"}; a step has to survive resampling, and a bare function call
-does not.}
+does not. Infinite values are an error under either setting.}
 
 \item{tol}{Relative tolerance on the step between periods when deciding
-whether two blocks are contiguous. The default of \code{0.25} is loose so that
-calendar months, which vary from 28 to 31 days, are not mistaken for gaps.}
+whether two blocks are contiguous, in \verb{(0, 0.5)}. The default of \code{0.25}
+is loose so that calendar months, which vary from 28 to 31 days, are not
+mistaken for gaps. It stays below one half so that a block one period
+later, two periods later and part-way through a period remain distinct.}
+
+\item{period}{The spacing between consecutive periods: a single positive
+number in the units of \code{index} (days for a \code{Date}, seconds for a
+\code{POSIXct}), or a \code{difftime}. \code{NULL} (the default) infers it within each
+group as the median step of that group's training index, so geographies
+that report on different weekdays each keep their own grid. A group with
+a single training time point takes the median of the other groups'
+periods.}
 
 \item{role}{Not used by this step, since new columns are not created.}
 
 \item{trained}{Has the step been prepared?}
 
-\item{columns, states, last_index, period}{Populated by \code{prep()}; not set
+\item{columns, states, last_index, history}{Populated by \code{prep()}; not set
 directly.}
 
 \item{skip}{Should the step be skipped when baking? Must remain \code{FALSE}:
@@ -93,40 +106,95 @@ of emitting missing values there.
 
 Adstock is a filter with memory. Prepare a recipe on January to June and bake
 it on July to December, and the first rows of July have no history to draw
-on. \code{recipes::step_lag()} answers this by emitting \code{NA}, silently; its
-documented remedy, \code{step_naomit()}, changes the row count, which breaks
-\code{fit_resamples()} outright. That is not an escape hatch, it is a dead end.
+on. A lag built with \code{recipes::step_lag()} leaves \code{NA}, or the filler given
+as its \code{default}, in the first rows of new data at every prep/bake
+boundary, and dropping those rows with \code{step_naomit()} removes the boundary
+weeks from training and evaluation. \code{step_adstock()} carries the filter's
+state across the boundary instead, so no row is dropped or filled in.
 
-The way out is to store \emph{filter state} rather than rows. Geometric adstock is
-an infinite impulse response filter whose entire memory is one number per
-series,
+Geometric adstock is an infinite impulse response filter whose memory is
+one number per series,
 \deqn{a_t = x_t + \theta a_{t-1},}
-so \code{prep()} stores one double per column per group. That is \eqn{O(1)} state.
-It retains no training observations, so it adds nothing meaningful to the
-size of a fitted workflow and carries no raw data with it. Only the truncated
-forms, where \code{max_lag} is finite, need an actual tail of \code{max_lag - 1}
-values.
+so the filter can be continued from where the training data left off.
+\code{prep()} stores, for each group, the training time points and the training
+values of each selected column. \code{bake()} runs the filter over the training
+rows that come before the new data and then over the new rows, so the new
+rows get exactly the values a filter over the whole series gives them. That
+holds whether the new data follows the training data, repeats its last few
+periods or repeats all of it.
+}
+
+\section{Storage}{
+
+The stored values take as much space as the selected columns of the
+training data, plus one time index per group: about 25 KB for the three
+geographies, 156 weeks and five channels of \code{mm_weekly}. They are media
+values only; no outcome is stored. A recipe prepared with
+\code{retain = TRUE}, the default of \code{\link[recipes:prep]{recipes::prep()}}, already keeps the whole
+training set. Selecting only the media columns keeps the stored part small.
 }
 
 \section{What bake() does at the boundary}{
 
-\code{prep()} records, per group, the terminal filter state, the last time index
-seen, and the period inferred from the median spacing of the index. \code{bake()}
-then compares the start of the new data against that record:
+\code{prep()} records, per group, the training time points and values, and the
+period: the median step of that group's index unless \code{period} is given.
+\code{bake()} then takes, for each group, the training time points strictly
+before the first new row and compares the first new row with the last of
+them:
 
 \describe{
-\item{Exactly contiguous}{Warm-start from the stored state. The result is
-identical to filtering the whole series at once, with no prepended rows.}
-\item{Overlaps the training data}{Cold-start. This is what catches
-\code{bake(rec, new_data = training)}, which would otherwise double-count the
-training period's own carryover.}
-\item{A gap}{Cold-start, and warn, naming the gap size and the group.}
+\item{About one period later, or on a training time point}{The new data
+continues or repeats the series. The filter runs over the earlier
+training rows and then the new rows, and the result is identical to
+filtering the whole series at once. A block that starts at or before the
+first training time point has nothing before it and starts from zero,
+as \code{prep()} did, which is why \code{bake(rec, new_data = training)}
+reproduces the prepared output. A block that repeats the last periods
+of training, as \code{rsample::rolling_origin(lag = )} builds, continues from
+the rows before it.}
+\item{More than one period later}{A gap. Cold-start, and warn, naming the
+gap size and the group.}
+\item{Less than one period later}{A misaligned start, as when daily rows
+are baked into a weekly step or the reporting day moves. Cold-start,
+and warn.}
 \item{An unseen group}{Cold-start, and warn.}
 }
 
+Under \code{carry_over = "warm"} each of these warnings is an error instead.
 Row count and row order are preserved in every case. The step sorts by
 \code{index} internally and restores the original order before returning, so
 nothing downstream sees a reordered table.
+}
+
+\section{Selecting media columns}{
+
+Select the media columns only. \code{all_predictors()} also picks up controls
+such as price, seasonality and holiday flags, and adstocking those is
+rarely what a model needs. Name the columns, or keep their names in a
+character vector and use \code{all_of()}:
+
+\if{html}{\out{<div class="sourceCode r">}}\preformatted{channels <- c("tv", "video", "search", "social", "display")
+recipe(revenue ~ ., data = train) |>
+  step_adstock(all_of(channels), index = "date", by = "geo")
+}\if{html}{\out{</div>}}
+
+The step drops \code{index} and \code{by} from the selection before checking column
+types. To give each channel its own step in a loop, write \code{all_of(!!ch)}:
+selectors are evaluated when the recipe is prepared, after the loop has
+finished, so a bare \code{all_of(ch)} selects the last channel in every step.
+}
+
+\section{Tidying}{
+
+\code{tidy()} returns a tibble with one row per selected column per group and
+the columns \code{terms}, \code{group} (\code{NA} without \code{by}), \code{decay}, \code{state},
+\code{state_length} and \code{id}. \code{state} is the filter's state at the end of the
+training data. For \code{max_lag = Inf} it is the raw recursive accumulator
+\eqn{a_t}, before the \code{normalise} scaling by \eqn{1 - \theta}. For a finite
+\code{max_lag} it is the most recent of the \code{max_lag - 1} training values the
+kernel still reaches, and \code{state_length} gives their number. Before
+\code{prep()} the state columns are \code{NA}, and so is \code{decay} when it is marked
+with \code{tune()}.
 }
 
 \section{Resampling and leakage}{
@@ -162,7 +230,7 @@ baked <- bake(rec, new_data = test)
 nrow(baked) == nrow(test)
 sum(is.na(baked$tv))
 
-# The stored state is one number per column per geo
+# The filter state at the end of training, per column and geo
 tidy(rec, number = 1)
 \dontshow{\}) # examplesIf}
 }
