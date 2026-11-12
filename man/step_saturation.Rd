@@ -11,10 +11,12 @@ step_saturation(
   half_max = 0.5,
   shape = 1,
   ref = c("max", "q99", "q95", "mean"),
+  by = NULL,
   role = NA,
   trained = FALSE,
   columns = NULL,
   refs = NULL,
+  group_refs = NULL,
   skip = FALSE,
   id = .mm_rand_id("saturation")
 )
@@ -22,35 +24,45 @@ step_saturation(
 \arguments{
 \item{recipe}{A recipe object.}
 
-\item{...}{One or more selector functions choosing the media columns.}
+\item{...}{One or more selector functions choosing the media columns. As
+with \code{\link[=step_adstock]{step_adstock()}}, select media only; \code{all_predictors()} also picks
+up the controls.}
 
 \item{type}{Which curve: \code{"hill"} (the default), \code{"exponential"},
 \code{"michaelis_menten"} or \code{"power"}.}
 
 \item{half_max}{Half-saturation point, expressed as a \emph{fraction} of the
 column's reference level, in \verb{(0, 2]}. \code{0.5} means the curve reaches half
-its ceiling at half the reference spend. Ignored when \code{type = "power"},
-which has no half-saturation point. Tunable, over \verb{[0.05, 1]} by default.}
+its ceiling at half the reference level. Ignored when \code{type = "power"},
+which has no half-saturation point, and it cannot be tuned there.
+Otherwise tunable, over \verb{[0.05, 1]} by default.}
 
 \item{shape}{Means different things to different curves, and is validated
 accordingly. For \code{"hill"} it is the Hill exponent, any positive number:
 \code{1} gives a concave curve and values above \code{1} an S-shape with a
 threshold. For \code{"power"} it is the exponent itself and must lie in
 \verb{(0, 1]}, since a power above 1 is not saturating at all. Ignored by
-\code{"exponential"} and \code{"michaelis_menten"}. Tunable; the advertised range
-narrows to \verb{(0.1, 1]} when \code{type = "power"}, so a joint search cannot
-propose a value the curve would reject.}
+\code{"exponential"} and \code{"michaelis_menten"}, and it cannot be tuned there.
+Tunable for \code{"hill"} and \code{"power"}; the advertised range narrows to
+\verb{[0.1, 1]} when \code{type = "power"}, so a joint search cannot propose a value
+the curve would reject.}
 
 \item{ref}{How to set each column's reference level from the training data:
 \code{"max"} (the default), \code{"q99"}, \code{"q95"} or \code{"mean"}. Using a high quantile
 rather than the maximum makes the reference robust to a single outlying
-week.}
+week, but a channel that ran in only a few training periods can have a
+95th percentile of zero.}
+
+\item{by}{Optional character vector naming grouping columns. When given,
+each group gets its own reference level, so a small geography is placed
+on the curve by its own scale rather than by the largest one's. \code{NULL}
+(the default) pools all rows.}
 
 \item{role}{Not used by this step, since new columns are not created.}
 
 \item{trained}{Has the step been prepared?}
 
-\item{columns, refs}{Populated by \code{prep()}; not set directly.}
+\item{columns, refs, group_refs}{Populated by \code{prep()}; not set directly.}
 
 \item{skip}{Should the step be skipped when baking? Must remain \code{FALSE}.}
 
@@ -71,7 +83,7 @@ treated as zero spend, and negative values are clamped to zero with a
 warning. The commonest way to produce negatives is a \code{step_normalize()}
 earlier in the recipe, which centres each column on its mean and therefore
 sends about half of every column below zero. Saturate first, or normalise
-something other than the media.
+something other than the media. Infinite values are an error.
 }
 
 \section{Why the half-saturation point is relative}{
@@ -82,12 +94,15 @@ channel, which makes joint tuning across channels either meaningless or a
 separate parameter per column.
 
 Expressing it as a fraction of each column's own reference level fixes this:
-\code{half_max = 0.4} means "half the ceiling is reached at 40\% of this channel's
-peak spend" and reads the same way for every channel, so a single tunable
-parameter covers them all. \code{prep()} stores one number per column, learned
-from the training data only, and \code{bake()} applies it unchanged. A test-set
-spend above the training reference is not clipped: it simply lands further
-up the curve.
+\code{half_max = 0.4} means "half the ceiling is reached at 40\% of this column's
+reference level" and reads the same way for every channel, so a single
+tunable parameter covers them all. With the default \code{ref = "max"} the
+reference is the column's training maximum. After \code{\link[=step_adstock]{step_adstock()}} the
+column holds adstocked values, so that is the peak adstocked value, not the
+peak weekly spend. \code{prep()} stores one number per column, or per column and
+group with \code{by}, learned from the training data only, and \code{bake()} applies
+it unchanged. A test-set value above the training reference is not clipped:
+it lands further up the curve.
 
 Under the hood, \code{half_max} is converted to whichever native parameter the
 chosen curve uses -- the Hill and Michaelis--Menten half-points directly, and
@@ -95,11 +110,34 @@ chosen curve uses -- the Hill and Michaelis--Menten half-points directly, and
 same thing across all three bounded curves.
 }
 
+\section{Panel data}{
+
+Without \code{by}, the reference level is computed over every row, so on a panel
+it is set by the largest geography: a small one sits near the bottom of the
+curve and never saturates. With \code{by}, each group's reference comes from its
+own training rows. A group not seen during \code{prep()} uses the pooled
+reference, the one computed over every training row, with a warning. So
+does a group whose own training values give no positive reference, such as
+one where a channel never ran; \code{prep()} warns about those.
+}
+
 \section{Order}{
 
-Put this step \emph{after} \code{step_adstock()}. Saturating first caps each period's
-spend in isolation and then lets carryover accumulate the capped values past
-the ceiling. See \code{\link[=media_transform]{media_transform()}}.
+Put this step after \code{step_adstock()}, so that the curve acts on accumulated
+exposure rather than on each period's spend alone. With the default
+normalised kernel the result stays below the ceiling in either order; with
+\code{normalise = FALSE}, saturating first would also let carryover accumulate
+the capped values past the ceiling. See \code{\link[=media_transform]{media_transform()}}.
+}
+
+\section{Tidying}{
+
+\code{tidy()} returns a tibble with one row per selected column, or per column
+and group with \code{by}, and the columns \code{terms}, \code{group} (only with \code{by}),
+\code{type}, \code{half_max}, \code{shape}, \code{reference} and \code{id}. \code{half_max} and \code{shape}
+are \code{NA} where the curve ignores them, and before \code{prep()} when they are
+marked with \code{tune()}. \code{reference} is the learned reference level, \code{NA}
+before \code{prep()}.
 }
 
 \examples{
@@ -115,6 +153,13 @@ rec <- recipe(revenue ~ ., data = mm_weekly) |>
 out <- bake(rec, new_data = NULL)
 range(out$tv)
 tidy(rec, number = 2)
+
+# One reference level per geography
+rec_geo <- recipe(revenue ~ ., data = mm_weekly) |>
+  step_adstock(tv, index = "date", by = "geo", decay = 0.7) |>
+  step_saturation(tv, half_max = 0.4, shape = 1.5, by = "geo") |>
+  prep()
+tidy(rec_geo, number = 2)
 \dontshow{\}) # examplesIf}
 }
 \seealso{

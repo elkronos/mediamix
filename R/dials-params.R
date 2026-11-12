@@ -34,10 +34,12 @@
 #'
 #' `saturation_shape()` spans `[0.5, 3]`. Values above 1 give an S-shaped
 #' response with a threshold below which media barely registers; below 1 the
-#' curve bends harder than a plain hyperbola. Note that
-#' [step_saturation()] narrows this range to `(0.1, 1]` when
-#' `type = "power"`, where `shape` is the exponent itself and a value above 1
-#' would not be saturating at all.
+#' curve bends harder than a plain hyperbola. [step_saturation()] narrows
+#' this range to `[0.1, 1]` when `type = "power"`, where `shape` is the
+#' exponent itself and a value above 1 would not be saturating at all. It
+#' offers `saturation_shape()` only for the Hill and power curves and
+#' `saturation_half_max()` only for the three curves with a half-saturation
+#' point, since the others ignore them.
 #'
 #' @seealso [step_adstock()], [step_saturation()]
 #'

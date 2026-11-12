@@ -48,7 +48,20 @@ test_that("an all-zero column errors at prep time", {
   skip_if_not_installed("recipes")
   d <- data.frame(y = 1:5, x = rep(0, 5))
   rec <- recipes::recipe(y ~ ., data = d) |> step_saturation(x)
-  expect_error(recipes::prep(rec), "non-positive reference")
+  expect_error(recipes::prep(rec), "no positive values")
+})
+
+test_that("a zero quantile on a late-launched channel is not reported as an all-zero column", {
+  skip_if_not_installed("recipes")
+  # the channel runs only in the last 7 of 156 weeks
+  d <- data.frame(y = 1, x = c(rep(0, 149), rep(100, 7)))
+  rec <- recipes::recipe(y ~ ., data = d) |> step_saturation(x, ref = "q95")
+  err <- tryCatch(recipes::prep(rec), error = function(e) conditionMessage(e))
+  expect_match(err, "\"q95\" reference level is not positive")
+  expect_match(err, "launched late")
+  expect_no_match(err, "zero throughout")
+  expect_no_error(recipes::prep(recipes::recipe(y ~ ., data = d) |>
+                                  step_saturation(x, ref = "max")))
 })
 
 test_that("the reference level is learned from training data only and a higher test value is not clipped", {
@@ -140,4 +153,171 @@ test_that("step_adstock followed by step_saturation composes without error and s
   out <- recipes::bake(rec, new_data = NULL)
   expect_identical(nrow(out), nrow(north))
   expect_true(all(out$tv >= 0 & out$tv < 1))
+})
+
+# ---- reference levels per group --------------------------------------------------
+
+# A panel whose geographies differ only in scale.
+scaled_panel <- function() {
+  set.seed(11)
+  x <- runif(30, 50, 100)
+  data.frame(y = 1, geo = rep(c("north", "south", "central"), each = 30),
+             tv = c(x, x / 20, x * 5))
+}
+
+test_that("by gives each group its own reference level", {
+  skip_if_not_installed("recipes")
+  d <- scaled_panel()
+  rec <- recipes::recipe(y ~ ., data = d) |>
+    step_saturation(tv, half_max = 0.5, by = "geo") |>
+    recipes::prep()
+  out <- recipes::juice(rec)
+  # proportional geographies land on the same points of the curve
+  expect_equal(out$tv[d$geo == "south"], out$tv[d$geo == "north"])
+  expect_equal(out$tv[d$geo == "central"], out$tv[d$geo == "north"])
+
+  td <- generics::tidy(rec, number = 1)
+  expect_s3_class(td, "tbl_df")
+  expect_identical(td$group, c("north", "south", "central"))
+  expect_equal(td$reference, tapply(d$tv, d$geo, max)[td$group],
+               ignore_attr = TRUE)
+
+  # pooled, the small geography never leaves the bottom of the curve
+  pooled <- recipes::recipe(y ~ ., data = d) |>
+    step_saturation(tv, half_max = 0.5) |>
+    recipes::prep() |>
+    recipes::juice()
+  expect_lt(max(pooled$tv[d$geo == "south"]), 0.05)
+})
+
+test_that("without by the reference is pooled exactly as before", {
+  skip_if_not_installed("recipes")
+  d <- scaled_panel()
+  rec <- recipes::recipe(y ~ ., data = d) |>
+    step_saturation(tv, half_max = 0.4, shape = 1.5) |>
+    recipes::prep()
+  expect_equal(recipes::juice(rec)$tv,
+               saturate_hill(d$tv, half_max = 0.4 * max(d$tv), shape = 1.5))
+  expect_identical(names(generics::tidy(rec, number = 1)),
+                   c("terms", "type", "half_max", "shape", "reference", "id"))
+})
+
+test_that("a group unseen at prep uses the pooled reference, with a warning", {
+  skip_if_not_installed("recipes")
+  d <- scaled_panel()
+  rec <- recipes::recipe(y ~ ., data = d) |>
+    step_saturation(tv, half_max = 0.5, by = "geo") |>
+    recipes::prep()
+  new <- data.frame(y = 1, geo = c("north", "west"), tv = c(60, 60))
+  expect_warning(baked <- recipes::bake(rec, new_data = new),
+                 "not seen during")
+  expect_equal(baked$tv[1], saturate_hill(60, half_max = 0.5 * max(d$tv[1:30]),
+                                          shape = 1))
+  expect_equal(baked$tv[2], saturate_hill(60, half_max = 0.5 * max(d$tv),
+                                          shape = 1))
+})
+
+test_that("a group with no spend on a channel falls back to the pooled reference", {
+  skip_if_not_installed("recipes")
+  d <- scaled_panel()
+  d$tv[d$geo == "south"] <- 0
+  expect_warning(
+    rec <- recipes::recipe(y ~ ., data = d) |>
+      step_saturation(tv, half_max = 0.5, by = "geo") |>
+      recipes::prep(),
+    "pooled reference level"
+  )
+  td <- generics::tidy(rec, number = 1)
+  expect_equal(td$reference[td$group == "south"], max(d$tv))
+})
+
+test_that("missing group labels abort", {
+  skip_if_not_installed("recipes")
+  d <- scaled_panel()
+  d$geo[3] <- NA
+  expect_error(
+    recipes::prep(recipes::recipe(y ~ ., data = d) |>
+                    step_saturation(tv, by = "geo")),
+    "missing value"
+  )
+})
+
+# ---- only the parameters a curve uses are tunable --------------------------------
+
+test_that("tunable() lists only the parameters the chosen curve uses", {
+  skip_if_not_installed("recipes")
+  d <- data.frame(y = 1:10, x = runif(10))
+  rec <- recipes::recipe(y ~ ., data = d)
+  uses <- list(hill = c("half_max", "shape"), exponential = "half_max",
+               michaelis_menten = "half_max", power = "shape")
+  for (ty in names(uses)) {
+    shape <- if (ty == "power") 0.5 else 1
+    tb <- generics::tunable(step_saturation(rec, x, type = ty,
+                                            shape = shape)$steps[[1]])
+    expect_identical(tb$name, uses[[ty]], info = ty)
+  }
+})
+
+test_that("tune() on an argument the curve ignores is rejected", {
+  skip_if_not_installed("recipes")
+  skip_if_not_installed("hardhat")
+  d <- data.frame(y = 1:10, x = runif(10))
+  rec <- recipes::recipe(y ~ ., data = d)
+  tune <- hardhat::tune
+  expect_error(step_saturation(rec, x, type = "exponential", shape = tune()),
+               "cannot be tuned")
+  expect_error(step_saturation(rec, x, type = "michaelis_menten",
+                               shape = tune()),
+               "cannot be tuned")
+  expect_error(step_saturation(rec, x, type = "power", half_max = tune()),
+               "cannot be tuned")
+  expect_no_error(step_saturation(rec, x, type = "power", shape = tune()))
+  expect_no_error(step_saturation(rec, x, type = "exponential",
+                                  half_max = tune()))
+})
+
+test_that("tidy() works on a step with tune() placeholders and reports ignored parameters as NA", {
+  skip_if_not_installed("recipes")
+  skip_if_not_installed("hardhat")
+  d <- data.frame(y = 1:10, x = runif(10))
+  rec <- recipes::recipe(y ~ ., data = d) |>
+    step_saturation(x, half_max = hardhat::tune(), shape = hardhat::tune())
+  td <- generics::tidy(rec, number = 1)
+  expect_true(is.na(td$half_max))
+  expect_true(is.na(td$shape))
+
+  expo <- recipes::recipe(y ~ ., data = d) |>
+    step_saturation(x, type = "exponential", half_max = 0.3, shape = 2) |>
+    recipes::prep()
+  td_expo <- generics::tidy(expo, number = 1)
+  expect_equal(td_expo$half_max, 0.3)
+  expect_true(is.na(td_expo$shape))
+})
+
+# ---- messages and edge cases -------------------------------------------------------
+
+test_that("infinite media values abort at prep and at bake", {
+  skip_if_not_installed("recipes")
+  d <- data.frame(y = 1:4, x = c(100, 50, 25, 10))
+  rec <- recipes::recipe(y ~ ., data = d) |>
+    step_saturation(x) |>
+    recipes::prep()
+  expect_error(recipes::bake(rec, new_data = data.frame(y = 1, x = Inf)),
+               "infinite values: \"x\"")
+  d$x[2] <- Inf
+  expect_error(recipes::prep(recipes::recipe(y ~ ., data = d) |>
+                               step_saturation(x)),
+               "infinite values")
+})
+
+test_that("an empty selection preps, bakes nothing and tidies to zero rows", {
+  skip_if_not_installed("recipes")
+  d <- data.frame(y = 1:4, x = c(100, 50, 25, 10))
+  rec <- recipes::recipe(y ~ ., data = d) |>
+    step_saturation(recipes::all_nominal_predictors()) |>
+    recipes::prep()
+  expect_equal(recipes::juice(rec)$x, d$x)
+  td <- generics::tidy(rec, number = 1)
+  expect_s3_class(td, "tbl_df")
+  expect_identical(nrow(td), 0L)
 })

@@ -54,10 +54,12 @@ its range is unitless and comparable across channels. See
 
 \code{saturation_shape()} spans \verb{[0.5, 3]}. Values above 1 give an S-shaped
 response with a threshold below which media barely registers; below 1 the
-curve bends harder than a plain hyperbola. Note that
-\code{\link[=step_saturation]{step_saturation()}} narrows this range to \verb{(0.1, 1]} when
-\code{type = "power"}, where \code{shape} is the exponent itself and a value above 1
-would not be saturating at all.
+curve bends harder than a plain hyperbola. \code{\link[=step_saturation]{step_saturation()}} narrows
+this range to \verb{[0.1, 1]} when \code{type = "power"}, where \code{shape} is the
+exponent itself and a value above 1 would not be saturating at all. It
+offers \code{saturation_shape()} only for the Hill and power curves and
+\code{saturation_half_max()} only for the three curves with a half-saturation
+point, since the others ignore them.
 }
 \examples{
 \dontshow{if (requireNamespace("dials", quietly = TRUE)) (if (getRversion() >= "3.4") withAutoprint else force)(\{ # examplesIf}
