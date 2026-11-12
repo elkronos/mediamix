@@ -626,3 +626,159 @@ test_that("panel arguments are validated", {
                               index = as.character(d$week), decays = 0.5),
                class = "rlang_error", regexp = "index")
 })
+
+# ---- saved predictions ---------------------------------------------------------------
+
+test_that("save_pred keeps every candidate's forecasts, and they give the metric", {
+  set.seed(42)
+  n <- 100
+  sp <- pmax(0, rnorm(n, 500, 250))
+  kpi <- 200 + 0.5 * adstock_geometric(sp, decay = 0.6) + rnorm(n, sd = 8)
+  decays <- seq(0.2, 0.8, by = 0.2)
+  plain <- tune_carryover(sp, kpi, max_lags = c(4, Inf), decays = decays)
+  kept <- tune_carryover(sp, kpi, max_lags = c(4, Inf), decays = decays,
+                         save_pred = TRUE)
+  expect_null(plain$predictions)
+  expect_false("predictions" %in% names(plain))
+  expect_identical(unclass(kept)[names(plain)], unclass(plain))
+
+  p <- kept$predictions
+  expect_identical(names(p), c("split", "row", "max_lag", "decay",
+                               "observed", "predicted"))
+  expect_equal(nrow(p), nrow(kept$results) * kept$n_splits)
+  expect_identical(p$row, p$split + 50L)
+  expect_equal(p$observed, kpi[p$row])
+  # Candidates come in the order of `results`, best first.
+  first <- unique(p[c("max_lag", "decay")])
+  expect_equal(first$decay, kept$results$decay)
+  expect_equal(first$max_lag, kept$results$max_lag)
+  for (i in seq_len(nrow(kept$results))) {
+    rows <- p$max_lag == kept$results$max_lag[i] &
+      p$decay == kept$results$decay[i]
+    expect_equal(rmse(p$observed[rows], p$predicted[rows]),
+                 kept$results$metric[i])
+  }
+  # One forecast checked by hand: the best candidate, split 10.
+  z <- adstock_geometric(sp, kept$best$decay, max_lag = kept$best$max_lag)
+  m <- fit_ols(z[1:59], kpi[1:59])
+  hit <- p$split == 10L & p$decay == kept$best$decay &
+    p$max_lag == kept$best$max_lag
+  expect_equal(p$predicted[hit], predict(m, z[60]))
+
+  # A result with predictions prints, converts and plots.
+  printed <- paste(capture.output(print(kept), type = "message"),
+                   collapse = " ")
+  expect_match(printed, "400 out-of-sample predictions kept")
+  expect_identical(as.data.frame(kept), as.data.frame(plain))
+  skip_if_not_installed("generics")
+  expect_identical(generics::tidy(kept), generics::tidy(plain))
+  f <- tempfile(fileext = ".pdf")
+  grDevices::pdf(f)
+  drawn <- plot(kept)
+  grDevices::dev.off()
+  unlink(f)
+  expect_identical(drawn, kept)
+})
+
+test_that("saved predictions follow the metric with aggregate = 'mean' and longer assessments", {
+  set.seed(43)
+  n <- 90
+  sp <- pmax(0, rnorm(n, 500, 250))
+  kpi <- 100 + 0.4 * adstock_geometric(sp, decay = 0.5) + rnorm(n, sd = 6)
+  decays <- seq(0.1, 0.9, by = 0.2)
+  kept <- tune_carryover(sp, kpi, decays = decays, assess = 3, skip = 2,
+                         aggregate = "mean", metric_fn = mae, save_pred = TRUE)
+  p <- kept$predictions
+  expect_equal(nrow(p), 5 * 3 * kept$n_splits)
+  for (i in seq_along(decays)) {
+    rows <- p$decay == kept$results$decay[i]
+    per_split <- tapply(seq_len(sum(rows)), p$split[rows], function(j) {
+      mae(p$observed[rows][j], p$predicted[rows][j])
+    })
+    expect_equal(mean(per_split), kept$results$metric[i])
+  }
+  # The fast path and a general fitter keep the same predictions.
+  wrapped <- tune_carryover(sp, kpi, fit_fn = function(x, y) fit_ols(x, y),
+                            decays = decays, assess = 3, skip = 2,
+                            aggregate = "mean", metric_fn = mae,
+                            save_pred = TRUE)
+  expect_equal(wrapped$predictions, p)
+})
+
+test_that("saved predictions cover the splits every candidate completed", {
+  set.seed(8)
+  n <- 100
+  spend <- pmax(0, rnorm(n, 500, 200))
+  kpi <- 50 + 0.4 * adstock_geometric(spend, 0.4) + rnorm(n, sd = 5)
+  flaky <- function(x, y) {
+    if (length(y) > 80 && abs(x[1] - 0.6 * spend[1]) < 1e-9) {
+      stop("window too long")
+    }
+    fit_ols(x, y)
+  }
+  tuned <- suppressWarnings(tune_carryover(
+    spend, kpi, fit_fn = flaky, predict_fn = stats::predict,
+    decays = c(0.2, 0.3, 0.4, 0.5, 0.6), save_pred = TRUE
+  ))
+  p <- tuned$predictions
+  expect_setequal(unique(p$split), 1:31)
+  expect_equal(nrow(p), 5 * 31)
+  expect_false(anyNA(p$predicted))
+})
+
+test_that("panel predictions carry index and group, in the caller's row numbers", {
+  d <- sim_panel(4)
+  d$date <- as.Date("2023-01-02") + 7 * (d$week - 1)
+  run <- function(d) {
+    tune_carryover(d$x, d$y, by = d$geo, index = d$date,
+                   decays = c(0.4, 0.6, 0.8),
+                   controls = data.frame(geo = d$geo), save_pred = TRUE)
+  }
+  tuned <- run(d)
+  p <- tuned$predictions
+  expect_identical(names(p), c("split", "row", "index", "group", "max_lag",
+                               "decay", "observed", "predicted"))
+  expect_s3_class(p$index, "Date")
+  expect_identical(p$index, d$date[p$row])
+  expect_identical(p$group, d$geo[p$row])
+  expect_equal(p$observed, d$y[p$row])
+  # Each split assesses one week of every series.
+  expect_true(all(tapply(p$group, list(p$split, p$decay), length) == 3L))
+
+  set.seed(10)
+  o <- sample(nrow(d))
+  shuffled <- run(d[o, ])$predictions
+  shuffled$row <- o[shuffled$row]
+  key <- function(z) order(z$decay, z$split, z$row)
+  expect_equal(shuffled[key(shuffled), c("row", "predicted")],
+               p[key(p), c("row", "predicted")], ignore_attr = TRUE)
+
+  # A data frame of keys shows each series' labels joined.
+  keyed <- tune_carryover(d$x, d$y, by = data.frame(region = "r", geo = d$geo),
+                          index = d$week, decays = c(0.4, 0.6),
+                          save_pred = TRUE)$predictions
+  expect_true(all(keyed$group %in% c("r / a", "r / b", "r / c")))
+})
+
+test_that("save_pred is validated", {
+  set.seed(1)
+  x <- pmax(0, rnorm(40, 500, 200))
+  y <- 10 + 0.4 * adstock_geometric(x, 0.5) + rnorm(40)
+  for (bad in list(NA, "yes", c(TRUE, FALSE), 1)) {
+    expect_error(tune_carryover(x, y, decays = 0.5, save_pred = bad),
+                 class = "rlang_error", regexp = "save_pred")
+  }
+})
+
+test_that("cores = 2 keeps the same predictions", {
+  skip_on_os("windows")
+  skip_on_cran()
+  skip_if_not(isTRUE(parallel::detectCores(logical = FALSE) >= 2))
+  set.seed(1)
+  x <- pmax(0, rnorm(120, 500, 200))
+  y <- 100 + 0.5 * adstock_geometric(x, 0.3) + rnorm(120, sd = 5)
+  serial <- tune_carryover(x, y, decays = c(0.2, 0.3, 0.5), save_pred = TRUE)
+  forked <- tune_carryover(x, y, decays = c(0.2, 0.3, 0.5), save_pred = TRUE,
+                           cores = 2)
+  expect_identical(forked$predictions, serial$predictions)
+})

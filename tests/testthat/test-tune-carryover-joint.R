@@ -264,3 +264,113 @@ test_that("the joint tuner adstocks each series on its own", {
   shuffled <- run(d[sample(nrow(d)), ])
   expect_equal(shuffled$profiles, j$profiles)
 })
+
+# ---- saved predictions -----------------------------------------------------------
+
+test_that("save_pred keeps the forecasts of best and of the one-SE set", {
+  s <- sim_two(4, noise = 80)
+  decays <- seq(0.1, 0.9, by = 0.1)
+  plain <- tune_carryover_joint(s$media, s$y, controls = s$controls,
+                                decays = decays)
+  j <- tune_carryover_joint(s$media, s$y, controls = s$controls,
+                            decays = decays, save_pred = TRUE)
+  expect_null(plain$predictions)
+  expect_identical(unclass(j)[names(plain)], unclass(plain))
+
+  p <- j$predictions
+  expect_identical(names(p), c("selection", "split", "row", "max_lag_a",
+                               "decay_a", "max_lag_b", "decay_b", "observed",
+                               "predicted"))
+  expect_identical(unique(p$selection), c("best", "best_1se"))
+  expect_equal(nrow(p), 2 * j$n_splits)
+  best <- p[p$selection == "best", ]
+  one_se <- p[p$selection == "best_1se", ]
+  expect_equal(unique(best$decay_a), j$best$decay[1])
+  expect_equal(unique(best$decay_b), j$best$decay[2])
+  expect_equal(unique(one_se$decay_a), j$best_1se$decay[1])
+  expect_equal(unique(one_se$decay_b), j$best_1se$decay[2])
+  expect_identical(best$row, best$split + 75L)
+  expect_equal(best$observed, s$y[best$row])
+  expect_equal(rmse(best$observed, best$predicted), j$metric)
+  expect_equal(rmse(one_se$observed, one_se$predicted), j$best_1se_metric)
+
+  # One forecast checked by hand: the best set, last split.
+  X <- cbind(as.data.frame(Map(function(x, d) adstock_geometric(x, d),
+                               s$media, j$best$decay)), s$controls)
+  fit <- stats::lm(yy ~ ., data = cbind(yy = s$y[1:149], X[1:149, ]))
+  expect_equal(best$predicted[best$split == 75L],
+               unname(stats::predict(fit, X[150, , drop = FALSE])))
+
+  table <- capture.output(msgs <- capture.output(print(j), type = "message"))
+  expect_match(paste(msgs, collapse = " "), "150 out-of-sample predictions kept")
+  expect_identical(as.data.frame(j), as.data.frame(plain))
+  f <- tempfile(fileext = ".pdf")
+  grDevices::pdf(f)
+  drawn <- plot(j)
+  grDevices::dev.off()
+  unlink(f)
+  expect_identical(drawn, j)
+  skip_if_not_installed("generics")
+  expect_identical(generics::tidy(j), generics::tidy(plain))
+})
+
+test_that("when the one-SE set is best, its rows repeat those of best", {
+  s <- sim_two(3)
+  j <- tune_carryover_joint(s$media, s$y, controls = s$controls,
+                            decays = c(0.2, 0.7), skip = 9, save_pred = TRUE)
+  expect_identical(j$best_1se, j$best)
+  p <- j$predictions
+  best <- p[p$selection == "best", setdiff(names(p), "selection")]
+  one_se <- p[p$selection == "best_1se", setdiff(names(p), "selection")]
+  expect_equal(one_se, best, ignore_attr = TRUE)
+  expect_equal(rmse(best$observed, best$predicted), j$metric)
+})
+
+test_that("joint panel predictions carry index and group", {
+  set.seed(7)
+  n <- 104
+  d <- do.call(rbind, lapply(c("east", "west"), function(g) {
+    a <- pmax(0, rnorm(n, 500, 250))
+    b <- pmax(0, rnorm(n, 300, 150))
+    data.frame(geo = g, week = seq_len(n), a = a, b = b,
+               y = 100 + 0.6 * adstock_geometric(a, 0.7) +
+                 0.9 * adstock_geometric(b, 0.2) + rnorm(n, sd = 10))
+  }))
+  d <- d[sample(nrow(d)), ]
+  j <- tune_carryover_joint(d[c("a", "b")], d$y, by = d$geo, index = d$week,
+                            controls = data.frame(geo = d$geo),
+                            decays = seq(0.1, 0.9, by = 0.1),
+                            save_pred = TRUE)
+  p <- j$predictions
+  expect_identical(names(p)[1:5], c("selection", "split", "row", "index",
+                                    "group"))
+  expect_identical(p$index, d$week[p$row])
+  expect_identical(p$group, d$geo[p$row])
+  expect_equal(p$observed, d$y[p$row])
+})
+
+test_that("the joint save_pred is validated and keeps channel names as given", {
+  s <- sim_two()
+  expect_error(tune_carryover_joint(s$media, s$y, decays = 0.5,
+                                    save_pred = "yes"),
+               class = "rlang_error", regexp = "save_pred")
+  spaced <- stats::setNames(s$media, c("TV Spend", "search"))
+  j <- tune_carryover_joint(spaced, s$y, controls = s$controls,
+                            decays = c(0.2, 0.7), skip = 9, save_pred = TRUE)
+  expect_true(all(c("decay_TV Spend", "max_lag_TV Spend") %in%
+                    names(j$predictions)))
+})
+
+test_that("cores = 2 keeps the same joint predictions", {
+  skip_on_os("windows")
+  skip_on_cran()
+  skip_if_not(isTRUE(parallel::detectCores(logical = FALSE) >= 2))
+  s <- sim_two(3)
+  a <- tune_carryover_joint(s$media, s$y, controls = s$controls,
+                            decays = seq(0.1, 0.9, by = 0.2), skip = 4,
+                            save_pred = TRUE)
+  b <- tune_carryover_joint(s$media, s$y, controls = s$controls,
+                            decays = seq(0.1, 0.9, by = 0.2), skip = 4,
+                            save_pred = TRUE, cores = 2)
+  expect_identical(b$predictions, a$predictions)
+})

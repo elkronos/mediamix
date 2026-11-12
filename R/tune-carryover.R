@@ -77,6 +77,11 @@
 #'   most of their training data, so their errors are usually correlated and
 #'   independence understates the standard error; a block of a few splits
 #'   allows for that. `best` does not depend on it.
+#' @param save_pred Keep the out-of-sample predictions? `FALSE` by default, as
+#'   in \pkg{tune}'s `control_resamples()`. With `TRUE` the result gains
+#'   `predictions`: every candidate's forecasts for the assessed rows of the
+#'   splits it was scored on. The fits produce them in any case, so keeping
+#'   them costs only the table, one row per candidate per assessed row.
 #'
 #' @return An object of class `mm_carryover`: a list with elements
 #'   \describe{
@@ -102,6 +107,15 @@
 #'     \item{`n_series`}{Number of series, more than 1 only with `by`.}
 #'     \item{`normalise`}{Whether the adstock kernel was normalised, carried
 #'       through so the selected decay can be reapplied on the same footing.}
+#'     \item{`predictions`}{Only with `save_pred = TRUE`: one row per
+#'       candidate per assessed row of the `n_ok` splits `metric` was computed
+#'       on, with columns `split` (the split's position among the
+#'       `n_splits` formed), `row` (the row of `x` and `y`), `index` and
+#'       `group` (with `index` and `by`), `max_lag`, `decay`, `observed` and
+#'       `predicted`. Candidates come in the order of `results`, and a
+#'       candidate that completed no split has no rows. With
+#'       `aggregate = "pooled"`, `metric_fn(observed, predicted)` over one
+#'       candidate's rows gives its `metric`.}
 #'   }
 #'   `as.data.frame()` and `tidy()` return `results` with two logical columns,
 #'   `best` and `best_1se`, marking the two selections.
@@ -226,6 +240,13 @@
 #' # The shortest carryover the data cannot distinguish from the best
 #' tuned$best_1se$decay
 #'
+#' # Keep the out-of-sample forecasts, for example to look at the best one
+#' kept <- tune_carryover(spend, kpi, max_lags = Inf,
+#'                        decays = seq(0.1, 0.9, by = 0.1), save_pred = TRUE)
+#' best <- kept$predictions[kept$predictions$decay == kept$best$decay, ]
+#' head(best)
+#' c(rmse(best$observed, best$predicted), kept$best$metric)
+#'
 #' # Tune against a model with controls rather than the bare default. Passed
 #' # as `controls`, the trend and seasonality are fitted inside every training
 #' # window, so no split learns from KPI values that come after it.
@@ -262,7 +283,8 @@ tune_carryover <- function(x, y,
                            warm_start = FALSE,
                            by = NULL,
                            index = NULL,
-                           se_block = 1L) {
+                           se_block = 1L,
+                           save_pred = FALSE) {
   scheme <- match.arg(scheme)
   aggregate <- match.arg(aggregate)
   metric_name <- .mm_fn_label(substitute(metric_fn))
@@ -278,6 +300,7 @@ tune_carryover <- function(x, y,
   if (!is.function(metric_fn)) cli::cli_abort("{.arg metric_fn} must be a function.")
   .mm_check_flag(normalise, "normalise")
   .mm_check_flag(warm_start, "warm_start")
+  .mm_check_flag(save_pred, "save_pred")
   n <- length(x)
   if (all(x == x[1L])) {
     cli::cli_abort(c(
@@ -358,7 +381,7 @@ tune_carryover <- function(x, y,
 
   .mm_warn_grid_edge(list(.mm_edge_notes(best$max_lag, best$decay, grid)))
 
-  structure(
+  out <- structure(
     list(best = best, best_1se = best_1se, results = results,
          metric = best$metric, metric_name = metric_name,
          aggregate = aggregate, scheme = scheme,
@@ -366,6 +389,14 @@ tune_carryover <- function(x, y,
          n_series = layout$n_series, normalise = normalise),
     class = "mm_carryover"
   )
+  if (save_pred) {
+    kept <- ord[sc$live[ord]]
+    out$predictions <- .mm_cv_predictions(
+      sets$folds[kept], splits, which(sc$common), y_cv, layout, index,
+      grid[kept, c("max_lag", "decay"), drop = FALSE]
+    )
+  }
+  out
 }
 
 #' @export
@@ -397,6 +428,7 @@ print.mm_carryover <- function(x, ...) {
                    {.field max_lag} = {o_lag}. The data cannot separate the \\
                    two.")
   }
+  .mm_note_predictions(x$predictions)
   invisible(x)
 }
 
@@ -431,6 +463,18 @@ tidy.mm_carryover <- function(x, ...) {
   if (row$max_lag == 1 || row$decay == 0) return(" (no carryover)")
   if (!is.finite(row$half_life)) return("")
   sprintf(" (half-life %s periods)", format(round(row$half_life, 2)))
+}
+
+# The line print() adds when the predictions were kept.
+#' @keywords internal
+#' @noRd
+.mm_note_predictions <- function(predictions) {
+  if (!is.data.frame(predictions)) return(invisible(NULL))
+  n <- nrow(predictions)
+  shown <- format(n, big.mark = ",")
+  cli::cli_text("{shown} out-of-sample {cli::qty(n)}prediction{?s} kept in \\
+                 {.code $predictions}.")
+  invisible(NULL)
 }
 
 # Which rows of a table share a selection's (channel,) max_lag and decay.
@@ -797,6 +841,43 @@ tidy.mm_carryover <- function(x, ...) {
   })
 }
 
+# Out-of-sample predictions as a table: for each candidate's fold set in
+# `sets`, one row per assessed row of the splits in `keep`, with that
+# candidate's row of `params` repeated down its block. `y` is in resampling
+# order; `row` numbers the rows as the caller gave them. A split a candidate
+# did not complete has missing predictions.
+#' @keywords internal
+#' @noRd
+.mm_cv_predictions <- function(sets, splits, keep, y, layout, index, params) {
+  test <- lapply(splits[keep], `[[`, "test")
+  pos <- unlist(test, use.names = FALSE)
+  m <- length(pos)
+  row <- if (is.null(layout$cv_order)) pos else layout$cv_order[pos]
+  base <- data.frame(split = rep(as.integer(keep), lengths(test)),
+                     row = as.integer(row))
+  if (!is.null(index)) base$index <- index[row]
+  if (!is.null(layout$by)) {
+    base$group <- gsub("\x1f", " / ", layout$by[row], fixed = TRUE)
+  }
+  k <- length(sets)
+  out <- base[rep(seq_len(m), k), , drop = FALSE]
+  pars <- params[rep(seq_len(k), each = m), , drop = FALSE]
+  out <- cbind(out, pars)
+  out$observed <- rep(as.numeric(y[pos]), k)
+  out$predicted <- as.numeric(unlist(lapply(sets, function(folds) {
+    unlist(lapply(seq_along(keep), function(i) {
+      p <- folds[[keep[i]]]$pred
+      if (is.null(folds[[keep[i]]]$error) && length(p) == length(test[[i]])) {
+        as.numeric(p)
+      } else {
+        rep(NA_real_, length(test[[i]]))
+      }
+    }), use.names = FALSE)
+  }), use.names = FALSE))
+  rownames(out) <- NULL
+  out
+}
+
 # ---- scoring -------------------------------------------------------------------
 
 # Score candidates on the splits all of them completed.
@@ -809,7 +890,8 @@ tidy.mm_carryover <- function(x, ...) {
 # for everyone. A candidate that completes no split is scored NA; the rest are
 # scored only on the splits every one of them completed, so no candidate is
 # compared on easier splits than another. `lost` counts the informative
-# splits left out that way.
+# splits left out that way, `common` marks the splits that are scored and
+# `live` the candidates that completed at least one split.
 #
 # With `se = TRUE`, the metric is also recomputed with each block of
 # `se_block` consecutive splits left out. `jack` holds those leave-one-block-out
@@ -871,7 +953,8 @@ tidy.mm_carryover <- function(x, ...) {
   out <- list(metric = rep(NA_real_, n_cand), std_err = rep(NA_real_, n_cand),
               jack = NULL, n_ok = n_ok,
               lost = if (any(live)) sum(informative & !common) else 0L,
-              n_informative = sum(informative), first_error = first_error)
+              n_informative = sum(informative), first_error = first_error,
+              common = common, live = live)
   if (n_ok == 0L) return(out)
 
   idx <- which(common)

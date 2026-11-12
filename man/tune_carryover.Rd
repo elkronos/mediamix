@@ -24,7 +24,8 @@ tune_carryover(
   warm_start = FALSE,
   by = NULL,
   index = NULL,
-  se_block = 1L
+  se_block = 1L,
+  save_pred = FALSE
 )
 }
 \arguments{
@@ -119,6 +120,12 @@ the default, treats the splits as independent. Successive forecasts share
 most of their training data, so their errors are usually correlated and
 independence understates the standard error; a block of a few splits
 allows for that. \code{best} does not depend on it.}
+
+\item{save_pred}{Keep the out-of-sample predictions? \code{FALSE} by default, as
+in \pkg{tune}'s \code{control_resamples()}. With \code{TRUE} the result gains
+\code{predictions}: every candidate's forecasts for the assessed rows of the
+splits it was scored on. The fits produce them in any case, so keeping
+them costs only the table, one row per candidate per assessed row.}
 }
 \value{
 An object of class \code{mm_carryover}: a list with elements
@@ -145,6 +152,15 @@ error of \code{metric} over splits; for \code{aggregate = "mean"} with
 \item{\code{n_series}}{Number of series, more than 1 only with \code{by}.}
 \item{\code{normalise}}{Whether the adstock kernel was normalised, carried
 through so the selected decay can be reapplied on the same footing.}
+\item{\code{predictions}}{Only with \code{save_pred = TRUE}: one row per
+candidate per assessed row of the \code{n_ok} splits \code{metric} was computed
+on, with columns \code{split} (the split's position among the
+\code{n_splits} formed), \code{row} (the row of \code{x} and \code{y}), \code{index} and
+\code{group} (with \code{index} and \code{by}), \code{max_lag}, \code{decay}, \code{observed} and
+\code{predicted}. Candidates come in the order of \code{results}, and a
+candidate that completed no split has no rows. With
+\code{aggregate = "pooled"}, \code{metric_fn(observed, predicted)} over one
+candidate's rows gives its \code{metric}.}
 }
 \code{as.data.frame()} and \code{tidy()} return \code{results} with two logical columns,
 \code{best} and \code{best_1se}, marking the two selections.
@@ -272,6 +288,13 @@ tuned$best$decay
 
 # The shortest carryover the data cannot distinguish from the best
 tuned$best_1se$decay
+
+# Keep the out-of-sample forecasts, for example to look at the best one
+kept <- tune_carryover(spend, kpi, max_lags = Inf,
+                       decays = seq(0.1, 0.9, by = 0.1), save_pred = TRUE)
+best <- kept$predictions[kept$predictions$decay == kept$best$decay, ]
+head(best)
+c(rmse(best$observed, best$predicted), kept$best$metric)
 
 # Tune against a model with controls rather than the bare default. Passed
 # as `controls`, the trend and seasonality are fitted inside every training

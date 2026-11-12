@@ -26,7 +26,8 @@ tune_carryover_joint(
   cores = 1L,
   by = NULL,
   index = NULL,
-  se_block = 1L
+  se_block = 1L,
+  save_pred = FALSE
 )
 }
 \arguments{
@@ -117,6 +118,13 @@ the default, treats the splits as independent. Successive forecasts share
 most of their training data, so their errors are usually correlated and
 independence understates the standard error; a block of a few splits
 allows for that. \code{best} does not depend on it.}
+
+\item{save_pred}{Keep the out-of-sample predictions of the selected values?
+\code{FALSE} by default, as in \pkg{tune}'s \code{control_resamples()}. With \code{TRUE}
+the result gains \code{predictions}, for \code{best} and for the \code{best_1se} set.
+The other grid points' predictions are not kept: each channel's final
+profile alone holds one set per grid point, so keeping them would need a
+row for every channel, grid point and assessed row.}
 }
 \value{
 An object of class \code{mm_carryover_joint}: a list with
@@ -135,6 +143,14 @@ final sweep, with the other channels held at their selected values:
 \item{\code{metric_name}}{Name of the metric function used.}
 \item{\code{iterations}, \code{converged}}{Sweeps run, and whether the last
 sweep changed nothing.}
+\item{\code{predictions}}{Only with \code{save_pred = TRUE}: the forecasts of
+\code{best} and of the \code{best_1se} set on the splits both completed, one
+row per set per assessed row. Columns: \code{selection} (\code{"best"} or
+\code{"best_1se"}), \code{split} (the split's position among the \code{n_splits}
+formed), \code{row} (the row of \code{media} and \code{y}), \code{index} and \code{group}
+(with \code{index} and \code{by}), \verb{max_lag_<channel>} and \verb{decay_<channel>}
+for each channel, \code{observed} and \code{predicted}. When the two sets are
+the same, the \code{best_1se} rows repeat the \code{best} rows.}
 }
 plus \code{scheme}, \code{aggregate}, \code{n_splits}, \code{n_ok}, \code{n_series} and
 \code{normalise}, as in \code{\link[=tune_carryover]{tune_carryover()}}. \code{as.data.frame()} and \code{tidy()}
@@ -192,10 +208,14 @@ controls <- data.frame(week = seq_len(nrow(north)), price = north$price,
 joint <- tune_carryover_joint(north[channels], north$revenue,
                               controls = controls,
                               decays = seq(0.05, 0.95, by = 0.1),
-                              skip = 3)
+                              skip = 3, save_pred = TRUE)
 joint
 rbind(truth = attr(mm_weekly, "truth")$decay[channels],
       joint = joint$best$decay)
+
+# The selected values' forecasts of the weeks each split held out
+kept <- joint$predictions[joint$predictions$selection == "best", ]
+head(kept[c("split", "row", "observed", "predicted")])
 }
 \seealso{
 \code{\link[=tune_carryover]{tune_carryover()}} for one channel, \code{\link[=adstock_steady_state]{adstock_steady_state()}}

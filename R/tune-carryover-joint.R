@@ -37,6 +37,12 @@
 #'   and `predict_fn` must call other packages with `pkg::fun()` and must not
 #'   rely on functions or data defined in your session. `metric_fn` runs in
 #'   your session.
+#' @param save_pred Keep the out-of-sample predictions of the selected values?
+#'   `FALSE` by default, as in \pkg{tune}'s `control_resamples()`. With `TRUE`
+#'   the result gains `predictions`, for `best` and for the `best_1se` set.
+#'   The other grid points' predictions are not kept: each channel's final
+#'   profile alone holds one set per grid point, so keeping them would need a
+#'   row for every channel, grid point and assessed row.
 #' @inheritParams tune_carryover
 #'
 #' @return An object of class `mm_carryover_joint`: a list with
@@ -55,6 +61,14 @@
 #'     \item{`metric_name`}{Name of the metric function used.}
 #'     \item{`iterations`, `converged`}{Sweeps run, and whether the last
 #'       sweep changed nothing.}
+#'     \item{`predictions`}{Only with `save_pred = TRUE`: the forecasts of
+#'       `best` and of the `best_1se` set on the splits both completed, one
+#'       row per set per assessed row. Columns: `selection` (`"best"` or
+#'       `"best_1se"`), `split` (the split's position among the `n_splits`
+#'       formed), `row` (the row of `media` and `y`), `index` and `group`
+#'       (with `index` and `by`), `max_lag_<channel>` and `decay_<channel>`
+#'       for each channel, `observed` and `predicted`. When the two sets are
+#'       the same, the `best_1se` rows repeat the `best` rows.}
 #'   }
 #'   plus `scheme`, `aggregate`, `n_splits`, `n_ok`, `n_series` and
 #'   `normalise`, as in [tune_carryover()]. `as.data.frame()` and `tidy()`
@@ -105,10 +119,14 @@
 #' joint <- tune_carryover_joint(north[channels], north$revenue,
 #'                               controls = controls,
 #'                               decays = seq(0.05, 0.95, by = 0.1),
-#'                               skip = 3)
+#'                               skip = 3, save_pred = TRUE)
 #' joint
 #' rbind(truth = attr(mm_weekly, "truth")$decay[channels],
 #'       joint = joint$best$decay)
+#'
+#' # The selected values' forecasts of the weeks each split held out
+#' kept <- joint$predictions[joint$predictions$selection == "best", ]
+#' head(kept[c("split", "row", "observed", "predicted")])
 #' @export
 tune_carryover_joint <- function(media, y,
                                  controls = NULL,
@@ -130,7 +148,8 @@ tune_carryover_joint <- function(media, y,
                                  cores = 1L,
                                  by = NULL,
                                  index = NULL,
-                                 se_block = 1L) {
+                                 se_block = 1L,
+                                 save_pred = FALSE) {
   scheme <- match.arg(scheme)
   aggregate <- match.arg(aggregate)
   metric_name <- .mm_fn_label(substitute(metric_fn))
@@ -147,6 +166,7 @@ tune_carryover_joint <- function(media, y,
   if (!is.function(metric_fn)) cli::cli_abort("{.arg metric_fn} must be a function.")
   .mm_check_flag(normalise, "normalise")
   .mm_check_flag(warm_start, "warm_start")
+  .mm_check_flag(save_pred, "save_pred")
   max_iter <- .mm_check_count(max_iter, "max_iter", min = 1L)
   max_lags <- .mm_check_lag_grid(max_lags)
   decays <- .mm_check_decay_grid(decays)
@@ -277,9 +297,12 @@ tune_carryover_joint <- function(media, y,
   # The per-channel choices taken together were never part of the search, so
   # score them as a set.
   best_1se_metric <- metric
-  if (!identical(one_se, cur)) {
-    both <- compare(list(run(cur), run(one_se)))
-    best_1se_metric <- both$metric[2L]
+  differ <- !identical(one_se, cur)
+  if (differ || save_pred) {
+    best_sets <- run(cur)
+    one_sets <- if (differ) run(one_se) else best_sets
+    both <- compare(list(best_sets, one_sets))
+    if (differ) best_1se_metric <- both$metric[2L]
   }
 
   pick <- function(sel) {
@@ -298,7 +321,7 @@ tune_carryover_joint <- function(media, y,
   names(notes) <- channels
   .mm_warn_grid_edge(notes)
 
-  structure(
+  out <- structure(
     list(best = best, best_1se = pick(one_se),
          best_1se_metric = best_1se_metric, profiles = prof,
          metric = metric, metric_name = metric_name,
@@ -307,6 +330,23 @@ tune_carryover_joint <- function(media, y,
          n_series = layout$n_series, normalise = normalise),
     class = "mm_carryover_joint"
   )
+  if (save_pred) {
+    # One column per channel and parameter, as tune's tuning parameters are.
+    wide <- function(label, sel) {
+      sel <- unname(sel)
+      cols <- list(selection = label)
+      for (i in seq_along(channels)) {
+        cols[[paste0("max_lag_", channels[i])]] <- grid$max_lag[sel[i]]
+        cols[[paste0("decay_", channels[i])]] <- grid$decay[sel[i]]
+      }
+      as.data.frame(cols, check.names = FALSE, stringsAsFactors = FALSE)
+    }
+    params <- rbind(wide("best", cur), wide("best_1se", one_se))
+    p <- .mm_cv_predictions(list(best_sets, one_sets), splits,
+                            which(both$common), y_cv, layout, index, params)
+    out$predictions <- p[c("selection", setdiff(names(p), "selection"))]
+  }
+  out
 }
 
 #' @export
@@ -331,6 +371,7 @@ print.mm_carryover_joint <- function(x, ...) {
   tab <- x$best
   tab$decay_1se <- x$best_1se$decay
   print(tab, row.names = FALSE, digits = 3)
+  .mm_note_predictions(x$predictions)
   invisible(x)
 }
 
