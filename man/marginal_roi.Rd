@@ -12,21 +12,27 @@ marginal_roi(
   by = NULL,
   lift = 0.01,
   rows = NULL,
-  extend = 0L
+  extend = 0L,
+  spec = NULL
 )
 }
 \arguments{
-\item{spend}{Numeric vector of raw spend for one channel, in time order.}
+\item{spend}{Numeric vector of raw spend for one channel, in time order.
+Or a data frame with one row per period and a column of spend per
+channel, to compute every channel in one call.}
 
 \item{coefficient}{The channel's fitted coefficient on the transformed
-regressor.}
+regressor. When \code{spend} is a data frame, a numeric vector of
+coefficients named by channel, such as \code{coef(fit)}.}
 
 \item{adstock, saturation}{Lists describing the transform, exactly as for
 \code{\link[=media_transform]{media_transform()}}. They must match the transform the model was fitted
-on.}
+on. When \code{spend} is a data frame and \code{spec} is \code{NULL}, every channel
+uses them.}
 
 \item{by}{Optional grouping vector, as for \code{\link[=media_transform]{media_transform()}}, one element
-per element of \code{spend}.}
+per element of \code{spend}. When \code{spend} is a data frame, one element or row
+per row, or column names of \code{spend}, as for \code{\link[=transform_plan]{transform_plan()}}.}
 
 \item{lift}{Proportional increase in spend used for the marginal return.
 The default \code{0.01} asks what a 1\% larger budget would have returned.}
@@ -44,12 +50,25 @@ default \code{0} counts response only inside the observed window, as
 It also drops the carryover of late spend, which understates the marginal
 return of slow channels; see "Carryover after the window". Set it to
 \code{\link[=effective_window]{effective_window()}} of the decay to measure long-run return.}
+
+\item{spec}{Optional list with one transform per channel, named by column,
+as for \code{\link[=transform_plan]{transform_plan()}}: each entry holds \code{adstock} and \code{saturation},
+and optionally \code{order}. Only when \code{spend} is a data frame. The channels
+are then the names of \code{spec}, and \code{coefficient} may hold other names,
+which are ignored. Without \code{spec}, the channels are the names of
+\code{coefficient}.}
 }
 \value{
 A one-row data frame with columns \code{spend} (total spend over the
 series), \code{contribution} (the channel's total response), \code{roi} (their
 ratio, the average return) and \code{mroi} (incremental response per unit of
 incremental spend, when the spend in \code{rows} is increased by \code{lift}).
+
+When \code{spend} is a data frame, one row per channel, in the order of
+\code{spec} or of \code{coefficient}, with a leading \code{channel} column and then the
+same columns. A channel with no spend in the window has an \code{mroi} of
+\code{NA}, and a message names it; with no spend at all, its \code{roi} is \code{NA}
+too.
 }
 \description{
 Computes a channel's average return and its marginal return by re-running
@@ -140,6 +159,15 @@ marginal_roi(
                     shape = truth$shape[["tv"]]),
   rows = last_q
 )
+
+# Every channel in one call, each with its own transform
+channels <- c("tv", "video", "search", "social", "display")
+spec <- lapply(stats::setNames(channels, channels), function(ch) list(
+  adstock = list(decay = truth$decay[[ch]]),
+  saturation = list(half_max = truth$half_max[[ch]],
+                    shape = truth$shape[[ch]])
+))
+marginal_roi(north, truth$beta, spec = spec)
 }
 \references{
 Jin, Y., Wang, Y., Sun, Y., Chan, D. and Koehler, J. (2017). Bayesian
@@ -147,5 +175,6 @@ methods for media mix modeling with carryover and shape effects. Google
 Inc. \url{https://research.google/pubs/pub46001/}
 }
 \seealso{
-\code{\link[=roi]{roi()}}, \code{\link[=mroi]{mroi()}}, \code{\link[=response_curve]{response_curve()}}, \code{\link[=media_transform]{media_transform()}}
+\code{\link[=roi]{roi()}}, \code{\link[=mroi]{mroi()}}, \code{\link[=response_curve]{response_curve()}}, \code{\link[=media_transform]{media_transform()}},
+\code{\link[=simulate_plan]{simulate_plan()}}, \code{\link[=allocate_budget]{allocate_budget()}}
 }

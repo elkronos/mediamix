@@ -1,5 +1,6 @@
-# Tests for the planning helpers in R/plan.R: transform_plan(),
-# simulate_plan() and reallocate().
+# Tests for the planning helpers in R/plan.R, transform_plan(),
+# simulate_plan() and reallocate(), and for marginal_roi() over a data
+# frame.
 
 north_plan <- function() {
   data(mm_weekly, package = "mediamix", envir = environment())
@@ -336,4 +337,73 @@ test_that("with by, reallocate() moves the amount within each group or named gro
                "group \"south\"")
   expect_error(reallocate(dark, "display", "social", 1e6, by = "geo"),
                "more than")
+})
+
+# ---- marginal_roi() over a data frame ----------------------------------------------
+
+test_that("marginal_roi() over a data frame matches one call per channel", {
+  north <- north_plan()
+  channels <- c("tv", "search", "display")
+  spec <- truth_spec(channels)
+  beta <- truth_beta()
+  table <- marginal_roi(north, beta, spec = spec)
+  expect_identical(names(table),
+                   c("channel", "spend", "contribution", "roi", "mroi"))
+  expect_identical(table$channel, channels)
+  for (ch in channels) {
+    one <- marginal_roi(north[[ch]], beta[[ch]], adstock = spec[[ch]]$adstock,
+                        saturation = spec[[ch]]$saturation)
+    expect_equal(table[table$channel == ch, -1], one, ignore_attr = TRUE)
+  }
+  # Without spec, the names of coefficient choose the channels and every
+  # channel shares the transform.
+  shared <- marginal_roi(north, beta[c("search", "social")],
+                         adstock = list(decay = 0.3),
+                         saturation = list(half_max = 400))
+  one <- marginal_roi(north$social, beta[["social"]],
+                      adstock = list(decay = 0.3),
+                      saturation = list(half_max = 400))
+  expect_identical(shared$channel, c("search", "social"))
+  expect_equal(shared[2, -1], one, ignore_attr = TRUE)
+  expect_identical(names(marginal_roi(north$tv, 1)),
+                   c("spend", "contribution", "roi", "mroi"))
+})
+
+test_that("marginal_roi() over a data frame takes rows, by and extend", {
+  data(mm_weekly, envir = environment())
+  spec <- truth_spec(c("tv", "social"))
+  beta <- truth_beta()
+  late <- seq_len(nrow(mm_weekly)) %% 156 > 130
+  table <- marginal_roi(mm_weekly, beta, spec = spec, by = "geo", rows = late,
+                        extend = 10)
+  one <- marginal_roi(mm_weekly$tv, beta[["tv"]], adstock = spec$tv$adstock,
+                      saturation = spec$tv$saturation, by = mm_weekly$geo,
+                      rows = late, extend = 10)
+  expect_equal(table[1, -1], one, ignore_attr = TRUE)
+  expect_equal(table, marginal_roi(mm_weekly, beta, spec = spec,
+                                   by = mm_weekly$geo, rows = late,
+                                   extend = 10))
+})
+
+test_that("marginal_roi() over a data frame reports dark channels and refuses ambiguity", {
+  plan <- data.frame(a = c(10, 20, 30), b = c(0, 0, 0), c = c(5, 0, 0))
+  spec <- list(a = list(adstock = list(decay = 0.5)),
+               b = list(adstock = list(decay = 0.5)))
+  expect_message(r <- marginal_roi(plan, c(a = 1, b = 2, x = 9), spec = spec),
+                 "\"b\"")
+  expect_identical(r$channel, c("a", "b"))
+  expect_true(is.na(r$mroi[2]))
+  expect_true(is.na(r$roi[2]))
+  expect_message(w <- marginal_roi(plan, c(a = 1, c = 1), rows = 2:3), "\"c\"")
+  expect_true(is.na(w$mroi[2]))
+  expect_equal(w$roi[2], sum(adstock_geometric(plan$c, 0.5)) / 5)
+  expect_error(marginal_roi(plan, c(a = 1), spec = spec), "no value")
+  expect_error(marginal_roi(plan, c(a = 1, b = 1),
+                            adstock = list(decay = 0.2), spec = spec),
+               "once")
+  expect_error(marginal_roi(plan$a, 1, spec = spec), "data frame")
+  expect_error(marginal_roi(plan, 1), "named by channel")
+  expect_error(marginal_roi(plan, c(z = 1)), "no column \"z\"")
+  expect_error(marginal_roi(plan, c(a = 1), rows = 5), "index periods")
+  expect_error(marginal_roi(plan, c(a = 1), by = 1:2), "one element per row")
 })
