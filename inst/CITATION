@@ -1,9 +1,9 @@
-year <- if (!is.null(meta$Date)) {
-  sub("-.*", "", meta$Date)
-} else if (!is.null(meta$Packaged)) {
-  sub("-.*", "", meta$Packaged)
+# The year of the release, not of the build: CRAN records the publication
+# date, and development versions cite the year of the last release.
+year <- if (!is.null(meta$`Date/Publication`)) {
+  sub("-.*", "", meta$`Date/Publication`)
 } else {
-  format(Sys.Date(), "%Y")
+  "2026"
 }
 
 bibentry(
