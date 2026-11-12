@@ -10,7 +10,11 @@ attribute(
   first_weight = 0.4,
   last_weight = 0.4,
   decay = decay_from_half_life(7),
-  period = 1
+  period = 1,
+  by = NULL,
+  times = 0L,
+  level = 0.9,
+  seed = NULL
 )
 }
 \arguments{
@@ -25,22 +29,52 @@ rule named twice is run once.}
 \item{first_weight, last_weight}{Passed to \code{\link[=credit_position]{credit_position()}}.}
 
 \item{decay, period}{Passed to \code{\link[=credit_time_decay]{credit_time_decay()}}.}
+
+\item{by}{Optional names of columns of \code{paths} that divide the journeys
+into segments, such as a device column carried by the \code{keep} argument of
+\code{\link[=build_paths]{build_paths()}}. Every rule then runs on each segment's journeys alone,
+so shares sum to 1 within each segment and rule, and the Markov chain is
+fitted per segment. Each column must take one value per journey and have
+no missing values. See \emph{Segments}.}
+
+\item{times}{Number of bootstrap replicates behind intervals on the
+shares, at most 1,000,000. The default, 0, computes no intervals. See
+\emph{Intervals}.}
+
+\item{level}{Confidence level of the percentile intervals.}
+
+\item{seed}{Optional random seed, one whole number, for reproducible
+intervals. The caller's random number stream is restored afterwards.}
 }
 \value{
-A data frame with one row per rule and channel:
+A data frame with one row per rule and channel, or per segment,
+rule and channel when \code{by} is given:
 \describe{
+\item{The \code{by} columns}{The segment, in the columns' own types. Present
+only with \code{by}.}
 \item{\code{rule}}{Which credit rule produced the row.}
 \item{\code{channel}}{Channel label.}
 \item{\code{conversions}}{Fractional conversions credited to the channel.}
 \item{\code{share}}{\code{conversions} as a share of all conversions credited
-under that rule. Shares sum to 1 within each rule.}
+under that rule. Shares sum to 1 within each rule, and within each
+segment.}
+\item{\code{lower}, \code{upper}}{Percentile interval for \code{share} at \code{level},
+present only when \code{times} is above 0. \code{NA} where fewer than two
+replicates define the share, as in a segment with no converting
+journey.}
 \item{\code{value}}{Credited conversion value, present only when the journey
 table carries values.}
 \item{\code{touches}}{Number of touchpoints on the channel across all
 journeys, converting or not.}
 }
-Rows are ordered by rule, then by descending conversions, with ties in
-channel order (C locale, so the same on every platform).
+Rows are ordered by segment, then by rule, then by descending
+conversions, with ties in channel order (C locale, so the same on every
+platform). Segments are sorted by their values, factors in level order.
+
+The result has class \code{mm_attribution}. With \code{by} it also has class
+\code{mm_attribution_segments} and the attribute \code{"segments"}, naming the
+segment columns. With intervals it also has class
+\code{mm_attribution_intervals} and the attributes \code{"level"} and \code{"times"}.
 }
 \description{
 Runs a set of credit rules over the same journey table and returns their
@@ -49,6 +83,48 @@ a choice of default. That spread is the most useful output of rule-based
 attribution: it bounds how much a channel's apparent value depends on the
 convention rather than the data.
 }
+\section{Segments}{
+
+A segment holds whole journeys, so a column given to \code{by} must take one
+value in each journey. A device column kept per touch can change within a
+cross-device journey; give each journey one value first, for example the
+device of its last touch:
+
+\if{html}{\out{<div class="sourceCode">}}\preformatted{last <- paths$touch_rank == paths$touch_n
+at_last <- match(paths$path_id, paths$path_id[last])
+paths$journey_device <- paths$device[last][at_last]
+}\if{html}{\out{</div>}}
+
+Each segment is attributed as if it were the whole table: a channel's
+share is its share of that segment's credited conversions, \code{touches}
+counts that segment's touches, and a channel appears only in segments
+where it has a touch. A segment with no non-converting journeys gets one
+warning that names it, as \code{\link[=markov_removal]{markov_removal()}} gives for a whole table.
+}
+
+\section{Intervals}{
+
+With \code{times} above 0, the journeys of each segment are resampled with
+replacement \code{times} times, every rule is recomputed on each resample, and
+\code{lower} and \code{upper} are percentile intervals of the resampled shares. They
+show how far the shares move with the sample of journeys observed, with
+the journey table's construction and each rule held fixed. They say
+nothing about the choice of rule, which \code{\link[=attribution_spread]{attribution_spread()}} measures.
+
+A resample gives the same shares as \code{attribute()} on a journey table
+holding the drawn journeys, each draw a separate journey: a heuristic rule
+credits each journey on its own, so its resampled totals reuse the credit
+every journey received on the full data, and the Markov chain is refitted
+from the transitions of the drawn journeys. Journeys are drawn
+independently, so a customer's several journeys are treated as unrelated.
+A resample with no converting journey defines no share; it is left out of
+the intervals and counted in a message.
+
+Every draw comes after \code{seed} is set, and the caller's random number stream
+is restored afterwards, as in \code{\link[=block_bootstrap]{block_bootstrap()}}. Without \code{seed} the
+draws advance the session's stream.
+}
+
 \examples{
 data(mm_events)
 paths <- build_paths(mm_events, id = "customer_id", channel = "channel",
@@ -63,6 +139,20 @@ tapply(res$conversions, res$rule, sum)
 
 # How much does the answer depend on the rule?
 attribution_spread(res)
+
+# How much does it depend on the sample? 90\% intervals from 50 resamples
+boot <- attribute(paths, rules = c("first", "last", "markov"), times = 50,
+                  seed = 1)
+head(boot)
+
+# Credit per segment, here a device recorded once per customer
+ev <- mm_events
+ev$device <- ifelse(grepl("[02468]$", ev$customer_id), "mobile", "desktop")
+kept <- build_paths(ev, id = "customer_id", channel = "channel",
+                    timestamp = "timestamp", conversion = "conversion",
+                    keep = "device")
+by_device <- attribute(kept, rules = c("first", "last"), by = "device")
+by_device[by_device$channel == "display", ]
 }
 \seealso{
 \code{\link[=credit_linear]{credit_linear()}} and friends, \code{\link[=markov_removal]{markov_removal()}},

@@ -14,6 +14,9 @@ A data frame with one row per channel, ordered by descending spread:
 \code{channel}, \code{min_share}, \code{max_share}, \code{mean_share}, \code{spread} (the difference
 between the first two), and -- only when both the \code{"first"} and \code{"last"}
 rules were run -- \code{first_last_ratio}.
+For a result of \code{attribute(by = )}, one row per segment and channel
+instead, with the segment columns first and rows ordered by segment, then
+by descending spread.
 
 Note that \code{first_last_ratio} here is a ratio of credited \emph{shares}, which is
 not the same quantity as the column of the same name in
