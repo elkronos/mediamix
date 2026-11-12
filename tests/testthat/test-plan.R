@@ -1,6 +1,6 @@
-# Tests for the planning helpers in R/plan.R, transform_plan(),
-# simulate_plan() and reallocate(), and for marginal_roi() over a data
-# frame.
+# Tests for the planning helpers: transform_plan(), simulate_plan() and
+# reallocate() in R/plan.R, allocate_budget() in R/allocate.R, its plot method
+# in R/plot-allocate.R, and marginal_roi() over a data frame.
 
 north_plan <- function() {
   data(mm_weekly, package = "mediamix", envir = environment())
@@ -20,6 +20,79 @@ truth_spec <- function(channels) {
 truth_beta <- function() {
   data(mm_weekly, package = "mediamix", envir = environment())
   attr(mm_weekly, "truth")$beta
+}
+
+# A small plan with three flighted channels and concave curves by default.
+toy_plan <- function() {
+  t <- seq_len(30)
+  data.frame(week = t,
+             a = 100 + 40 * sin(t / 2),
+             b = 60 * (1 + cos(t / 3)),
+             c = 30 + 20 * (t %% 4 == 0))
+}
+
+toy_spec <- function(shape = c(a = 1, b = 1, c = 1)) {
+  list(
+    a = list(adstock = list(decay = 0.6),
+             saturation = list(half_max = 80, shape = shape[["a"]])),
+    b = list(adstock = list(decay = 0.3),
+             saturation = list(half_max = 50, shape = shape[["b"]])),
+    c = list(adstock = list(decay = 0.1),
+             saturation = list(half_max = 40, shape = shape[["c"]]))
+  )
+}
+
+toy_beta <- c(a = 50, b = 40, c = 30)
+
+# A channel's response at a total spend of `level`, written out from the
+# transforms rather than through the functions under test.
+toy_response <- function(plan, spec, beta, ch, level) {
+  x <- plan[[ch]]
+  z <- adstock_geometric(x * (level / sum(x)), decay = spec[[ch]]$adstock$decay)
+  beta[[ch]] * sum(saturate_hill(z, half_max = spec[[ch]]$saturation$half_max,
+                                 shape = spec[[ch]]$saturation$shape))
+}
+
+# Draw `expr` on a null device and return the calls it made to the base
+# graphics functions in `fns`, with their arguments evaluated and matched.
+record_graphics <- function(expr, fns = c("points", "text", "rect", "segments",
+                                          "axis", "mtext", "title")) {
+  log <- new.env(parent = emptyenv())
+  log$calls <- list()
+  graphics_ns <- asNamespace("graphics")
+  wrap <- function(fn) {
+    orig <- getExportedValue("graphics", fn)
+    def <- if (fn %in% c("points", "text")) {
+      utils::getFromNamespace(paste0(fn, ".default"), "graphics")
+    } else {
+      orig
+    }
+    function(...) {
+      if (!identical(topenv(parent.frame()), graphics_ns)) {
+        call <- as.call(c(list(as.name(fn)), list(...)))
+        args <- as.list(match.call(def, call))[-1L]
+        log$calls[[length(log$calls) + 1L]] <- list(fn = fn, args = args)
+      }
+      orig(...)
+    }
+  }
+  grDevices::pdf(NULL)
+  on.exit(grDevices::dev.off(), add = TRUE)
+  mocks <- lapply(stats::setNames(fns, fns), wrap)
+  do.call(local_mocked_bindings, c(mocks, list(.package = "graphics")))
+  force(expr)
+  log$calls
+}
+
+recorded_text <- function(calls) {
+  unlist(lapply(calls, function(cl) {
+    switch(cl$fn,
+           text = cl$args$labels,
+           mtext = cl$args$text,
+           title = cl$args$main,
+           axis = if (is.character(cl$args$labels)) cl$args$labels,
+           NULL)
+  }))
 }
 
 # ---- transform_plan() ------------------------------------------------------------
@@ -406,4 +479,279 @@ test_that("marginal_roi() over a data frame reports dark channels and refuses am
   expect_error(marginal_roi(plan, c(z = 1)), "no column \"z\"")
   expect_error(marginal_roi(plan, c(a = 1), rows = 5), "index periods")
   expect_error(marginal_roi(plan, c(a = 1), by = 1:2), "one element per row")
+})
+
+# ---- allocate_budget() ------------------------------------------------------------
+
+test_that("on two channels the grid search matches a brute-force search", {
+  plan <- toy_plan()
+  spec <- toy_spec()[c("a", "b")]
+  total <- sum(plan$a) + sum(plan$b)
+  steps <- 40
+  res <- allocate_budget(plan, spec, toy_beta, steps = steps)
+  step <- total / steps
+  value <- vapply(0:steps, function(j) {
+    toy_response(plan, spec, toy_beta, "a", j * step) +
+      toy_response(plan, spec, toy_beta, "b", (steps - j) * step)
+  }, numeric(1))
+  best <- which.max(value) - 1
+  expect_equal(res$allocation$recommended_spend, c(best, steps - best) * step)
+  expect_equal(sum(res$allocation$recommended_response), max(value))
+  expect_equal(res$step, step)
+  expect_identical(res$steps, 40L)
+})
+
+test_that("on three channels the grid search matches a brute-force search", {
+  plan <- toy_plan()
+  spec <- toy_spec()
+  channels <- c("a", "b", "c")
+  total <- sum(plan[channels])
+  steps <- 24
+  res <- allocate_budget(plan, spec, toy_beta, steps = steps)
+  step <- total / steps
+  r <- lapply(channels, function(ch) {
+    vapply(0:steps, function(j) toy_response(plan, spec, toy_beta, ch, j * step),
+           numeric(1))
+  })
+  grid <- expand.grid(i = 0:steps, j = 0:steps)
+  grid <- grid[grid$i + grid$j <= steps, ]
+  value <- r[[1]][grid$i + 1] + r[[2]][grid$j + 1] +
+    r[[3]][steps - grid$i - grid$j + 1]
+  best <- grid[which.max(value), ]
+  expect_equal(res$allocation$recommended_spend,
+               c(best$i, best$j, steps - best$i - best$j) * step)
+})
+
+test_that("the grid answer is within a step of the continuous optimum, with equal marginal returns", {
+  plan <- toy_plan()
+  spec <- toy_spec()[c("a", "b")]
+  total <- sum(plan$a) + sum(plan$b)
+  f <- function(s) {
+    toy_response(plan, spec, toy_beta, "a", s) +
+      toy_response(plan, spec, toy_beta, "b", total - s)
+  }
+  opt <- stats::optimize(f, c(0, total), maximum = TRUE, tol = 1e-8)$maximum
+  expect_true(opt > 0.1 * total && opt < 0.9 * total)
+  res <- allocate_budget(plan, spec, toy_beta, steps = 400)
+  expect_lte(abs(res$allocation$recommended_spend[1] - opt), res$step)
+  expect_equal(res$allocation$mroi[1], res$allocation$mroi[2],
+               tolerance = 0.01)
+})
+
+test_that("an S-shaped channel gets the budget a brute-force search gives it", {
+  plan <- toy_plan()
+  spec <- toy_spec(shape = c(a = 4, b = 1, c = 1))[c("a", "b")]
+  beta <- c(a = 400, b = 150)
+  total <- sum(plan$a) + sum(plan$b)
+  steps <- 40
+  step <- total / steps
+  gain <- function(ch) {
+    toy_response(plan, spec, beta, ch, step) -
+      toy_response(plan, spec, beta, ch, 0)
+  }
+  # The first increment returns far less on the S-curve, so a search that
+  # adds one increment at a time where it returns most would never fund it.
+  expect_lt(gain("a"), gain("b") / 100)
+  value <- vapply(0:steps, function(j) {
+    toy_response(plan, spec, beta, "a", j * step) +
+      toy_response(plan, spec, beta, "b", (steps - j) * step)
+  }, numeric(1))
+  best <- which.max(value) - 1
+  expect_true(best > 0 && best < steps)
+  res <- allocate_budget(plan, spec, beta, steps = steps)
+  expect_equal(res$allocation$recommended_spend, c(best, steps - best) * step)
+})
+
+test_that("allocate_budget() keeps to the bounds and spends exactly the total", {
+  plan <- toy_plan()
+  spec <- toy_spec()
+  now <- colSums(plan[c("a", "b", "c")])
+  free <- allocate_budget(plan, spec, toy_beta, steps = 60)
+  expect_equal(sum(free$allocation$recommended_spend), sum(now))
+  expect_equal(free$total, sum(now))
+  expect_equal(free$allocation$current_spend, unname(now))
+
+  lower <- c(a = 0.9 * now[["a"]])
+  upper <- c(b = 0.5 * now[["b"]], c = 1.1 * now[["c"]])
+  held <- allocate_budget(plan, spec, toy_beta, total = 1.2 * sum(now),
+                          lower = lower, upper = upper, steps = 60)
+  rec <- stats::setNames(held$allocation$recommended_spend,
+                         held$allocation$channel)
+  expect_gte(rec[["a"]], lower[["a"]])
+  expect_lte(rec[["b"]], upper[["b"]])
+  expect_lte(rec[["c"]], upper[["c"]])
+  expect_equal(sum(rec), 1.2 * sum(now))
+
+  floor <- allocate_budget(plan, spec, toy_beta, lower = 1000, steps = 30)
+  expect_true(all(floor$allocation$recommended_spend >= 1000))
+  # Upper bounds that leave less than a step of room still spend the total.
+  tight <- allocate_budget(plan, spec, toy_beta, upper = now + 0.1,
+                           steps = 30)
+  expect_equal(sum(tight$allocation$recommended_spend), sum(now))
+  expect_true(all(tight$allocation$recommended_spend <= now + 0.1))
+})
+
+test_that("the recommended plan rescales each channel and simulates to the reported response", {
+  plan <- toy_plan()
+  spec <- toy_spec()
+  res <- allocate_budget(plan, spec, toy_beta, steps = 30)
+  for (ch in c("a", "b", "c")) {
+    rec <- res$allocation$recommended_spend[res$allocation$channel == ch]
+    expect_equal(res$plan[[ch]], plan[[ch]] * (rec / sum(plan[[ch]])))
+  }
+  expect_identical(res$plan$week, plan$week)
+  expect_equal(simulate_plan(res$plan, spec, toy_beta)$response,
+               res$allocation$recommended_response)
+  expect_equal(simulate_plan(plan, spec, toy_beta)$response,
+               res$allocation$current_response)
+  expect_equal(res$allocation$mroi,
+               marginal_roi(res$plan, toy_beta, spec = spec)$mroi)
+})
+
+test_that("a channel with no spend stays at zero, and a lower bound on it is an error", {
+  plan <- toy_plan()
+  plan$d <- 0
+  spec <- c(toy_spec(), list(d = list(saturation = list(half_max = 10))))
+  beta <- c(toy_beta, d = 100)
+  expect_message(res <- allocate_budget(plan, spec, beta, steps = 20),
+                 "\"d\" has no spend")
+  expect_equal(res$allocation$recommended_spend[4], 0)
+  expect_true(is.na(res$allocation$mroi[4]))
+  expect_identical(res$plan$d, plan$d)
+  expect_error(suppressMessages(
+    allocate_budget(plan, spec, beta, lower = c(d = 5))), "pattern")
+})
+
+test_that("allocate_budget() names impossible bounds and bad arguments", {
+  plan <- toy_plan()
+  spec <- toy_spec()
+  now <- sum(plan[c("a", "b", "c")])
+  expect_error(allocate_budget(plan, spec, toy_beta, upper = 1),
+               "upper bounds add up")
+  expect_error(allocate_budget(plan, spec, toy_beta, lower = c(a = now + 1)),
+               "lower bounds add up")
+  expect_error(allocate_budget(plan, spec, toy_beta, lower = c(a = 10),
+                               upper = c(a = 5)), "below")
+  expect_error(allocate_budget(plan, spec, toy_beta, lower = c(z = 1)),
+               "\"z\"")
+  expect_error(allocate_budget(plan, spec, toy_beta, lower = c(1, 2)),
+               "no names")
+  expect_error(allocate_budget(plan, spec, toy_beta, upper = c(a = -1)),
+               "negative")
+  expect_error(allocate_budget(plan, spec, toy_beta, lower = c(a = Inf)),
+               "finite")
+  expect_error(allocate_budget(plan, spec, toy_beta, lower = c(a = NA)),
+               "numeric vector")
+  expect_error(allocate_budget(plan, spec, toy_beta, total = -1), "total")
+  expect_error(allocate_budget(plan, spec, toy_beta, steps = 0), "steps")
+  expect_error(allocate_budget(plan, spec, toy_beta, steps = 2.5), "steps")
+  expect_error(allocate_budget(plan, spec, c(a = 1)), "no value")
+})
+
+test_that("allocate_budget() handles a zero budget, one row, one channel and groups", {
+  plan <- toy_plan()
+  spec <- toy_spec()
+  none <- allocate_budget(plan, spec, toy_beta, total = 0)
+  expect_equal(none$allocation$recommended_spend, c(0, 0, 0))
+  expect_true(all(is.na(none$allocation$mroi)))
+  one_row <- allocate_budget(data.frame(a = 10, b = 30), spec[c("a", "b")],
+                             toy_beta, steps = 20)
+  expect_equal(sum(one_row$allocation$recommended_spend), 40)
+  single <- allocate_budget(plan, spec["a"], toy_beta, steps = 5)
+  expect_equal(single$allocation$recommended_spend, sum(plan$a))
+
+  data(mm_weekly, envir = environment())
+  wk <- truth_spec(c("search", "social"))
+  beta <- truth_beta()
+  grouped <- allocate_budget(mm_weekly, wk, beta, by = "geo", steps = 20)
+  expect_equal(simulate_plan(grouped$plan, wk, beta, by = "geo")$response,
+               grouped$allocation$recommended_response)
+  pooled <- allocate_budget(mm_weekly, wk, beta, steps = 20)
+  expect_false(isTRUE(all.equal(pooled$allocation$current_response,
+                                grouped$allocation$current_response)))
+})
+
+test_that("a transform warning is shown once however many levels are searched", {
+  spec <- toy_spec()[c("a", "b")]
+  spec$a$order <- "saturate_then_adstock"
+  seen <- character(0)
+  withCallingHandlers(
+    allocate_budget(toy_plan(), spec, toy_beta, steps = 10),
+    warning = function(w) {
+      seen <<- c(seen, conditionMessage(w))
+      invokeRestart("muffleWarning")
+    }
+  )
+  expect_length(seen, 1L)
+  expect_match(seen, "channel \"a\"")
+})
+
+test_that("allocations print, convert to a data frame and tidy", {
+  res <- allocate_budget(toy_plan(), toy_spec(), toy_beta, steps = 10)
+  expect_s3_class(res, "mm_allocation")
+  expect_identical(as.data.frame(res), res$allocation)
+  expect_identical(names(res$allocation),
+                   c("channel", "current_spend", "recommended_spend",
+                     "current_response", "recommended_response", "mroi"))
+  printed <- paste(capture.output(table <- capture.output(print(res)),
+                                  type = "message"), collapse = " ")
+  expect_match(printed, "Budget allocation")
+  expect_true(any(grepl("recommended_spend", table)))
+  skip_if_not_installed("generics")
+  expect_identical(generics::tidy(res), res$allocation)
+})
+
+# ---- plot.mm_allocation() ---------------------------------------------------------
+
+test_that("the allocation plot restores par, leaves the RNG alone and returns x invisibly", {
+  res <- allocate_budget(toy_plan(), toy_spec(), toy_beta, steps = 10)
+  f <- tempfile(fileext = ".pdf")
+  grDevices::pdf(f)
+  on.exit({
+    grDevices::dev.off()
+    unlink(f)
+  })
+  op <- graphics::par(no.readonly = TRUE)
+  set.seed(42)
+  seed <- .Random.seed
+  out <- withVisible(plot(res))
+  expect_identical(.Random.seed, seed)
+  expect_false(out$visible)
+  expect_identical(out$value, res)
+  expect_identical(graphics::par("mar"), op$mar)
+  expect_identical(graphics::par("oma"), op$oma)
+  expect_identical(graphics::par("mfrow"), op$mfrow)
+})
+
+test_that("the allocation plot labels every channel and takes main and col", {
+  res <- allocate_budget(toy_plan(), toy_spec(), toy_beta, steps = 10)
+  calls <- record_graphics(plot(res, main = "Next quarter",
+                                col = c("black", "grey")))
+  text <- recorded_text(calls)
+  expect_true(all(c("a", "b", "c") %in% text))
+  expect_true(all(c("Next quarter", "Total spend", "Change in response") %in%
+                    text))
+  expect_true(any(grepl("The same total budget", text)))
+  rects <- Filter(function(cl) identical(cl$fn, "rect"), calls)
+  fills <- unlist(lapply(rects, function(cl) cl$args$col))
+  expect_true(all(fills %in% c("black", "grey")))
+  changes <- res$allocation$recommended_response -
+    res$allocation$current_response
+  expect_identical(sort(unique(fills)),
+                   sort(unique(ifelse(changes >= 0, "black", "grey"))))
+
+  more <- allocate_budget(toy_plan(), toy_spec(), toy_beta,
+                          total = 1.5 * sum(toy_plan()[c("a", "b", "c")]),
+                          steps = 10)
+  expect_true(any(grepl("A total budget of",
+                        recorded_text(record_graphics(plot(more))))))
+})
+
+test_that("the allocation plot names the columns it needs", {
+  res <- allocate_budget(toy_plan(), toy_spec(), toy_beta, steps = 10)
+  edited <- res
+  edited$allocation <- edited$allocation[c("channel", "current_spend")]
+  expect_error(plot(edited), "recommended_spend", class = "rlang_error")
+  edited$allocation <- NULL
+  expect_error(plot(edited), "data frame", class = "rlang_error")
 })
