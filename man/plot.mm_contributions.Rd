@@ -11,7 +11,9 @@
 
 \item{type}{\code{"time"} (the default) or \code{"total"}.}
 
-\item{...}{Ignored.}
+\item{...}{Graphical arguments: \code{main}, \code{xlab} and \code{ylab} replace the
+defaults, and \code{col} gives one colour per channel, in the order the
+channels first appear in \code{x}. Others are ignored.}
 }
 \value{
 \code{x}, invisibly.
@@ -22,6 +24,13 @@ shows \emph{when} media worked; \code{type = "total"} compares channel totals. T
 baseline is left out of both, because it is usually several times the size
 of all media combined and would flatten everything else; its total is
 reported in the subtitle.
+}
+\details{
+Periods are drawn in sorted order: dates and date-times on a date axis,
+numbers at their values, and text labels in sort order, so pass a factor
+to set the order of text labels. With more than eight channels the time
+chart keeps the seven largest and draws the rest together as "Other", with
+a message. A missing contribution is counted as zero, with a warning.
 }
 \examples{
 data(mm_weekly)

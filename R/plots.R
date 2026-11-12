@@ -496,7 +496,9 @@ plot.mm_carryover_joint <- function(x, truth = NULL, ...) {
 #' @param reference Optional value drawn as a muted vertical line -- `1` for
 #'   an ROI's break-even point, `0` for a coefficient.
 #' @param xlab Axis label.
-#' @param ... Ignored.
+#' @param ... Graphical arguments: `main` and `ylab` replace the defaults, and
+#'   `col` colours each term's interval and dot, recycled in the row order of
+#'   `x`. Others are ignored.
 #'
 #' @return `x`, invisibly.
 #'
@@ -507,35 +509,43 @@ plot.mm_carryover_joint <- function(x, truth = NULL, ...) {
 #' plot(b, reference = 0)
 #' @export
 plot.mm_bootstrap <- function(x, reference = NULL, xlab = "Estimate", ...) {
-  op <- .mm_par(mar = c(4, 7, 3, 1))
-  on.exit(graphics::par(op), add = TRUE)
+  d <- as.data.frame(x)
+  .mm_plot_needs(d, c("term", "estimate", "lower", "upper"),
+                 "block_bootstrap")
+  dots <- list(...)
   level <- attr(x, "level")
   if (is.null(level)) level <- 0.9
-  x <- as.data.frame(x)
-  x <- x[order(x$estimate), ]
-  k <- nrow(x)
-  xl <- range(c(x$lower, x$upper, reference), na.rm = TRUE)
+  cols <- rep_len(.mm_arg(dots, "col", .mm_cat()[["blue"]]), nrow(d))
+  ord <- order(d$estimate)
+  d <- d[ord, , drop = FALSE]
+  cols <- cols[ord]
+  k <- nrow(d)
+  xl <- .mm_lim(c(d$lower, d$upper, d$estimate, reference),
+                what = "estimates")
+  labs <- .mm_fit_labels(d$term)
+  op <- .mm_par(mar = c(4, labs$lines, 3, 1))
+  on.exit(graphics::par(op), add = TRUE)
   ink <- .mm_ink()
-  col <- .mm_cat()[["blue"]]
   graphics::plot.new()
   graphics::plot.window(xlim = xl + c(-0.03, 0.03) * diff(xl),
                         ylim = c(0.5, k + 0.5))
   graphics::abline(v = pretty(xl), col = ink[["grid"]], lwd = 0.8)
   .mm_xaxis()
-  graphics::axis(2, at = seq_len(k), labels = x$term, las = 1, lwd = 0,
+  graphics::axis(2, at = seq_len(k), labels = labs$labels, las = 1, lwd = 0,
                  col.axis = ink[["secondary"]], cex.axis = 0.85)
   if (!is.null(reference)) {
     graphics::abline(v = reference, col = ink[["muted"]], lwd = 1.2)
   }
-  graphics::segments(x$lower, seq_len(k), x$upper, seq_len(k), col = col,
+  graphics::segments(d$lower, seq_len(k), d$upper, seq_len(k), col = cols,
                      lwd = 2)
-  graphics::points(x$estimate, seq_len(k), pch = 21, bg = col,
+  graphics::points(d$estimate, seq_len(k), pch = 21, bg = cols,
                    col = ink[["surface"]], cex = 1.5, lwd = 2)
-  graphics::title(main = sprintf("Estimates with %d%% block-bootstrap intervals",
-                                 round(100 * level)),
-                  col.main = ink[["primary"]], font.main = 1, cex.main = 1,
-                  adj = 0, line = 1.2)
-  .mm_axis_titles(xlab)
+  main <- .mm_arg(dots, "main",
+                  sprintf("Estimates with %d%% block-bootstrap intervals",
+                          round(100 * level)))
+  graphics::title(main = main, col.main = ink[["primary"]], font.main = 1,
+                  cex.main = 1, adj = 0, line = 1.2)
+  .mm_axis_titles(xlab, .mm_arg(dots, "ylab", ""))
   invisible(x)
 }
 
@@ -551,9 +561,18 @@ plot.mm_bootstrap <- function(x, reference = NULL, xlab = "Estimate", ...) {
 #'
 #' @param x A data frame from [contributions()].
 #' @param type `"time"` (the default) or `"total"`.
-#' @param ... Ignored.
+#' @param ... Graphical arguments: `main`, `xlab` and `ylab` replace the
+#'   defaults, and `col` gives one colour per channel, in the order the
+#'   channels first appear in `x`. Others are ignored.
 #'
 #' @return `x`, invisibly.
+#'
+#' @details
+#' Periods are drawn in sorted order: dates and date-times on a date axis,
+#' numbers at their values, and text labels in sort order, so pass a factor
+#' to set the order of text labels. With more than eight channels the time
+#' chart keeps the seven largest and draws the rest together as "Other", with
+#' a message. A missing contribution is counted as zero, with a warning.
 #'
 #' @examples
 #' data(mm_weekly)
@@ -570,87 +589,159 @@ plot.mm_bootstrap <- function(x, reference = NULL, xlab = "Estimate", ...) {
 #' @export
 plot.mm_contributions <- function(x, type = c("time", "total"), ...) {
   type <- match.arg(type)
-  x <- as.data.frame(x)
-  base_total <- sum(x$contribution[x$channel == "(baseline)"])
-  m <- x[x$channel != "(baseline)", ]
-  ch <- unique(m$channel)
-  if (length(ch) > 8L) {
-    cli::cli_abort("Plot at most 8 channels; fold the smallest into one column.")
+  d <- as.data.frame(x)
+  .mm_plot_needs(d, c("period", "channel", "contribution"), "contributions")
+  dots <- list(...)
+  d$channel <- as.character(d$channel)
+  bad <- !is.finite(d$contribution)
+  if (any(bad)) {
+    cli::cli_warn(c(
+      "{sum(bad)} contribution{?s} {?is/are} missing or infinite and \\
+       {?is/are} counted as zero.",
+      i = "Channel{?s} affected: {.val {unique(d$channel[bad])}}."
+    ))
+    d$contribution[bad] <- 0
   }
-  cols <- stats::setNames(.mm_cat()[seq_along(ch)], ch)
+  base <- d$channel %in% "(baseline)"
+  m <- d[!base, , drop = FALSE]
+  if (nrow(m) == 0L) {
+    cli::cli_abort(c(
+      "{.arg x} has no media channel to plot.",
+      i = "It holds only the {.val (baseline)} rows."
+    ))
+  }
+  ch <- unique(m$channel)
+  col_for <- function(chs) {
+    stats::setNames(unname(rep_len(.mm_arg(dots, "col", .mm_cat()),
+                                   length(chs))), chs)
+  }
+  cols <- col_for(ch)
   ink <- .mm_ink()
-  sub <- sprintf("Baseline (not shown): %s in total, %.0f%% of the prediction.",
-                 format(round(base_total), big.mark = ","),
-                 100 * base_total / sum(x$contribution))
+  base_total <- sum(d$contribution[base])
+  pred <- sum(d$contribution)
+  share <- 100 * base_total / pred
+  sub <- if (is.finite(share) && share >= 0 && share <= 100) {
+    sprintf("Baseline (not shown): %s in total, %.0f%% of the prediction.",
+            .mm_short(base_total), share)
+  } else {
+    sprintf("Baseline (not shown): %s in total, against a prediction of %s.",
+            .mm_short(base_total), .mm_short(pred))
+  }
   if (type == "total") {
-    op <- .mm_par(mar = c(4, 7, 3.4, 1))
-    on.exit(graphics::par(op), add = TRUE)
     tot <- sort(tapply(m$contribution, m$channel, sum))
     k <- length(tot)
-    xl <- range(c(0, tot))
+    labs <- .mm_fit_labels(names(tot))
+    op <- .mm_par(mar = c(4, labs$lines, 3.4, 1))
+    on.exit(graphics::par(op), add = TRUE)
+    lo <- min(0, tot)
+    hi <- max(0, tot)
+    if (hi == lo) hi <- 1
+    w <- hi - lo
+    xl <- c(lo - if (lo < 0) 0.14 * w else 0, hi + if (hi > 0) 0.14 * w else 0)
+    at <- pretty(c(lo, hi))
+    at <- at[at >= xl[1L] & at <= xl[2L]]
     graphics::plot.new()
-    graphics::plot.window(xlim = xl * c(1, 1.12), ylim = c(0.4, k + 0.6))
-    graphics::abline(v = pretty(xl), col = ink[["grid"]], lwd = 0.8)
+    graphics::plot.window(xlim = xl, ylim = c(0.4, k + 0.6))
+    graphics::abline(v = at, col = ink[["grid"]], lwd = 0.8)
+    bar_col <- if (is.null(dots[["col"]])) .mm_cat()[["blue"]] else
+      cols[names(tot)]
     graphics::rect(0, seq_len(k) - 0.28, tot, seq_len(k) + 0.28,
-                   col = .mm_cat()[["blue"]], border = ink[["surface"]], lwd = 2)
-    .mm_xaxis(at = pretty(xl))
-    graphics::axis(2, at = seq_len(k), labels = names(tot), las = 1, lwd = 0,
+                   col = bar_col, border = ink[["surface"]], lwd = 2)
+    .mm_xaxis(at = at)
+    graphics::axis(2, at = seq_len(k), labels = labs$labels, las = 1, lwd = 0,
                    col.axis = ink[["secondary"]], cex.axis = 0.85)
-    graphics::text(tot, seq_len(k), format(round(tot), big.mark = ","),
-                   pos = 4, cex = 0.75, col = ink[["secondary"]], xpd = TRUE)
-    graphics::title(main = "Total contribution by channel",
-                    col.main = ink[["primary"]], font.main = 1, cex.main = 1,
-                    adj = 0, line = 2)
-    .mm_axis_titles("Contribution")
+    graphics::text(tot, seq_len(k), .mm_short(tot),
+                   pos = ifelse(tot < 0, 2, 4), cex = 0.75,
+                   col = ink[["secondary"]], xpd = TRUE)
+    main <- .mm_arg(dots, "main", "Total contribution by channel")
+    graphics::title(main = main, col.main = ink[["primary"]], font.main = 1,
+                    cex.main = 1, adj = 0, line = 2)
+    .mm_axis_titles(.mm_arg(dots, "xlab", "Contribution"),
+                    .mm_arg(dots, "ylab", ""))
     graphics::mtext(sub, side = 3, line = 0.6, adj = 0, cex = 0.75,
                     col = ink[["secondary"]])
     return(invisible(x))
   }
+  series <- stats::setNames(as.list(ch), ch)
+  if (length(ch) > 8L) {
+    size <- tapply(abs(m$contribution), m$channel, sum)[ch]
+    big <- ch[order(-size)][seq_len(7L)]
+    small <- setdiff(ch, big)
+    cli::cli_inform(c(
+      "The plot has {length(ch)} channels; the {length(small)} smallest are \\
+       drawn together as {.val Other}.",
+      i = "Folded: {.val {small}}."
+    ))
+    kept <- ch[ch %in% big]
+    series <- c(stats::setNames(as.list(kept), kept), list(Other = small))
+    cols <- c(if (is.null(dots[["col"]])) col_for(kept) else cols[kept],
+              Other = ink[["axis"]])
+  }
+  undated <- is.na(m$period)
+  if (any(undated)) {
+    cli::cli_warn("{sum(undated)} row{?s} with a missing period {?is/are} \\
+                   left out of the time chart.")
+  }
   op <- .mm_par(mar = c(3, 5.2, 3.4, 1))
   on.exit(graphics::par(op), add = TRUE)
-  per <- unique(m$period)
-  mat <- vapply(ch, function(c0) {
-    v <- tapply(m$contribution[m$channel == c0], m$period[m$channel == c0], sum)
-    as.numeric(v[as.character(per)])
+  per <- sort(unique(m$period))
+  at_per <- factor(match(m$period, per), levels = seq_along(per))
+  mat <- vapply(series, function(s) {
+    rows <- m$channel %in% s
+    v <- tapply(m$contribution[rows], at_per[rows], sum)
+    v[is.na(v)] <- 0
+    as.numeric(v)
   }, numeric(length(per)))
-  mat[!is.finite(mat)] <- 0
-  xs <- if (inherits(per, "Date") || inherits(per, "POSIXct")) per else
-    seq_along(per)
-  cum <- t(apply(mat, 1, cumsum))
-  if (length(ch) == 1L) cum <- matrix(cum, ncol = 1L)
-  yl <- range(c(0, cum))
-  .mm_frame(range(as.numeric(xs)), yl * c(1, 1.05),
-            main = "Media contribution by period", sub = sub,
-            xaxt = FALSE, xlab = "", ylab = "Contribution")
-  if (inherits(xs, "Date")) {
-    graphics::axis.Date(1, xs, col = ink[["axis"]], col.axis = ink[["muted"]],
+  mat <- matrix(mat, nrow = length(per))
+  cum <- mat
+  for (j in seq_len(ncol(cum))[-1L]) cum[, j] <- cum[, j - 1L] + mat[, j]
+  dated <- inherits(per, c("Date", "POSIXct"))
+  xs <- if (dated || is.numeric(per)) as.numeric(per) else seq_along(per)
+  .mm_frame(.mm_lim(xs, what = "periods"), .mm_lim(c(0, cum), c(0, 0.05)),
+            main = .mm_arg(dots, "main", "Media contribution by period"),
+            sub = sub, xaxt = FALSE, xlab = .mm_arg(dots, "xlab", ""),
+            ylab = .mm_arg(dots, "ylab", "Contribution"))
+  if (inherits(per, "Date")) {
+    graphics::axis.Date(1, per, col = ink[["axis"]], col.axis = ink[["muted"]],
                         lwd = 0.8, cex.axis = 0.85)
+  } else if (inherits(per, "POSIXct")) {
+    graphics::axis.POSIXct(1, per, col = ink[["axis"]],
+                           col.axis = ink[["muted"]], lwd = 0.8,
+                           cex.axis = 0.85)
+  } else if (is.numeric(per)) {
+    at <- graphics::axTicks(1)
+    .mm_xaxis(at = at, labels = format(at, scientific = FALSE, trim = TRUE,
+                                       drop0trailing = TRUE))
   } else {
-    .mm_xaxis()
+    at <- unique(c(1L, round(pretty(xs))))
+    at <- at[at >= 1L & at <= length(per)]
+    .mm_xaxis(at = at, labels = as.character(per)[at])
   }
   lower <- rep(0, length(per))
-  for (j in seq_along(ch)) {
+  for (j in seq_along(series)) {
     upper <- cum[, j]
-    graphics::polygon(c(as.numeric(xs), rev(as.numeric(xs))),
-                      c(upper, rev(lower)), col = cols[[j]],
+    graphics::polygon(c(xs, rev(xs)), c(upper, rev(lower)), col = cols[[j]],
                       border = ink[["surface"]], lwd = 1.5)
     lower <- upper
   }
-  .mm_legend("topleft", rev(ch), col = rev(cols), pch = 15, pt.cex = 1.4,
-             horiz = FALSE, ncol = min(length(ch), 5L))
+  .mm_legend("topleft", rev(names(series)), col = rev(unname(cols)), pch = 15,
+             pt.cex = 1.4, horiz = FALSE, ncol = min(length(series), 5L))
   invisible(x)
 }
 
 #' Plot a response curve
 #'
 #' Two stacked panels on a shared spend axis: the response and its marginal
-#' return. Spend beyond the observed range is shaded, because there the curve
-#' is extrapolation.
+#' return. Spend outside the observed range, below or above it, is shaded,
+#' because there the curve is extrapolation. The point where the marginal
+#' return is largest in size is marked as the steepest.
 #'
 #' @param x A data frame from [response_curve()].
 #' @param observed Optional numeric vector of the spend levels seen in the
 #'   data (for example the adstocked series); its range is left unshaded.
-#' @param ... Ignored.
+#' @param ... Graphical arguments: `main` and `ylab` replace the upper panel's
+#'   title and axis label, `xlab` the spend axis label, and `col` the line
+#'   colour. Others are ignored.
 #'
 #' @return `x`, invisibly.
 #'
@@ -660,38 +751,60 @@ plot.mm_contributions <- function(x, type = c("time", "total"), ...) {
 #' plot(rc, observed = c(0, 3450))
 #' @export
 plot.mm_response_curve <- function(x, observed = NULL, ...) {
+  d <- as.data.frame(x)
+  .mm_plot_needs(d, c("spend", "response", "marginal"), "response_curve")
+  dots <- list(...)
+  d <- d[order(d$spend), , drop = FALSE]
+  xl <- .mm_lim(d$spend, what = "spend values")
+  obs <- NULL
+  if (!is.null(observed)) {
+    if (!is.numeric(observed)) {
+      cli::cli_abort("{.arg observed} must be numeric, not \\
+                      {.obj_type_friendly {observed}}.")
+    }
+    if (any(is.finite(observed))) obs <- range(observed[is.finite(observed)])
+  }
+  y1 <- .mm_lim(c(0, d$response), what = "responses")
+  y2 <- .mm_lim(c(0, d$marginal), what = "marginal returns")
   op <- .mm_par(mfrow = c(2, 1), mar = c(2.2, 5.2, 2.6, 1))
   on.exit(graphics::par(op), add = TRUE)
   ink <- .mm_ink()
-  col <- .mm_cat()[["blue"]]
-  x <- as.data.frame(x)
-  xl <- range(x$spend)
+  col <- .mm_arg(dots, "col", .mm_cat()[["blue"]])[[1L]]
   shade <- function(yl) {
-    if (is.null(observed)) return(invisible(NULL))
-    hi <- max(observed, na.rm = TRUE)
-    if (hi < xl[2]) {
-      graphics::rect(hi, yl[1], xl[2], yl[2], col = "#f0efec", border = NA)
-      graphics::text(hi, yl[2], " extrapolation", adj = c(0, 1.4), cex = 0.75,
+    if (is.null(obs)) return(invisible(NULL))
+    label <- " extrapolation"
+    fits <- function(w) w >= graphics::strwidth(label, cex = 0.75)
+    if (obs[1L] > xl[1L]) {
+      graphics::rect(xl[1L], yl[1], obs[1L], yl[2], col = "#f0efec",
+                     border = NA)
+      if (fits(obs[1L] - xl[1L])) {
+        graphics::text(xl[1L], yl[2], label, adj = c(0, 1.4), cex = 0.75,
+                       col = ink[["muted"]])
+      }
+    }
+    if (obs[2L] < xl[2L]) {
+      graphics::rect(obs[2L], yl[1], xl[2L], yl[2], col = "#f0efec",
+                     border = NA)
+      graphics::text(obs[2L], yl[2], label, adj = c(0, 1.4), cex = 0.75,
                      col = ink[["muted"]])
     }
   }
-  yl <- range(c(0, x$response))
-  .mm_frame(xl, yl, main = "Response", ylab = "Response", xaxt = FALSE)
-  shade(yl)
-  graphics::abline(h = pretty(yl), col = ink[["grid"]], lwd = 0.8)
-  graphics::lines(x$spend, x$response, col = col, lwd = 2)
+  .mm_frame(xl, y1, main = .mm_arg(dots, "main", "Response"),
+            ylab = .mm_arg(dots, "ylab", "Response"), xaxt = FALSE)
+  shade(y1)
+  graphics::abline(h = pretty(y1), col = ink[["grid"]], lwd = 0.8)
+  graphics::lines(d$spend, d$response, col = col, lwd = 2)
   graphics::par(mar = c(4, 5.2, 2.2, 1))
-  yl2 <- range(c(0, x$marginal))
-  .mm_frame(xl, yl2, main = "Marginal return per unit of spend",
-            xlab = "Spend", ylab = "Marginal")
-  shade(yl2)
-  graphics::abline(h = pretty(yl2), col = ink[["grid"]], lwd = 0.8)
-  graphics::lines(x$spend, x$marginal, col = col, lwd = 2)
-  pk <- which.max(x$marginal)
-  if (pk > 1L && pk < nrow(x)) {
-    graphics::points(x$spend[pk], x$marginal[pk], pch = 21, bg = col,
+  .mm_frame(xl, y2, main = "Marginal return per unit of spend",
+            xlab = .mm_arg(dots, "xlab", "Spend"), ylab = "Marginal")
+  shade(y2)
+  graphics::abline(h = pretty(y2), col = ink[["grid"]], lwd = 0.8)
+  graphics::lines(d$spend, d$marginal, col = col, lwd = 2)
+  pk <- which.max(abs(d$marginal))
+  if (length(pk) == 1L && pk > 1L && pk < nrow(d)) {
+    graphics::points(d$spend[pk], d$marginal[pk], pch = 21, bg = col,
                      col = ink[["surface"]], cex = 1.5, lwd = 2)
-    graphics::text(x$spend[pk], x$marginal[pk], "steepest", pos = 4,
+    graphics::text(d$spend[pk], d$marginal[pk], "steepest", pos = 4,
                    cex = 0.75, col = ink[["secondary"]])
   }
   invisible(x)
@@ -708,9 +821,16 @@ plot.mm_response_curve <- function(x, observed = NULL, ...) {
 #'
 #' @param x A data frame from [attribute()].
 #' @param n Show the `n` channels with the largest mean share.
-#' @param ... Ignored.
+#' @param ... Graphical arguments: `main`, `xlab` and `ylab` replace the
+#'   defaults, and `col` gives the colours of the first-touch, last-touch and
+#'   Markov markers. Others are ignored.
 #'
 #' @return `x`, invisibly.
+#'
+#' @details
+#' A missing share is left out of the plot with a warning. The mean share
+#' that ranks the channels is taken over the shares that are present, and a
+#' channel with no share at all ranks last.
 #'
 #' @examples
 #' data(mm_events)
@@ -719,27 +839,42 @@ plot.mm_response_curve <- function(x, observed = NULL, ...) {
 #' plot(attribute(paths))
 #' @export
 plot.mm_attribution <- function(x, n = 10L, ...) {
-  x <- as.data.frame(x)
+  d <- as.data.frame(x)
+  .mm_plot_needs(d, c("rule", "channel", "share"), "attribute")
   n <- .mm_check_count(n, "n", min = 1L)
-  mean_share <- sort(tapply(x$share, x$channel, mean))
-  keep <- utils::tail(names(mean_share), n)
+  dots <- list(...)
+  miss <- !is.finite(d$share)
+  if (any(miss)) {
+    cli::cli_warn(c(
+      "{sum(miss)} share{?s} {?is/are} missing and left out of the plot.",
+      i = "Channel{?s} affected: {.val {unique(d$channel[miss])}}."
+    ))
+    d$share[miss] <- NA_real_
+  }
+  mean_share <- tapply(d$share, d$channel, mean, na.rm = TRUE)
+  mean_share[!is.finite(mean_share)] <- NA_real_
+  keep <- utils::tail(names(mean_share)[order(mean_share, na.last = FALSE)], n)
   k <- length(keep)
-  op <- .mm_par(mar = c(4, 8, 3.4, 1))
+  labs <- .mm_fit_labels(keep)
+  op <- .mm_par(mar = c(4, labs$lines, 3.4, 1))
   on.exit(graphics::par(op), add = TRUE)
   ink <- .mm_ink()
-  xl <- range(c(0, x$share[x$channel %in% keep]))
+  xl <- .mm_lim(c(0, d$share[d$channel %in% keep]), what = "shares")
+  at <- pretty(xl)
   graphics::plot.new()
   graphics::plot.window(xlim = xl, ylim = c(0.5, k + 0.5))
-  graphics::abline(v = pretty(xl), col = ink[["grid"]], lwd = 0.8)
-  graphics::axis(1, at = pretty(xl), labels = paste0(round(100 * pretty(xl)), "%"),
-                 col = ink[["axis"]], col.axis = ink[["muted"]], lwd = 0.8,
-                 cex.axis = 0.85)
-  graphics::axis(2, at = seq_len(k), labels = keep, las = 1, lwd = 0,
+  graphics::abline(v = at, col = ink[["grid"]], lwd = 0.8)
+  .mm_xaxis(at = at, labels = .mm_pct(at))
+  graphics::axis(2, at = seq_len(k), labels = labs$labels, las = 1, lwd = 0,
                  col.axis = ink[["secondary"]], cex.axis = 0.85)
-  marked <- c(first = "blue", last = "orange", markov = "aqua")
+  marked <- stats::setNames(
+    unname(rep_len(.mm_arg(dots, "col", .mm_cat()[c("blue", "orange", "aqua")]),
+                   3L)),
+    c("first", "last", "markov"))
   pch <- c(first = 21, last = 24, markov = 23)
   for (i in seq_len(k)) {
-    s <- x[x$channel == keep[i], ]
+    s <- d[d$channel == keep[i] & !is.na(d$share), , drop = FALSE]
+    if (nrow(s) == 0L) next
     graphics::segments(min(s$share), i, max(s$share), i, col = "#d6d5ce",
                        lwd = 6, lend = 1)
     other <- s[!s$rule %in% names(marked), ]
@@ -747,20 +882,21 @@ plot.mm_attribution <- function(x, n = 10L, ...) {
                      col = ink[["muted"]], cex = 0.9)
     for (r in intersect(names(marked), s$rule)) {
       graphics::points(s$share[s$rule == r], i, pch = pch[[r]],
-                       bg = .mm_cat()[[marked[[r]]]], col = ink[["surface"]],
+                       bg = marked[[r]], col = ink[["surface"]],
                        cex = 1.5, lwd = 1.5)
     }
   }
-  present <- intersect(names(marked), x$rule)
-  labs <- c(first = "first touch", last = "last touch", markov = "Markov")
-  .mm_legend("bottomright", c(labs[present], "other rules"),
+  present <- intersect(names(marked), d$rule)
+  rule_labs <- c(first = "first touch", last = "last touch", markov = "Markov")
+  .mm_legend("bottomright", c(rule_labs[present], "other rules"),
              col = c(rep(ink[["surface"]], length(present)), ink[["muted"]]),
              pch = c(pch[present], 124),
-             pt.bg = c(.mm_cat()[marked[present]], NA), pt.cex = 1.3)
-  graphics::title(main = "Share of conversions by attribution rule",
-                  col.main = ink[["primary"]], font.main = 1, cex.main = 1,
-                  adj = 0, line = 2)
-  .mm_axis_titles("Share of credited conversions")
+             pt.bg = c(marked[present], NA), pt.cex = 1.3)
+  main <- .mm_arg(dots, "main", "Share of conversions by attribution rule")
+  graphics::title(main = main, col.main = ink[["primary"]], font.main = 1,
+                  cex.main = 1, adj = 0, line = 2)
+  .mm_axis_titles(.mm_arg(dots, "xlab", "Share of credited conversions"),
+                  .mm_arg(dots, "ylab", ""))
   graphics::mtext("Bar: range across every rule. A long bar is a convention, not a measurement.",
                   side = 3, line = 0.6, adj = 0, cex = 0.75,
                   col = ink[["secondary"]])

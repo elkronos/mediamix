@@ -195,3 +195,191 @@ test_that("tick and value labels are short, exact and never scientific", {
   expect_identical(mediamix:::.mm_pct(c(0, 0.005, 0.01, 0.015)),
                    c("0%", "0.5%", "1%", "1.5%"))
 })
+
+test_that("the time plot puts periods on their own axis, in order", {
+  nm <- north_media()
+  n <- nrow(nm$media)
+
+  posix <- contributions(nm$media, nm$fit,
+                         index = as.POSIXct(nm$north$date, tz = "UTC"))
+  expect_length(calls_to(draw_calls(plot(posix)), "axis.POSIXct"), 1L)
+
+  years <- 1990 + seq_len(n)
+  numbered <- contributions(nm$media, nm$fit, index = years)
+  poly <- calls_to(draw_calls(plot(numbered)), "polygon")
+  expect_equal(range(poly[[1L]]$args$x), range(years))
+
+  dated <- contributions(nm$media, nm$fit, index = nm$north$date)
+  backwards <- dated[rev(seq_len(nrow(dated))), ]
+  poly <- calls_to(draw_calls(plot(backwards)), "polygon")
+  expect_false(is.unsorted(poly[[1L]]$args$x[seq_len(n)]))
+})
+
+test_that("a missing contribution or share warns and keeps its channel", {
+  nm <- north_media()
+  gap <- contributions(nm$media, nm$fit, index = nm$north$date)
+  gap$contribution[gap$channel == "tv"][5] <- NA
+  expect_warning(calls <- draw_calls(plot(gap, type = "total")),
+                 "missing")
+  expect_true("tv" %in% left_labels(calls))
+  expect_false(any(grepl("NA%", drawn_text(calls))))
+  expect_warning(draw_calls(plot(gap)), "missing")
+
+  data(mm_events, envir = environment())
+  paths <- build_paths(mm_events, id = "customer_id", channel = "channel",
+                       timestamp = "timestamp", conversion = "conversion")
+  res <- attribute(paths)
+  top <- names(which.max(tapply(res$share, res$channel, mean)))
+  res$share[res$channel == top & res$rule == "linear"] <- NA
+  expect_warning(calls <- draw_calls(plot(res)), "missing")
+  expect_true(top %in% left_labels(calls))
+})
+
+test_that("data frame plot methods name the columns they need", {
+  nm <- north_media()
+  contrib <- contributions(nm$media, nm$fit, index = nm$north$date)
+  expect_error(plot(contrib[, c("period", "channel")]), "contribution",
+               class = "rlang_error")
+
+  data(mm_events, envir = environment())
+  paths <- build_paths(mm_events, id = "customer_id", channel = "channel",
+                       timestamp = "timestamp", conversion = "conversion")
+  res <- attribute(paths)
+  expect_error(plot(res[, c("rule", "channel")]), "share",
+               class = "rlang_error")
+
+  rc <- response_curve(seq(0, 2000, 100), 5, half_max = 500, shape = 2)
+  expect_error(plot(rc[, c("spend", "response")]), "marginal",
+               class = "rlang_error")
+
+  b <- block_bootstrap(data.frame(a = 1:20 + 0), function(d) c(m = mean(d$a)),
+                       times = 10, seed = 1)
+  expect_error(plot(b[, c("term", "estimate")]), "lower",
+               class = "rlang_error")
+})
+
+test_that("degenerate contributions and response curves plot or fail clearly", {
+  nm <- north_media()
+  contrib <- contributions(nm$media, nm$fit, index = nm$north$date)
+  base_only <- contrib[contrib$channel == "(baseline)", ]
+  expect_error(plot(base_only), "no media channel", class = "rlang_error")
+
+  negative <- contributions(nm$media, c(tv = -0.5, search = 0.2),
+                            intercept = 1000, index = nm$north$date)
+  text <- drawn_text(draw_calls(plot(negative, type = "total")))
+  expect_false(any(grepl("[0-9]% of the prediction", text)))
+  expect_true(any(grepl("against a prediction of", text)))
+
+  zero <- contributions(data.frame(tv = rep(0, 5)), c(tv = 1), intercept = 0)
+  text <- drawn_text(draw_calls(plot(zero)))
+  expect_false(any(grepl("NaN", text)))
+
+  falling <- response_curve(seq(0, 5000, 100), -2, half_max = 2000, shape = 2)
+  text <- drawn_text(draw_calls(plot(falling)))
+  expect_true("steepest" %in% text)
+})
+
+test_that("data frame plot methods return their input unchanged", {
+  fx <- carryover_fixture()
+  b <- block_bootstrap(data.frame(a = fx$x, b = fx$y), colMeans, times = 20,
+                       seed = 1)
+  expect_identical(with_device(plot(b)), b)
+
+  rc <- response_curve(seq(0, 2000, 100), 5, half_max = 500, shape = 2)
+  expect_identical(with_device(plot(rc, observed = c(0, 900))), rc)
+
+  nm <- north_media()
+  contrib <- contributions(nm$media, nm$fit, index = nm$north$date)
+  expect_identical(with_device(plot(contrib)), contrib)
+  expect_identical(with_device(plot(contrib, type = "total")), contrib)
+
+  data(mm_events, envir = environment())
+  paths <- build_paths(mm_events, id = "customer_id", channel = "channel",
+                       timestamp = "timestamp", conversion = "conversion")
+  res <- attribute(paths)
+  expect_identical(with_device(plot(res)), res)
+})
+
+test_that("small shares and large totals get readable labels", {
+  data(mm_events, envir = environment())
+  paths <- build_paths(mm_events, id = "customer_id", channel = "channel",
+                       timestamp = "timestamp", conversion = "conversion")
+  res <- attribute(paths)
+  small <- res[res$share < 0.035, ]
+  bottom <- Filter(function(cl) identical(cl$args$side, 1),
+                   calls_to(draw_calls(plot(small)), "axis"))
+  ticks <- bottom[[1L]]$args$labels
+  expect_identical(anyDuplicated(ticks), 0L)
+  expect_true("0.5%" %in% ticks)
+
+  nm <- north_media()
+  big <- contributions(nm$media, nm$fit, index = nm$north$date)
+  big$contribution <- big$contribution * 1e5
+  text <- drawn_text(draw_calls(plot(big, type = "total")))
+  expect_true(any(grepl("^[0-9.]+B$", text)))
+  expect_false(any(grepl("e\\+", text)))
+})
+
+test_that("long term names widen the margin instead of being clipped", {
+  long <- "a_really_long_term_name_for_a_channel"
+  d <- data.frame(x = seq(1, 2, length.out = 30),
+                  b = seq(2, 3, length.out = 30))
+  names(d)[1] <- long
+  b <- block_bootstrap(d, colMeans, times = 10, seed = 1)
+  calls <- draw_calls(plot(b), fns = c("par", "axis"))
+  set <- Filter(function(cl) !is.null(cl$args$mar), calls_to(calls, "par"))
+  grDevices::pdf(NULL)
+  need <- graphics::strwidth(long, units = "inches", cex = 0.85) /
+    (graphics::par("csi") * graphics::par("mex"))
+  grDevices::dev.off()
+  expect_gt(set[[1L]]$args$mar[2], need)
+  expect_true(long %in% left_labels(calls))
+})
+
+test_that("the time plot folds channels past the eighth into Other", {
+  ten <- as.data.frame(lapply(stats::setNames(1:10, paste0("c", 1:10)),
+                              function(i) i * (1 + sin(seq_len(30) + i))))
+  wide <- contributions(ten, stats::setNames(rep(1, 10), names(ten)),
+                        intercept = 100)
+  expect_message(calls <- draw_calls(plot(wide)), "Other")
+  expect_length(calls_to(calls, "polygon"), 8L)
+  expect_length(calls_to(draw_calls(plot(wide, type = "total")), "rect"), 1L)
+})
+
+test_that("the response curve shades spend below the observed range too", {
+  rc <- response_curve(seq(0, 2000, 100), 5, half_max = 500, shape = 2)
+  rects <- calls_to(draw_calls(plot(rc, observed = c(500, 900))), "rect")
+  expect_length(rects, 4L)
+  right_edges <- vapply(rects, function(cl) cl$args$xright, numeric(1))
+  expect_true(500 %in% right_edges)
+})
+
+test_that("data frame plot methods take main, xlab, ylab and col", {
+  fx <- carryover_fixture()
+  b <- block_bootstrap(data.frame(a = fx$x), function(d) c(m = mean(d$a)),
+                       times = 10, seed = 1)
+  calls <- draw_calls(plot(b, main = "Mean spend", col = "black"))
+  expect_true("Mean spend" %in% drawn_text(calls))
+  expect_identical(calls_to(calls, "segments")[[1L]]$args$col, "black")
+
+  nm <- north_media()
+  contrib <- contributions(nm$media, nm$fit, index = nm$north$date)
+  calls <- draw_calls(plot(contrib, main = "Media", ylab = "Revenue",
+                           col = c("black", "grey")))
+  expect_true(all(c("Media", "Revenue") %in% drawn_text(calls)))
+  fills <- vapply(calls_to(calls, "polygon"), function(cl) cl$args$col, "")
+  expect_identical(fills, c("black", "grey"))
+
+  rc <- response_curve(seq(0, 2000, 100), 5, half_max = 500, shape = 2)
+  calls <- draw_calls(plot(rc, main = "TV", xlab = "Weekly spend",
+                           col = "black"))
+  expect_true(all(c("TV", "Weekly spend") %in% drawn_text(calls)))
+  expect_identical(calls_to(calls, "lines")[[1L]]$args$col, "black")
+
+  data(mm_events, envir = environment())
+  paths <- build_paths(mm_events, id = "customer_id", channel = "channel",
+                       timestamp = "timestamp", conversion = "conversion")
+  calls <- draw_calls(plot(attribute(paths), main = "Rules",
+                           xlab = "Share"))
+  expect_true(all(c("Rules", "Share") %in% drawn_text(calls)))
+})

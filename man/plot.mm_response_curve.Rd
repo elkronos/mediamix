@@ -12,15 +12,18 @@
 \item{observed}{Optional numeric vector of the spend levels seen in the
 data (for example the adstocked series); its range is left unshaded.}
 
-\item{...}{Ignored.}
+\item{...}{Graphical arguments: \code{main} and \code{ylab} replace the upper panel's
+title and axis label, \code{xlab} the spend axis label, and \code{col} the line
+colour. Others are ignored.}
 }
 \value{
 \code{x}, invisibly.
 }
 \description{
 Two stacked panels on a shared spend axis: the response and its marginal
-return. Spend beyond the observed range is shaded, because there the curve
-is extrapolation.
+return. Spend outside the observed range, below or above it, is shaded,
+because there the curve is extrapolation. The point where the marginal
+return is largest in size is marked as the steepest.
 }
 \examples{
 rc <- response_curve(seq(0, 6000, by = 100), coefficient = 6000,
