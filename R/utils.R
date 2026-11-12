@@ -101,7 +101,17 @@
 .mm_check_by <- function(by, n, call = parent.frame()) {
   if (is.null(by)) return(NULL)
   if (is.data.frame(by)) {
-    by <- .mm_paste_key(by)
+    if (ncol(by) == 0L) {
+      cli::cli_abort("{.arg by} is a data frame with no columns.", call = call)
+    }
+    if (nrow(by) != n) {
+      cli::cli_abort(
+        "{.arg by} must have the same length as {.arg x} ({n}), not {nrow(by)}.",
+        call = call
+      )
+    }
+    .mm_check_key_columns(by, "by", call = call)
+    return(.mm_paste_key(by))
   }
   if (length(by) != n) {
     cli::cli_abort(
@@ -112,7 +122,50 @@
   if (anyNA(by)) {
     cli::cli_abort("{.arg by} must not contain missing values.", call = call)
   }
-  as.character(by)
+  .mm_key_values(by)
+}
+
+# Grouping columns must be complete. Pasted into a key, a missing value reads
+# as the text "NA" and merges with a real "NA" label such as North America.
+#' @keywords internal
+#' @noRd
+.mm_check_key_columns <- function(cols, arg = "by", call = parent.frame()) {
+  for (j in seq_along(cols)) {
+    n_missing <- sum(is.na(cols[[j]]))
+    if (n_missing > 0L) {
+      col <- names(cols)[j]
+      cli::cli_abort(c(
+        "Column {.val {col}} of {.arg {arg}} has {n_missing} missing \\
+         value{?s}.",
+        i = "Recode them to a named group, or drop those rows."
+      ), call = call)
+    }
+  }
+  invisible(TRUE)
+}
+
+# One grouping column as character keys that depend only on the values: a
+# whole number gives the same key whether it is stored as integer or double,
+# distinct doubles never share a key, and date-times are written in UTC
+# rather than in the session's time zone.
+#' @keywords internal
+#' @noRd
+.mm_key_values <- function(v) {
+  if (is.factor(v)) return(as.character(v))
+  if (inherits(v, "POSIXt")) {
+    out <- format(as.POSIXct(v), "%Y-%m-%d %H:%M:%OS6", tz = "UTC")
+    return(sub("\\.?0+$", "", out))
+  }
+  if (inherits(v, "Date")) return(format(v))
+  if (!is.double(v)) return(as.character(v))
+  out <- as.character(v)
+  whole <- is.finite(v) & v == trunc(v) & abs(v) < 2^53
+  # Adding zero turns -0 into 0, which would otherwise print as "-0".
+  out[whole] <- sprintf("%.0f", v[whole] + 0)
+  rest <- which(is.finite(v) & !whole)
+  inexact <- rest[as.numeric(out[rest]) != v[rest]]
+  out[inexact] <- sprintf("%.17g", v[inexact])
+  out
 }
 
 #' @keywords internal
@@ -155,10 +208,13 @@
 #' @noRd
 .mm_key_sep <- function() "\x1f"
 
+# Columns are unnamed before the call so that a column called `sep` or
+# `collapse` cannot be taken for an argument of paste().
 #' @keywords internal
 #' @noRd
 .mm_paste_key <- function(cols) {
-  do.call(paste, c(lapply(cols, as.character), list(sep = .mm_key_sep())))
+  parts <- unname(lapply(cols, .mm_key_values))
+  do.call(paste, c(parts, list(sep = .mm_key_sep())))
 }
 
 # Split a joined key back into its parts, for display.

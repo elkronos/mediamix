@@ -447,3 +447,42 @@ test_that("counts can carry an upper bound, and say which number they got", {
                "not 2.9999999999999996")
   expect_error(adstock_geometric(1:3, 1.0000000000000002), "not 1.0000000000000002")
 })
+
+# ---- 10. Group keys --------------------------------------------------------------
+
+test_that("a missing value in a data-frame by is an error, not the label NA", {
+  # Pasted into a key, NA used to become the text "NA" and merge with a real
+  # "NA" label (North America here), pooling the two regions.
+  by <- data.frame(region = c("NA", "NA", "NA", NA, NA, NA))
+  expect_error(
+    adstock_geometric(c(100, 50, 25, 50, 25, 12.5), decay = 0.5, by = by),
+    class = "rlang_error", regexp = "region"
+  )
+})
+
+test_that("group keys depend on the values, not on how they are stored", {
+  x <- c(1, 2, 3, 4)
+  # A whole number keys the same whether it is a double or an integer.
+  s <- adstock_state(x, decay = 0.5, by = c(1e5, 1e5, 2, 2))
+  expect_identical(names(s), c("100000", "2"))
+  expect_equal(
+    adstock_geometric(c(5, 5), decay = 0.5, by = c(100000L, 2L), state = s),
+    c(adstock_geometric(5, decay = 0.5, state = s[[1]]),
+      adstock_geometric(5, decay = 0.5, state = s[[2]]))
+  )
+
+  # Distinct doubles that print alike stay distinct groups.
+  expect_equal(adstock_geometric(c(100, 100), decay = 0.5, by = c(0.1 + 0.2, 0.3)),
+               c(50, 50))
+
+  # Date-times are keyed in UTC, whatever the session time zone.
+  key_in <- function(tz) {
+    old <- Sys.getenv("TZ", unset = NA)
+    on.exit(if (is.na(old)) Sys.unsetenv("TZ") else Sys.setenv(TZ = old))
+    Sys.setenv(TZ = tz)
+    t <- .POSIXct(1710072000)
+    names(adstock_state(c(1, 2), decay = 0.5, by = c(t, t)))
+  }
+  expect_identical(key_in("UTC"), "2024-03-10 12:00:00")
+  expect_identical(key_in("America/New_York"), "2024-03-10 12:00:00")
+})
