@@ -99,7 +99,12 @@ start-up bias of long-carryover channels. As in \code{\link[=tune_carryover]{tun
 seed uses no media from beyond the first training window.}
 
 \item{cores}{Number of cores over which each channel's grid points are
-scored. See \code{\link[=tune_carryover]{tune_carryover()}}.}
+scored. Values above 1 use \code{\link[parallel:mclapply]{parallel::mclapply()}} on Unix-alikes and a
+socket cluster elsewhere. The workers of a socket cluster are new R
+sessions that load \pkg{mediamix} and nothing else, so there \code{fit_fn}
+and \code{predict_fn} must call other packages with \code{pkg::fun()} and must not
+rely on functions or data defined in your session. \code{metric_fn} runs in
+your session.}
 
 \item{by, index}{Panel data. \code{by} assigns each row to a series, as a vector
 or a data frame of key columns, and \code{index} gives each row's period, as a

@@ -80,8 +80,9 @@ Ignored otherwise.}
 \item{cores}{Number of cores. Values above 1 use \code{\link[parallel:mclapply]{parallel::mclapply()}} on
 Unix-alikes and a socket cluster elsewhere. The workers of a socket
 cluster are new R sessions that load \pkg{mediamix} and nothing else, so
-there \code{fit_fn}, \code{predict_fn} and \code{metric_fn} must call other packages with
-\code{pkg::fun()} and must not rely on helpers defined in your session.}
+there \code{fit_fn} and \code{predict_fn} must call other packages with
+\code{pkg::fun()} and must not rely on functions or data defined in your
+session. \code{metric_fn} runs in your session.}
 
 \item{aggregate}{How to turn the assessment sets into one score.
 \code{"pooled"} (the default) collects every out-of-sample prediction across

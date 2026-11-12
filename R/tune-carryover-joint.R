@@ -31,7 +31,12 @@
 #'   start-up bias of long-carryover channels. As in [tune_carryover()], the
 #'   seed uses no media from beyond the first training window.
 #' @param cores Number of cores over which each channel's grid points are
-#'   scored. See [tune_carryover()].
+#'   scored. Values above 1 use [parallel::mclapply()] on Unix-alikes and a
+#'   socket cluster elsewhere. The workers of a socket cluster are new R
+#'   sessions that load \pkg{mediamix} and nothing else, so there `fit_fn`
+#'   and `predict_fn` must call other packages with `pkg::fun()` and must not
+#'   rely on functions or data defined in your session. `metric_fn` runs in
+#'   your session.
 #' @inheritParams tune_carryover
 #'
 #' @return An object of class `mm_carryover_joint`: a list with

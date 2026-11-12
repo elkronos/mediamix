@@ -57,8 +57,9 @@
 #' @param cores Number of cores. Values above 1 use [parallel::mclapply()] on
 #'   Unix-alikes and a socket cluster elsewhere. The workers of a socket
 #'   cluster are new R sessions that load \pkg{mediamix} and nothing else, so
-#'   there `fit_fn`, `predict_fn` and `metric_fn` must call other packages with
-#'   `pkg::fun()` and must not rely on helpers defined in your session.
+#'   there `fit_fn` and `predict_fn` must call other packages with
+#'   `pkg::fun()` and must not rely on functions or data defined in your
+#'   session. `metric_fn` runs in your session.
 #' @param aggregate How to turn the assessment sets into one score.
 #'   `"pooled"` (the default) collects every out-of-sample prediction across
 #'   splits and evaluates `metric_fn` once on the lot, so `rmse` really is the
