@@ -17,7 +17,8 @@ A data frame with 468 rows and 11 columns:
 }
 }
 \source{
-Simulated. See \code{data-raw/make_mm_weekly.R} in the package sources.
+Simulated. See \code{data-raw/make_mm_weekly.R} in the source repository,
+\url{https://github.com/elkronos/mediamix}.
 }
 \usage{
 mm_weekly
@@ -43,14 +44,15 @@ and search is the short-carryover, immediately-responding one (decay 0.15).
 Channels are flighted, so several contain runs of zero-spend weeks: dark
 periods are the normal case in media data, not an edge case.
 
-The scalar elements of \code{"truth"} (\code{decay}, \code{half_max}, \code{shape}, \code{beta},
-\code{baseline}, \code{price_beta}, \code{trend}, \code{noise_sd}) describe north. Each
-geography has a scale factor, stored as \code{geo_scale} (north 1, central 0.72,
-south 1.35), that multiplies its spend, half-saturation points,
-coefficients, baseline, trend, December uplift (\code{holiday_uplift} at scale 1)
-and price effect; the noise standard deviation is multiplied by the square
-root of the scale. Seasonality moves revenue by \code{season_amplitude} times the
-scaled baseline, and price enters centred on its mean within the geography.
+The per-channel vectors \code{decay}, \code{half_max}, \code{shape} and \code{beta} in
+\code{"truth"}, and the single numbers \code{baseline}, \code{price_beta}, \code{trend} and
+\code{noise_sd}, describe north. Each geography has a scale factor, stored as
+\code{geo_scale} (north 1, central 0.72, south 1.35), that multiplies its spend,
+half-saturation points, coefficients, baseline, trend, December uplift
+(\code{holiday_uplift} at scale 1) and price effect; the noise standard
+deviation is multiplied by the square root of the scale. The seasonal term
+is \code{season_amplitude} times the scaled baseline times \code{seasonality - 1},
+and price enters centred on its mean within the geography.
 \code{by_geo} lists every channel's decay, half-saturation point, shape and
 coefficient for each geography, which is the table to check a
 per-geography model against. Decays and shapes are the same everywhere, so
