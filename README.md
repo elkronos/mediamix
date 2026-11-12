@@ -57,10 +57,10 @@ model you choose:
 - `attribute()` runs five rule-based credit schemes and an order-1
   Markov removal-effect model side by side, and `attribution_spread()`
   reports how much the answer depends on the choice.
-- `decay_from_half_life()`, `half_life()` and `effective_window()`
-  translate a decay coefficient into the half-life practitioners talk in
-  and the number of periods the carryover needs, one vocabulary for both
-  halves of the package.
+- `decay_from_half_life()` and `half_life()` translate between a decay
+  coefficient and the half-life practitioners talk in, and
+  `effective_window()` gives the number of periods that hold 90% of the
+  effect; both halves of the package use this one vocabulary.
 
 ## Scope
 
@@ -154,12 +154,13 @@ the fitted revenue into one part per channel and a baseline, and `roi()`
 divides each channel’s contribution by its spend:
 
 ``` r
-media <- as.data.frame(lapply(stats::setNames(channels, channels), function(ch) {
+one_channel <- function(ch) {
   media_transform(north[[ch]],
                   adstock = list(decay = truth$decay[[ch]]),
                   saturation = list(half_max = truth$half_max[[ch]],
                                     shape = truth$shape[[ch]]))
-}))
+}
+media <- as.data.frame(sapply(channels, one_channel))
 fit <- lm(north$revenue ~ ., data = cbind(media, controls))
 contrib <- contributions(media, fit, index = north$date)
 roi(contrib, north[channels])
