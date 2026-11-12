@@ -292,6 +292,8 @@ The step drops \code{index} and \code{by} from the selection before checking col
 types. To give each channel its own step in a loop, write \code{all_of(!!ch)}:
 selectors are evaluated when the recipe is prepared, after the loop has
 finished, so a bare \code{all_of(ch)} selects the last channel in every step.
+\code{\link[=step_adstock_channels]{step_adstock_channels()}} adds one step per channel without a loop, with a
+decay or a tuning parameter for each.
 }
 
 \section{Tidying}{
@@ -360,5 +362,6 @@ head(baked_delayed[c("date", "geo", "tv", "adstock_tv")])
 }
 \seealso{
 \code{\link[=adstock_geometric]{adstock_geometric()}}, \code{\link[=adstock_weibull]{adstock_weibull()}}, \code{\link[=adstock_delayed]{adstock_delayed()}},
-\code{\link[=adstock_steady_state]{adstock_steady_state()}}, \code{\link[=step_saturation]{step_saturation()}}, \code{\link[=carryover_decay]{carryover_decay()}}
+\code{\link[=adstock_steady_state]{adstock_steady_state()}}, \code{\link[=step_adstock_channels]{step_adstock_channels()}}, \code{\link[=step_saturation]{step_saturation()}},
+\code{\link[=carryover_decay]{carryover_decay()}}
 }

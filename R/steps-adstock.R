@@ -220,6 +220,8 @@
 #' types. To give each channel its own step in a loop, write `all_of(!!ch)`:
 #' selectors are evaluated when the recipe is prepared, after the loop has
 #' finished, so a bare `all_of(ch)` selects the last channel in every step.
+#' [step_adstock_channels()] adds one step per channel without a loop, with a
+#' decay or a tuning parameter for each.
 #'
 #' @section Tidying:
 #' `tidy()` returns a tibble with one row per selected column per group and
@@ -252,7 +254,8 @@
 #' series' first periods.
 #'
 #' @seealso [adstock_geometric()], [adstock_weibull()], [adstock_delayed()],
-#'   [adstock_steady_state()], [step_saturation()], [carryover_decay()]
+#'   [adstock_steady_state()], [step_adstock_channels()], [step_saturation()],
+#'   [carryover_decay()]
 #'
 #' @examplesIf requireNamespace("recipes", quietly = TRUE)
 #' library(recipes)
