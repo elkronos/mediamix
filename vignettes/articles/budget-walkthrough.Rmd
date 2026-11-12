@@ -40,8 +40,8 @@ d$collinearity[, c("channel", "vif", "most_correlated_with", "correlation")]
 smoothed series correlate more than raw spend and the model sees the smoothed
 ones. No channel is collinear enough to make its coefficient meaningless, and
 every one varies. Video and display are dark in a third or more of weeks, so they
-carry less information than their row count suggests — worth remembering when
-their numbers come out.
+carry less information than their row count suggests, which is worth
+remembering when their numbers come out.
 
 ## 2. Carryover: how well does the data identify it?
 
@@ -66,13 +66,12 @@ plot(joint, truth = truth$decay)
 Television, social and display land within 0.1 of the truth and video within
 0.2. Search does not, and its profile says why: it is nearly flat, so the data holds
 almost no information about search's carryover. The one-standard-error
-choice falls back to a short carryover, which is both the conservative claim
-and, here, close to right.
+choice falls back to a short carryover, which here is close to right.
 
 The joint search does not tune saturation. To keep this walkthrough about the
 *decision* rather than the estimation, the rest of it uses the generating
-parameters — what a full joint search over carryover *and* saturation, as in
-`vignette("tidymodels")`, is trying to reach. Section 7 comes back to what
+parameters, which is what a full joint search over carryover *and*
+saturation, as in `vignette("tidymodels")`, is trying to reach. Section 7 comes back to what
 happens when television's carryover is uncertain.
 
 ## 3. Fit the model
@@ -131,8 +130,8 @@ marginal[order(-marginal$mroi), ]
 The ranking changes. Social still has the highest marginal return, but
 television is no longer at the bottom: its S-shaped response means its next
 pound works nearly as hard as its average one. Display is now last, and its
-marginal return is below 1 — the last pounds spent on it did not pay for
-themselves.
+estimated marginal return is below 1: in this model, the last pounds spent on
+it did not pay for themselves.
 
 ```{r avg-vs-marginal, fig.height = 3.8}
 ink <- mm_palette(role = "ink")
@@ -158,17 +157,18 @@ legend("bottomright", c("average", "marginal"), pch = 21,
 par(op)
 ```
 
-So the candidate move is *display to social*, not *television to social*.
+So in this model the candidate move is *display to social*, not *television
+to social*.
 
 ## 6. How sure are we?
 
 Every number so far is a point estimate from one sample of 156 weeks. A block
 bootstrap resamples runs of consecutive weeks, refits the model, and
 recomputes, which shows how much of the ranking survives sampling noise. The
-transform is not re-run on the resampled rows — that would glue unrelated
-weeks together and carry spend across the joins — so each replicate refits
-the coefficients on resampled rows and recomputes average and marginal return
-on the original spend plan:
+transform is not re-run on the resampled rows, because that would glue
+unrelated weeks together and carry spend across the joins. Each replicate
+refits the coefficients on resampled rows and recomputes average and marginal
+return on the original spend plan:
 
 ```{r}
 boot_data <- cbind(revenue = north$revenue, media, controls)
@@ -193,18 +193,21 @@ boot
 plot(boot, reference = 1, xlab = "Revenue per pound")
 ```
 
-The intervals are wide. Only television's returns are clearly above
-break-even; every other channel's interval crosses 1, and display's reaches
-below zero. Two channels' intervals overlapping does not settle a comparison
-between them, though — their estimates move together from replicate to
-replicate — so ask the paired question directly:
+The intervals are wide. Only `r knitr::combine_words(boot$term[boot$lower > 1])`
+have intervals entirely above break-even; every other interval crosses 1, and
+display's reaches below zero. They hold the transforms at the true parameters
+chosen in section 3, so they show sampling uncertainty in the coefficients
+only. Two channels' intervals overlapping does not settle a comparison between
+them, because their estimates move together from replicate to replicate, so
+ask the paired question directly:
 
 ```{r}
 reps <- attr(boot, "replicates")
-c(social_beats_display = mean(reps[, "social: marginal"] >
-                                reps[, "display: marginal"]),
-  social_beats_tv      = mean(reps[, "social: marginal"] >
-                                reps[, "tv: marginal"]))
+paired <- c(social_beats_display = mean(reps[, "social: marginal"] >
+                                          reps[, "display: marginal"]),
+            social_beats_tv      = mean(reps[, "social: marginal"] >
+                                          reps[, "tv: marginal"]))
+paired
 ```
 
 That is the honest strength of the evidence for moving money into social:
@@ -247,10 +250,10 @@ rbind(
 )
 ```
 
-Moving a tenth of display's budget into social raises predicted revenue at no
-extra cost. Moving the *same amount* out of television instead — the move the
-average-ROI table suggested — gains less, because it gives up television's
-still-steep response. Moving two and a half times as much out of display
+In the model, moving a tenth of display's budget into social raises predicted
+revenue at no extra cost. Moving the *same amount* out of television instead,
+the move the average-ROI table suggested, gains less, because it gives up
+television's still-steep fitted response. Moving two and a half times as much out of display
 gains more in total but less per pound, as social climbs its own curve.
 
 Two checks before this goes in a deck. First, is the new plan inside the data?
@@ -291,26 +294,74 @@ c(tv_decay = tv_alt,
 
 Television's marginal return depends heavily on a carryover the data only
 loosely identifies: at the shorter decay its next pound no longer pays for
-itself. The display-to-social move does not involve television, which is one
-more reason to prefer it — it is the recommendation that survives the
-uncertainty. Whether television is over- or under-funded is a question this
-data cannot settle, and saying so is part of the answer.
+itself. The display-to-social move does not depend on television's
+carryover, which makes it the cleaner test. Whether television is over- or
+under-funded is a question this data cannot settle, and saying so is part of
+the answer.
 
-## 8. What to say, and what not to
+## 8. Check the answer against the truth
 
-The recommendation this analysis supports is modest and specific: *move
-around a tenth of display's budget into social as a test, leave television
-alone until its carryover is better measured, and scale the move only if the
-test confirms it.* The bootstrap in section 6 is why the word "test" is not
-optional. Every number
-here rests on a model fitted to observational data; a geo experiment — run the
-new allocation in one region and compare — turns the model's prediction into
-a measurement, and its result can then be used to calibrate the model's
-priors or constraints.
+`mm_weekly` was simulated, so this decision can be checked against the
+parameters that generated it, which a real analysis never can. The same
+marginal returns and moves, with the true coefficients in place of the fitted
+ones:
+
+```{r}
+true_mroi <- vapply(channels, function(ch) marginal_roi(
+  north[[ch]], coefficient = truth$beta[[ch]],
+  adstock = spec[[ch]]$adstock, saturation = spec[[ch]]$saturation
+)$mroi, numeric(1))
+round(rbind(fitted = stats::setNames(marginal$mroi, marginal$channel)[channels],
+            truth = true_mroi), 2)
+
+true_per_pound <- function(from, to, amount) {
+  plan <- north
+  plan[[from]] <- plan[[from]] * (1 - amount / sum(plan[[from]]))
+  plan[[to]] <- plan[[to]] + amount * plan[[to]] / sum(plan[[to]])
+  after <- transform_plan(plan, spec)
+  before <- transform_plan(north, spec)
+  sum(vapply(channels, function(ch) {
+    truth$beta[[ch]] * (sum(after[[ch]]) - sum(before[[ch]]))
+  }, numeric(1))) / amount
+}
+true_moves <- c(`display -> social` = true_per_pound("display", "social", tenth),
+                `tv -> social`      = true_per_pound("tv", "social", tenth),
+                `tv -> search`      = true_per_pound("tv", "search", tenth))
+round(true_moves, 2)
+```
+
+The direction of the display-to-social move holds up: it raises revenue in
+truth too. Everything else this analysis concluded about the ranking does not.
+The fitted model overstates that move's gain per pound about
+`r round(move("display", "social", tenth, spec)[["per_pound_moved"]] / true_moves[["display -> social"]], 1)`-fold,
+and in truth television has the lowest marginal return
+(`r round(true_mroi[["tv"]], 2)`) and search the highest
+(`r round(true_mroi[["search"]], 2)`), so the best move takes from television,
+the channel this analysis advised leaving alone, and gives to search.
+
+No step above was a mistake of method. Three years of weekly noise moved the
+coefficients enough to reorder channels whose true returns sit within a few
+tenths of each other, which is what the wide intervals in section 6 and the
+`r round(100 * paired[["social_beats_display"]])`% paired probability were
+saying. A real analysis has no truth to check against, which is why the next
+section treats the result as a hypothesis.
+
+## 9. What to say, and what not to
+
+The analysis supports a test, not a reallocation. The fitted model points at
+moving around a tenth of display's budget into social; the bootstrap puts the
+odds of that ranking at roughly
+`r round(100 * paired[["social_beats_display"]])` in 100; and section 8 shows
+how a fitted model can misrank channels whose returns are close. Run the move
+as a geo experiment: change the allocation in one region, compare it with the
+others, and use the measured result to calibrate the model's priors or
+constraints. Leave television's budget alone until its carryover is better
+measured, in either direction.
 
 What this analysis does not support: a precise revenue forecast for the new
 plan, any move that takes a channel far outside the spend it has historically
-run at, or a ranking of channels by average ROI.
+run at, or a ranking of channels by average ROI, or by marginal ROI without a
+test.
 
 ## Where next
 

@@ -7,7 +7,7 @@ frameworks. This page sets out what each tool is for, where they overlap, and
 when to reach for which. Tools change quickly; this reflects them as of 2026,
 and each project's own documentation is the authority on its current features.
 
-## The landscape
+## Other tools
 
 **Robyn** (Meta, R). An end-to-end MMM: geometric and Weibull adstock, Hill
 saturation, ridge regression, multi-objective hyperparameter search with the
@@ -36,24 +36,24 @@ with no compiled code and no Python:
 
 | Need | mediamix | Full framework |
 |---|---|---|
-| Adstock and saturation inside your own `lm()`, `brms`, `glmnet` or Stan model | Yes — plain functions on vectors | Usually inside the framework's model |
+| Adstock and saturation inside your own `lm()`, `brms`, `glmnet` or Stan model | Yes: plain functions on vectors | Usually inside the framework's model |
 | Carryover tuned jointly with a model penalty in tidymodels | `step_adstock()` keeps state across resampling boundaries | Framework-specific search |
 | Per-channel carryover by cross-validation in your own model | `tune_carryover_joint()` | Framework-specific search |
-| Marginal ROI by counterfactual simulation | `marginal_roi()` | Robyn, Meridian, PyMC-Marketing all report one |
+| Marginal ROI by counterfactual simulation | `marginal_roi()` | Meridian reports one; see each framework's documentation for its definition |
 | Journeys built from a raw event log | `build_paths()` | Not covered by the MMM frameworks; ChannelAttribution starts from paths |
 | Heuristic and Markov attribution side by side | `attribute()`, `attribution_spread()` | ChannelAttribution (Markov and heuristics) |
 | Uncertainty intervals | `block_bootstrap()` around any model | Posterior intervals in Meridian, PyMC-Marketing; bootstrap in Robyn |
-| Bayesian estimation with priors | No — use `brms` or Stan on mediamix transforms | Meridian, PyMC-Marketing |
-| Budget optimisation | No — `marginal_roi()` and scenario simulation only | Robyn, Meridian, PyMC-Marketing |
+| Bayesian estimation with priors | No; use `brms` or Stan on mediamix transforms | Meridian, PyMC-Marketing |
+| Budget optimisation | No; `marginal_roi()`, and scenarios simulated by hand | Robyn, Meridian, PyMC-Marketing |
 | Reach and frequency, geo hierarchies | No | Meridian |
 
 ## Choosing
 
 - **You want a complete, supported MMM product and are happy with its
   modelling choices:** Robyn in R, or Meridian or PyMC-Marketing in Python.
-- **You already have a modelling approach** — a regression, a `brms` model, a
-  tidymodels workflow — and need correct media transforms and honest reporting
-  around it: mediamix.
+- **You already have a modelling approach**, such as a regression, a `brms`
+  model or a tidymodels workflow, and need correct media transforms and
+  reporting around it: mediamix.
 - **You have an event log and need journeys, rule-based credit and Markov
   removal effects without building the paths by hand:** mediamix, with
   `as_channel_paths()` to hand off to ChannelAttribution for higher-order
@@ -72,8 +72,10 @@ with no compiled code and no Python:
   as a fraction of a column's range or maximum instead, as `step_saturation()`
   does.
 - For `order = 1`, `markov_removal()` and `ChannelAttribution::markov_model()`
-  implement the same removal-effect definition; small differences come from
-  ChannelAttribution's simulation.
+  implement the same removal-effect definition, and the package's tests compare
+  the two whenever ChannelAttribution is installed; small differences come from
+  ChannelAttribution's simulation. Export with `as_channel_paths(sep = ">")`
+  and pass the same `sep` to `markov_model()`.
 
 ## Reference
 
