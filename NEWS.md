@@ -2,6 +2,40 @@
 
 ## Breaking changes
 
+* Recipes prepared with `step_adstock()` or `step_saturation()` by an earlier
+  version must be prepared again; `bake()` stops on the old format. A prepared
+  `step_adstock()` now stores each group's training time points and media
+  values (about 25 KB for `mm_weekly`).
+* `tune_carryover()`'s `metric` field is the score; the metric's name moved to
+  `metric_name`, matching `tune_carryover_joint()`. `std_err` is the standard
+  error of `metric`, so `best_1se` can differ from earlier versions, and
+  `half_life` is `NA` for `max_lag = 1`.
+* `adstock_state()` returns an `mm_adstock_state` that records `max_lag` (and,
+  for the infinite kernel, `decay` and `kernel`); the transforms refuse a state
+  computed for another kernel. `as.numeric()` gives the bare value, and plain
+  numbers are still accepted as `state`.
+* `build_paths()` drops exact duplicate events by default (`dedupe = TRUE`) and
+  sorts a conversion after touches that share its timestamp. On `mm_events`
+  this gives 6,105 journeys (was 6,137).
+* `block_bootstrap(by =)` gives every group the same time blocks by default
+  (`panel = "shared"`), so panel intervals change; unequal group sizes need
+  `index` or `panel = "independent"`.
+* `plot()` methods return their input invisibly. Bootstrap, contributions,
+  response-curve and attribution plots used to return a modified data frame.
+* Inputs that used to pass, or were altered without a message, now stop with a
+  message naming the problem: text timestamps that do not parse completely,
+  unrecognised conversion flags, missing values in controls, `by` columns or a
+  step's time index, infinite spend or state, constant or unnamed media
+  columns in the tuners, repeated media names in `diagnose_media()`, spend text
+  that is not a number, `tol` outside (0, 0.5) in `step_adstock()`, and
+  overlapping journey ids under `rbind()`.
+* `adstock_steady_state()` stops on missing values by default (new
+  `na_action`), `rmse()` and `mae()` stop on empty input, and
+  `block_bootstrap()` stops when `block_length` covers a whole series.
+* `tidy()` on the recipe steps returns a tibble; an ungrouped adstock step
+  shows `group` as `NA`, and `step_saturation()` shows `NA` for parameters its
+  curve ignores. Keys for numeric and date-time `by` columns are written from
+  their values (100000 rather than "1e+05"; date-times in UTC).
 * `diagnose_media()`'s CPM table names its row column `row` (it was `period`,
   but held a row number) and gains a `group` column when `by` is supplied.
 * `tune_carryover()` pools out-of-sample forecasts by default
@@ -16,6 +50,70 @@
 
 ## Bug fixes
 
+* `rlang` is now in Imports. Every error, warning and message goes through
+  `cli`, which calls `rlang`, so without it installed even a warning stopped
+  the call with "there is no package called 'rlang'".
+* `build_paths()` reads character timestamps completely: ISO 8601 with `T` or
+  a space, fractional seconds and offsets such as `Z` or `+02:00`. Other text,
+  or a column mixing dates and date-times, is an error. Such timestamps used
+  to be cut to midnight, which reordered touches within a day.
+* dplyr verbs and `rbind()` keep journey tables valid: `touch_rank`, `touch_n`
+  and the construction counts follow the rows, and functions that take a
+  journey table recompute stale ranks with a message. New `bind_paths()`
+  combines tables built by separate `build_paths()` calls.
+* `contributions()` no longer applies the training fit's fitted values to other
+  rows (new `newdata`), keeps the controls in the baseline when the model
+  dropped rows for missing values, matches back-ticked coefficient names,
+  reports media columns that match no coefficient, warns for non-identity
+  links, accepts one-row media and uses the fixed effects of nlme and lme4
+  models.
+* `step_adstock()` continues the filter exactly when new data repeats the end
+  of the training data, as `rsample::rolling_origin(lag =)` assessment sets do;
+  those rows were cold-started without a warning. A block that starts less than
+  one period after a training time point warns (or errors under
+  `carry_over = "warm"`), and the period is inferred within each group.
+* `media_transform()` honours `by` inside the `adstock` list.
+* The tuners refuse missing controls instead of failing or shifting rows,
+  compare every candidate on the splits all of them completed, warn at both
+  edges of the searched grid, and quote the first failure of `fit_fn`,
+  `predict_fn` or `metric_fn`. With `cores > 1`, one failing grid point no
+  longer marks its neighbours as failed.
+* The one-standard-error rule compares each candidate with the reported `best`,
+  using the standard error of the paired difference in the same metric.
+  `tune_carryover_joint()` reports the error of its combined `best_1se` set as
+  `best_1se_metric`.
+* `warm_start` seeds the filter only from media inside the first training
+  window.
+* `block_bootstrap()` draws every resample before calling the statistic (a
+  statistic that set a seed made replicates repeat), sets `seed` before the
+  point estimate, matches replicates by name, counts missing values per term
+  and reports the first failure.
+* `credit_time_decay(decay = 0)` credits the most recent touch whatever the row
+  order, and every rule sees journeys in `touch_rank` order. Character
+  conversion flags are read as numbers first, numeric ids keep their digits,
+  numeric timestamps record `"index"` units, and an `NA` row index no longer
+  inserts rows of missing values.
+* `step_saturation()` offers for tuning only the parameters its curve uses,
+  and `print()` and `tidy()` accept `tune()` placeholders.
+* `roi()` and `diagnose_media()` read factor spend by its labels, `roi()` warns
+  when contributions and spend cover different periods, and `diagnose_media()`
+  flags CPM outliers when most CPMs are identical and accepts data.table input.
+* `mroi()`, `response_curve()` and `spend_for()` accept `type = "none"`, scale
+  their derivative step to the curve and refuse targets no spend can reach.
+* Group keys are type-stable (1e5 and 100000L are one group), a blank label is
+  an ordinary group, and groups are ordered by first appearance, so seeded
+  `block_bootstrap(by =)` results no longer depend on the locale.
+* The saturate-before-adstock warning and docs give the reason that applies to
+  the kernel: with the default normalised kernel the result stays under the
+  ceiling. The Markov null-path warning no longer claims every removal effect
+  is overstated.
+* `effective_window()` is exact at whole half-life boundaries, transforms keep
+  names and time-series attributes, `saturate_exponential()` keeps precision
+  for small inputs, and `fit_ols()` keeps slopes at any scale.
+* Plots: the joint-tuning plot draws one line per `max_lag`; the contributions
+  chart sorts periods and labels date-times as dates; a missing contribution or
+  share gives a warning instead of removing a channel; methods name any column
+  they need that is missing.
 * Subsetting an `mm_paths` object so that part of a journey is removed now
   recomputes `touch_rank` and `touch_n`. Previously the stale ranks made
   `credit_first()`, `credit_last()` and `credit_position()` give some
@@ -43,6 +141,25 @@
 
 ## New features
 
+* `bind_paths()`, and `build_paths(timestamp_format =, dedupe =)`;
+  `path_summary()` reports `duplicate_events` and `journeys_before_filtering`.
+* `by` and `index` in `tune_carryover()` and `tune_carryover_joint()` tune a
+  panel of geographies; `se_block` gives a block-jackknife standard error;
+  `tune_carryover_joint()` gains `cores`.
+* `contributions(newdata =)`; `block_bootstrap(panel =, index =, circular =)`.
+* `step_saturation(by =)` gives each group its own reference level;
+  `step_adstock(period =)` overrides the inferred spacing.
+* `media_transform()` accepts `adstock = NULL` or `saturation = NULL` to switch
+  a stage off, and the adstock functions gain `missing_state = "cold"`.
+* `as.data.frame()` and `tidy()` methods for `tune_carryover()`,
+  `tune_carryover_joint()`, `diagnose_media()` and `block_bootstrap()` results;
+  `coef()`, `fitted()` and `predict()` without `newdata` for `fit_ols()`.
+* A `plot()` method for `diagnose_media()` results. `plot()` methods accept
+  `main`, `xlab`, `ylab` and `col`, use k, M and B axis labels, and fold more
+  than eight series into "Other" instead of dropping them.
+* `mm_weekly`'s `"truth"` attribute records each geography's scale factor and
+  a per-geography table of channel parameters (`by_geo`), so a model fitted to
+  any geography can be checked; the data are unchanged.
 * `marginal_roi()` computes average and marginal return by re-running
   carryover and saturation on a slightly larger budget, following Jin et al.
   (2017), with optional planning windows and carryover run-out.
@@ -72,12 +189,34 @@
 
 ## Performance
 
+* `build_paths()` is about four times faster (1.2 million events in about
+  2 s), `assisted_conversions()` is linear in journey length,
+  `markov_removal()` solves all removal effects from one matrix inverse,
+  `tune_carryover_joint()` is about four times faster, and grouped adstock and
+  `step_adstock()`'s `bake()` are linear in the number of groups.
 * `assisted_conversions()` is about 16x faster and `top_paths()` /
   `as_channel_paths()` about 2x faster on large journey tables, via
   data.table. `response_curve()` computes marginals in one vectorised pass.
 
 ## Documentation
 
+* The budget walkthrough checks its recommendation against the parameters the
+  data was simulated from. The fitted model ranks the channels differently
+  from the truth, and the article now presents the reallocation as a test
+  rather than a finding. The getting-started vignette sets fitted marginal
+  returns against true ones in the same way.
+* The tidymodels vignette's per-channel loop used `all_of(ch)`, which is
+  evaluated after the loop ends, so all five steps adstocked `display`. It now
+  uses `all_of(!!ch)` and prints what each step selects.
+* The methods article cites Tashman (2000) for rolling-origin evaluation;
+  Bergmeir and Benitez (2012) recommend blocked cross-validation.
+* The README is knitted from `README.Rmd`, so its outputs and figures come from
+  the code shown, and numbers in the vignettes' prose are computed inline.
+* Claims corrected: dropping null paths does not inflate every removal
+  effect; `step_naomit()` does not break `tune_grid()`; out-of-sample
+  prediction is evidence of predictive value, not of a causal mechanism; and
+  the joint tuner is closer to the truth than one-at-a-time tuning but not
+  better for every channel.
 * A pkgdown site with an end-to-end budget walkthrough, a methods and
   references article and a comparison with other tools, deployed to GitHub
   Pages by a new workflow.
