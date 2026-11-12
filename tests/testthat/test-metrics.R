@@ -142,3 +142,70 @@ test_that("fit_ols() feeding tune_carryover()'s default composes correctly with 
   err <- rmse(kpi, predict(m, spend))
   expect_lt(err, 0.05)  # near-perfect fit up to the small injected noise
 })
+
+# ---- input handling at the edges ----------------------------------------------
+
+test_that("rmse() and mae() validate na_rm and refuse empty input", {
+  expect_error(rmse(1:3, 1:3, na_rm = NA), class = "rlang_error",
+               regexp = "na_rm")
+  expect_error(mae(1:3, 1:3, na_rm = "yes"), class = "rlang_error",
+               regexp = "na_rm")
+  expect_error(rmse(numeric(0), numeric(0)), class = "rlang_error",
+               regexp = "at least one")
+  expect_error(mae(numeric(0), numeric(0)), class = "rlang_error",
+               regexp = "at least one")
+  # Pairs that are all missing are still a missing answer, not an error.
+  expect_identical(rmse(NA_real_, 1), NA_real_)
+})
+
+test_that("rmse() does not overflow or underflow on extreme errors", {
+  expect_equal(rmse(c(1e200, -1e200), c(0, 0)), 1e200)
+  expect_equal(rmse(c(1e-200, -1e-200), c(0, 0)), 1e-200)
+  # The difference of two finite numbers can overflow on its own.
+  expect_equal(rmse(c(1.5e308, 0), c(-1.5e308, 0)), 3e308 / sqrt(2))
+  expect_equal(mae(c(1.5e308, 0), c(-1.5e308, 0)), 1.5e308)
+  # Ordinary inputs are unaffected.
+  expect_equal(rmse(c(3, 4), c(0, 0)), sqrt(12.5))
+})
+
+# ---- fit_ols(): scale, methods and printing ------------------------------------
+
+test_that("fit_ols() keeps a real slope however small x is", {
+  x <- (1:5) * 1e-9
+  y <- 2 * (1:5)
+  m <- fit_ols(x, y)
+  expect_equal(m$slope, unname(stats::coef(stats::lm(y ~ x))[2]),
+               tolerance = 1e-6)
+  expect_equal(m$slope, 2e9, tolerance = 1e-6)
+  # A constant regressor at a tiny scale still has no slope.
+  expect_equal(fit_ols(rep(3e-9, 5), 1:5)$slope, 0)
+})
+
+test_that("mm_ols has coef(), fitted() and a newdata-free predict()", {
+  x <- c(1, 2, 3, NA, 5)
+  y <- c(2.1, 3.9, 6.2, 7, 9.8)
+  m <- fit_ols(x, y)
+  ref <- stats::lm(y ~ x)
+  expect_equal(unname(stats::coef(m)), unname(stats::coef(ref)))
+  expect_named(stats::coef(m), c("(Intercept)", "media"))
+  expect_equal(unname(stats::fitted(m)), unname(stats::fitted(ref)))
+  expect_equal(stats::predict(m), stats::fitted(m))
+  expect_equal(stats::predict(m, c(10, 20)),
+               unname(stats::predict(ref, data.frame(x = c(10, 20)))))
+})
+
+test_that("an mm_ols fit decomposes with contributions()", {
+  z <- adstock_geometric(c(100, 50, 0, 0, 200, 100, 0, 50, 20, 80), 0.5)
+  set.seed(4)
+  kpi <- 10 + 0.4 * z + rnorm(10, sd = 0.5)
+  m <- fit_ols(z, kpi)
+  cn <- contributions(data.frame(media = z), m)
+  totals <- tapply(cn$contribution, cn$period, sum)
+  expect_equal(as.numeric(totals), stats::fitted(m))
+})
+
+test_that("print.mm_ols() shows small coefficients instead of rounding them to 0", {
+  m <- fit_ols((1:5) * 1e-9, 2 * (1:5))
+  printed <- paste(capture.output(print(m), type = "message"), collapse = " ")
+  expect_match(printed, "2e\\+09")
+})

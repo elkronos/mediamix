@@ -3,12 +3,18 @@
 \name{fit_ols}
 \alias{fit_ols}
 \alias{predict.mm_ols}
+\alias{coef.mm_ols}
+\alias{fitted.mm_ols}
 \alias{print.mm_ols}
 \title{Default linear fitter for carryover tuning}
 \usage{
 fit_ols(x, y)
 
-\method{predict}{mm_ols}(object, newdata, ...)
+\method{predict}{mm_ols}(object, newdata = NULL, ...)
+
+\method{coef}{mm_ols}(object, ...)
+
+\method{fitted}{mm_ols}(object, ...)
 
 \method{print}{mm_ols}(x, ...)
 }
@@ -20,14 +26,18 @@ media. For \code{print()}, an \code{mm_ols} object.}
 
 \item{object}{An \code{mm_ols} object.}
 
-\item{newdata}{Numeric vector of transformed media to predict from.}
+\item{newdata}{Numeric vector of transformed media to predict from. When
+omitted, \code{predict()} returns the fitted values.}
 
 \item{...}{Ignored, present for generic consistency.}
 }
 \value{
 \code{fit_ols()} returns an object of class \code{mm_ols}: a list with elements
-\code{intercept}, \code{slope} and \code{n}. \code{predict()} returns a numeric vector the same
-length as \code{newdata}.
+\code{intercept}, \code{slope}, \code{n} and \code{fitted.values}, the fitted values of the
+\code{n} complete pairs used. \code{predict()} returns a numeric vector the same
+length as \code{newdata}. \code{coef()} returns the intercept and slope, named
+\code{(Intercept)} and \code{media}, so a fit on a column named \code{media} works with
+\code{\link[=contributions]{contributions()}}. \code{fitted()} returns \code{fitted.values}.
 }
 \description{
 A bare intercept-and-slope least squares fit of \code{y} on transformed media,
@@ -48,6 +58,9 @@ split. For several channels at once use \code{\link[=tune_carryover_joint]{tune_
 carryover tuned jointly with saturation and a model penalty, \code{\link[=step_adstock]{step_adstock()}}
 in a \pkg{recipes} pipeline. All three are worked through in
 \code{vignette("carryover")} and \code{vignette("tidymodels")}.
+
+The slope is set to zero only when \code{x} has no spread relative to its own
+scale, so the answer does not depend on the units \code{x} is measured in.
 }
 \examples{
 set.seed(1)
@@ -56,6 +69,7 @@ kpi <- 10 + 0.4 * spend + rnorm(8, sd = 0.1)
 
 m <- fit_ols(spend, kpi)
 m
+coef(m)
 predict(m, spend)
 }
 \seealso{

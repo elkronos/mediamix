@@ -20,7 +20,9 @@ mae(actual, predicted, na_rm = TRUE)
 dropped? Defaults to \code{TRUE}.}
 }
 \value{
-A single number. \code{NA_real_} if no complete pairs remain.
+A single number. \code{NA_real_} if no complete pairs remain. Empty
+input is an error. \code{rmse()} scales the errors before squaring them, so
+errors near the limits of double precision neither overflow nor vanish.
 }
 \description{
 Two metrics, provided only so that \code{\link[=tune_carryover]{tune_carryover()}} has a working default
