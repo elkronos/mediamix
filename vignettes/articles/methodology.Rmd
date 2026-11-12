@@ -19,7 +19,7 @@ the implementation makes, so a result can be reproduced, cited or challenged.
 | `adstock_weibull()` | Weibull CDF / PDF carryover | As implemented in Robyn |
 | `saturate_hill()` | Hill saturation | Hill (1910); Jin et al. (2017) |
 | `saturate_michaelis_menten()`, `saturate_exponential()`, `saturate_power()` | Alternative concave response curves | Standard |
-| `tune_carryover()` | Forward-only cross-validation, one-SE rule | Bergmeir & Benítez (2012); Hastie et al. (2009) |
+| `tune_carryover()` | Forward-only cross-validation, one-SE rule | Tashman (2000); Hastie et al. (2009) |
 | `tune_carryover_joint()` | Coordinate descent over per-channel carryover in one model | Standard |
 | `adstock_steady_state()` | Steady-state filter initialisation | Standard |
 | `block_bootstrap()` | Moving block bootstrap | Künsch (1989); Lahiri (2003) |
@@ -34,7 +34,7 @@ the implementation makes, so a result can be reproduced, cited or challenged.
 ## Carryover
 
 **Geometric.** The effect of spend decays by a constant factor
-$\theta$ each period, $a_t = x_t + \theta a_{t-1}$ — the Koyck
+$\theta$ each period, $a_t = x_t + \theta a_{t-1}$. This is the Koyck
 distributed lag, introduced to advertising as "adstock" by Broadbent (1979).
 mediamix defaults to the *normalised* kernel, weights $(1-\theta)\theta^l$
 summing to one, as in Jin et al. (2017); Robyn uses the unnormalised recursion.
@@ -61,7 +61,7 @@ scale values do not transfer directly.
 **Start-up bias.** Every filter here is cold-started at zero unless given
 a `state`. For a slow channel that understates the first weeks of the series:
 at $\theta = 0.85$ a constant spend reaches 15% of its steady-state adstock
-in week one and 90% only after `effective_window(0.85)` weeks. Pass real
+in week one and 90% only after `r effective_window(0.85)` weeks. Pass real
 pre-period spend through `adstock_state()` when you have it.
 
 ## Saturation
@@ -77,10 +77,13 @@ enforces that order and warns if asked to reverse it.
 ## Choosing carryover by cross-validation
 
 `tune_carryover()` scores each candidate decay by out-of-sample prediction of
-the KPI, on forward-only splits — rolling-origin evaluation, which Bergmeir and
-Benítez (2012) recommend for time series because it never trains on the
-future. Because adstock is causal, the series is transformed once and then
-split; the package's tests enforce the causality this relies on.
+the KPI, on forward-only splits. This is rolling-origin evaluation (Tashman,
+2000), which never trains on the future. Bergmeir and Benítez (2012) found no
+practical harm from cross-validation's theoretical problems in their study and
+recommend blocked cross-validation, which also trains on later blocks; for a
+filter whose purpose is to carry the past forward, forward-only splits are the
+conservative choice. Because adstock is causal, the series is transformed once
+and then split; the package's tests enforce the causality this relies on.
 
 The score is pooled across splits by default: every out-of-sample forecast is
 collected and the metric computed once, so RMSE is a true root mean squared
@@ -103,7 +106,7 @@ best grid point with the rest held fixed, repeating until a sweep changes
 nothing. Every accepted step lowers the cross-validated error, so it
 terminates, at a local optimum of the grid; the cost is a few sweeps of the
 one-channel grid rather than the full product grid. It reports each channel's
-final profile, so a flat one — carryover the data does not identify — is
+final profile, so a flat one, carryover the data does not identify, is
 visible rather than hidden behind a point estimate.
 
 **Start-up bias.** `adstock_steady_state()` returns the filter state that
@@ -142,7 +145,7 @@ unseen, and only warm-starts in the first case.
 `contributions()` computes $\beta_j z_{jt}$ for each channel and takes the
 baseline as the fitted value minus total media, so the decomposition sums
 exactly to the model's prediction. For an additive model this is also each
-channel's removal effect — what the model predicts would be lost with that
+channel's removal effect: what the model predicts would be lost with that
 channel at zero.
 
 `marginal_roi()` follows the counterfactual definition used by Jin et al.
@@ -176,9 +179,9 @@ geographies that differ in scale manufactures correlation.
 ## Journeys and attribution
 
 `build_paths()` has no single literature source; it encodes the construction
-choices — splitting on conversion and inactivity, lookback, null paths,
-direct traffic, repeats, tie-breaking — that the attribution literature
-assumes have already been made. The rule-based credits (`credit_first()`,
+choices that the attribution literature assumes have already been made:
+splitting on conversion and inactivity, lookback, null paths, direct traffic,
+repeats and tie-breaking. The rule-based credits (`credit_first()`,
 `credit_last()`, `credit_linear()`, `credit_position()`,
 `credit_time_decay()`) are industry conventions and make no causal claim.
 
@@ -204,8 +207,8 @@ makes conversion impossible, so `b` gets twice `a`'s credit.
 
 None of these methods estimates incrementality from observational data alone.
 Regression-based MMM is identified only as well as its specification and the
-variation in the data allow, and attribution rules — including Markov removal
-effects — divide observed conversions by a convention. Randomised experiments
+variation in the data allow, and attribution rules, Markov removal effects
+included, divide observed conversions by a convention. Randomised experiments
 (geo experiments for media, holdouts for digital channels) measure what these
 methods estimate, and are the standard way to calibrate them.
 
@@ -243,3 +246,6 @@ Künsch, H. R. (1989). The jackknife and the bootstrap for general stationary
 observations. *The Annals of Statistics*, 17(3), 1217–1241.
 
 Lahiri, S. N. (2003). *Resampling Methods for Dependent Data.* Springer.
+
+Tashman, L. J. (2000). Out-of-sample tests of forecasting accuracy: an analysis
+and review. *International Journal of Forecasting*, 16(4), 437–450.
