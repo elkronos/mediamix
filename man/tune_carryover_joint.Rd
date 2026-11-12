@@ -22,18 +22,26 @@ tune_carryover_joint(
   aggregate = c("pooled", "mean"),
   start = NULL,
   max_iter = 10L,
-  warm_start = FALSE
+  warm_start = FALSE,
+  cores = 1L,
+  se_block = 1L
 )
 }
 \arguments{
 \item{media}{A data frame (or matrix with column names) of raw media, one
-column per channel, rows in time order.}
+column per channel, rows in time order. Every column must be finite and
+must vary.}
 
 \item{y}{Numeric vector of the KPI, one value per row of \code{media}.}
 
-\item{controls}{Optional data frame of control variables -- trend, price,
-seasonality, holidays -- entered into the model untransformed. Character
-and factor columns are expanded to dummies.}
+\item{controls}{Optional data frame of control variables, such as trend,
+price, seasonality and holidays, entered into the model untransformed.
+Character,
+factor and logical columns are expanded to treatment dummies by
+\code{\link[stats:model.matrix]{stats::model.matrix()}} and every name is made syntactic. A column with a
+single value is dropped with a message, and missing or non-finite values
+are an error that names the column and rows. No control may share a name
+with a channel.}
 
 \item{fit_fn, predict_fn}{Optional model. \code{fit_fn(X, y)} receives a data frame
 of the adstocked media followed by the controls; \code{predict_fn(model, X)}
@@ -55,9 +63,10 @@ what it assesses.}
 \item{metric_fn}{A function of \verb{(actual, predicted)} returning a single
 number to be minimised. Defaults to \code{\link[=rmse]{rmse()}}.}
 
-\item{initial}{Size of the first training window. Defaults to half the
-series for \code{scheme = "rolling_origin"}, and to \code{floor(n / (k + 1))} for
-\code{scheme = "k_fold_forward"}, in both cases rounded down.}
+\item{initial}{Size of the first training window, in periods. Defaults to
+half the series for \code{scheme = "rolling_origin"}, and to
+\code{floor(n / (k + 1))} for \code{scheme = "k_fold_forward"}, in both cases
+rounded down.}
 
 \item{assess}{Number of periods assessed per split. Used by
 \code{scheme = "rolling_origin"} only; the forward-block scheme's assessment
@@ -74,34 +83,50 @@ Ignored otherwise.}
 \code{"pooled"} (the default) collects every out-of-sample prediction across
 splits and evaluates \code{metric_fn} once on the lot, so \code{rmse} really is the
 root mean squared forecast error. \code{"mean"} evaluates \code{metric_fn} on each
-split and averages, which is the \pkg{tune} convention; note that with
+split and averages, which is the \pkg{tune} convention. With
 \code{assess = 1} a per-split RMSE is an absolute error, so the mean of them is
 a mean absolute error whatever \code{metric_fn} is called.}
 
-\item{start}{Optional named numeric vector of starting decays, one per
-channel. Defaults to the middle of \code{decays}.}
+\item{start}{Optional named numeric vector of starting decays in \verb{[0, 1]},
+one per channel. Defaults to the middle of \code{decays}.}
 
 \item{max_iter}{Maximum number of full sweeps over the channels.}
 
 \item{warm_start}{Seed each adstocked series with
 \code{\link[=adstock_steady_state]{adstock_steady_state()}} instead of starting from zero, removing the
-start-up bias of long-carryover channels.}
+start-up bias of long-carryover channels. As in \code{\link[=tune_carryover]{tune_carryover()}}, the
+seed uses no media from beyond the first training window.}
+
+\item{cores}{Number of cores over which each channel's grid points are
+scored. See \code{\link[=tune_carryover]{tune_carryover()}}.}
+
+\item{se_block}{Number of consecutive splits the jackknife leaves out
+together when it computes \code{std_err} and the one-standard-error rule. \code{1},
+the default, treats the splits as independent. Successive forecasts share
+most of their training data, so their errors are usually correlated and
+independence understates the standard error; a block of a few splits
+allows for that. \code{best} does not depend on it.}
 }
 \value{
 An object of class \code{mm_carryover_joint}: a list with
 \describe{
 \item{\code{best}}{One row per channel: \code{channel}, \code{max_lag}, \code{decay},
 \code{half_life}.}
-\item{\code{best_1se}}{The same, with each channel's decay chosen by the
-paired one-standard-error rule on its final profile.}
+\item{\code{best_1se}}{The same, with each channel's value chosen by the
+paired one-standard-error rule on its own final profile, anchored on
+its value in \code{best}. See \emph{The one-standard-error set}.}
+\item{\code{best_1se_metric}}{The cross-validated metric of the \code{best_1se}
+values taken together.}
 \item{\code{profiles}}{Each channel's cross-validation profile from the
 final sweep, with the other channels held at their selected values:
 \code{channel}, \code{max_lag}, \code{decay}, \code{half_life}, \code{metric}, \code{std_err}.}
 \item{\code{metric}}{The cross-validated metric at the selected values.}
+\item{\code{metric_name}}{Name of the metric function used.}
 \item{\code{iterations}, \code{converged}}{Sweeps run, and whether the last
 sweep changed nothing.}
 }
-plus \code{metric_name}, \code{scheme}, \code{aggregate}, \code{n_splits} and \code{normalise}.
+plus \code{scheme}, \code{aggregate}, \code{n_splits}, \code{n_ok} and \code{normalise}, as in
+\code{\link[=tune_carryover]{tune_carryover()}}.
 }
 \description{
 The multi-channel counterpart of \code{\link[=tune_carryover]{tune_carryover()}}. Each channel's
@@ -118,12 +143,31 @@ cross-validated error, so the search terminates, but like any coordinate
 method it finds a local optimum of the grid, not necessarily the global
 one. A different \code{start} is a cheap check. The cost is roughly
 \verb{channels x grid size x sweeps} cross-validated fits, far fewer than the
-full grid's \verb{grid size ^ channels}.
+full grid's \verb{grid size ^ channels}; \code{cores} spreads each channel's grid
+points over several processes.
+
+A grid point whose fit fails on some splits is handled as in
+\code{\link[=tune_carryover]{tune_carryover()}}: within each step every grid point is scored on the
+splits all of them completed. A warning reports the most splits any step
+left out, and a selection on the edge of the grid is reported for each
+channel.
 
 Saturation is not tuned here. For carryover, saturation and a model
 penalty tuned jointly, use \code{\link[=step_adstock]{step_adstock()}} and \code{\link[=step_saturation]{step_saturation()}} with
 \pkg{tune}; see \code{vignette("tidymodels")}.
 }
+\section{The one-standard-error set}{
+
+Each channel's one-standard-error choice is made on its own profile, with
+the other channels held at \code{best}, so the rule is applied channel by
+channel. Shortening several channels at once can cost more than any one of
+them does alone, and the combination was not part of the search. The set
+is therefore scored as a whole after the search, and \code{best_1se_metric}
+reports that score next to \code{metric}. When the gap between the two is large
+against the profiles' \code{std_err}, the channels' near-ties do not add up to a
+near-tie for the set, and \code{best_1se} is better read one channel at a time.
+}
+
 \examples{
 data(mm_weekly)
 north <- mm_weekly[mm_weekly$geo == "north", ]

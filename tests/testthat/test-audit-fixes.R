@@ -109,10 +109,10 @@ test_that("the metric label is usable for anonymous functions", {
   anon <- suppressWarnings(
     tune_carryover(x, y, max_lags = Inf, decays = c(0.3, 0.5),
                    metric_fn = function(a, p) sqrt(mean((a - p)^2))))
-  expect_equal(anon$metric, "<anonymous>")
+  expect_equal(anon$metric_name, "<anonymous>")
   named <- suppressWarnings(
     tune_carryover(x, y, max_lags = Inf, decays = 0.5, metric_fn = mae))
-  expect_equal(named$metric, "mae")
+  expect_equal(named$metric_name, "mae")
 })
 
 test_that("media_transform validates by and no longer saturates by default", {

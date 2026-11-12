@@ -77,7 +77,12 @@ test_that("pooled aggregation computes the metric over all forecasts", {
   expect_equal(pooled$best$metric, sqrt(mean(e^2)))
   # With one-period assessment sets, the mean of per-split RMSEs is an MAE.
   expect_equal(mean_agg$best$metric, mean(abs(e)))
-  expect_equal(pooled$best$std_err, stats::sd(abs(e)) / sqrt(length(e)))
+  # Each standard error belongs to the metric beside it: the jackknife of the
+  # pooled RMSE, and the standard error of the mean per-split value.
+  loo <- vapply(seq_along(e), function(i) sqrt(mean(e[-i]^2)), numeric(1))
+  jack <- sqrt((length(e) - 1) / length(e) * sum((loo - mean(loo))^2))
+  expect_equal(pooled$best$std_err, jack)
+  expect_equal(mean_agg$best$std_err, stats::sd(abs(e)) / sqrt(length(e)))
 })
 
 test_that("the one-standard-error rule never picks more carryover than best", {

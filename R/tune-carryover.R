@@ -4,7 +4,8 @@
 #' best predicts a held-out key performance indicator, using forward-only
 #' resampling and a model you supply.
 #'
-#' @param x Numeric vector of media spend in time order.
+#' @param x Numeric vector of media spend in time order. It must be finite and
+#'   must vary: a constant series carries no information about carryover.
 #' @param y Numeric vector of the KPI, the same length as `x`.
 #' @param fit_fn A function of `(x_adstocked, y)` returning a fitted model.
 #'   Defaults to [fit_ols()]. When `controls` are supplied it receives a data
@@ -26,9 +27,10 @@
 #'   what it assesses.
 #' @param metric_fn A function of `(actual, predicted)` returning a single
 #'   number to be minimised. Defaults to [rmse()].
-#' @param initial Size of the first training window. Defaults to half the
-#'   series for `scheme = "rolling_origin"`, and to `floor(n / (k + 1))` for
-#'   `scheme = "k_fold_forward"`, in both cases rounded down.
+#' @param initial Size of the first training window, in periods. Defaults to
+#'   half the series for `scheme = "rolling_origin"`, and to
+#'   `floor(n / (k + 1))` for `scheme = "k_fold_forward"`, in both cases
+#'   rounded down.
 #' @param assess Number of periods assessed per split. Used by
 #'   `scheme = "rolling_origin"` only; the forward-block scheme's assessment
 #'   sizes are determined by `k` and the series length.
@@ -40,18 +42,35 @@
 #' @param controls Optional data frame of control variables (trend, price,
 #'   seasonality, ...) entered into the model untransformed, so carryover is
 #'   judged with them accounted for. The rows are kept aligned with every split
-#'   automatically.
+#'   automatically. Factor, character and logical columns are expanded to
+#'   treatment dummies by [stats::model.matrix()] and every name is made
+#'   syntactic, so `fit_fn` sees columns such as `seasonQ2` rather than
+#'   `season`. A column with a single value adds nothing beside an intercept
+#'   and is dropped with a message. Missing or non-finite values are an error
+#'   that names the column and rows: impute them, or drop those periods from
+#'   every input.
 #' @param warm_start Seed the adstock with [adstock_steady_state()] rather
-#'   than zero, removing the start-up bias of a long carryover.
+#'   than zero, removing the start-up bias of a long carryover. The seed
+#'   averages spend over no more than the first training window, so it uses
+#'   only media that every split trains on.
 #' @param cores Number of cores. Values above 1 use [parallel::mclapply()] on
-#'   Unix-alikes and a socket cluster elsewhere.
+#'   Unix-alikes and a socket cluster elsewhere. The workers of a socket
+#'   cluster are new R sessions that load \pkg{mediamix} and nothing else, so
+#'   there `fit_fn`, `predict_fn` and `metric_fn` must call other packages with
+#'   `pkg::fun()` and must not rely on helpers defined in your session.
 #' @param aggregate How to turn the assessment sets into one score.
 #'   `"pooled"` (the default) collects every out-of-sample prediction across
 #'   splits and evaluates `metric_fn` once on the lot, so `rmse` really is the
 #'   root mean squared forecast error. `"mean"` evaluates `metric_fn` on each
-#'   split and averages, which is the \pkg{tune} convention; note that with
+#'   split and averages, which is the \pkg{tune} convention. With
 #'   `assess = 1` a per-split RMSE is an absolute error, so the mean of them is
 #'   a mean absolute error whatever `metric_fn` is called.
+#' @param se_block Number of consecutive splits the jackknife leaves out
+#'   together when it computes `std_err` and the one-standard-error rule. `1`,
+#'   the default, treats the splits as independent. Successive forecasts share
+#'   most of their training data, so their errors are usually correlated and
+#'   independence understates the standard error; a block of a few splits
+#'   allows for that. `best` does not depend on it.
 #'
 #' @return An object of class `mm_carryover`: a list with elements
 #'   \describe{
@@ -61,12 +80,19 @@
 #'     \item{`best_1se`}{The same, for the candidate chosen by the
 #'       one-standard-error rule. See *Choosing among near-ties*.}
 #'     \item{`results`}{Data frame of the full grid: `max_lag`, `decay`,
-#'       `half_life`, `metric`, `std_err` and `n_splits`. `std_err` is the
-#'       standard error of the per-split metric, `sd / sqrt(n_splits)`.}
-#'     \item{`metric`}{Name of the metric function used.}
+#'       `half_life`, `metric`, `std_err` and `n_splits`. `half_life` is `NA`
+#'       where the kernel carries nothing over (`decay = 0` or `max_lag = 1`)
+#'       or never decays (`decay = 1`). `std_err` is the jackknife standard
+#'       error of `metric` over splits; for `aggregate = "mean"` with
+#'       `se_block = 1` it is `sd / sqrt(n_splits)` of the per-split values.
+#'       `n_splits` is the number of splits every candidate was scored on.}
+#'     \item{`metric`}{The cross-validated metric of `best`.}
+#'     \item{`metric_name`}{Name of the metric function used.}
 #'     \item{`aggregate`}{How the splits were combined.}
 #'     \item{`scheme`}{The resampling scheme used.}
-#'     \item{`n_splits`}{Number of resampling splits evaluated.}
+#'     \item{`n_splits`}{Number of resampling splits formed.}
+#'     \item{`n_ok`}{Number of splits every candidate was scored on. See
+#'       *Failed fits*.}
 #'     \item{`normalise`}{Whether the adstock kernel was normalised, carried
 #'       through so the selected decay can be reapplied on the same footing.}
 #'   }
@@ -108,16 +134,29 @@
 #' resampling cannot distinguish from the best candidate. When the two
 #' disagree, the shorter carryover is the more conservative claim.
 #'
-#' The comparison is *paired*: every candidate is scored on the same splits,
-#' so a candidate qualifies when its mean per-split error exceeds the best
-#' candidate's by no more than one standard error of the per-split
-#' *difference*. The textbook unpaired version compares against the standard
-#' error of the best candidate's own mean error, which on time-series splits
-#' is dominated by how hard each period is to forecast -- common to every
-#' candidate -- and so admits nearly the whole grid. The `std_err` column
-#' reports that unpaired standard error, as a measure of forecast noise. The
-#' rule is computed on per-split errors whatever `aggregate` is, because that
-#' is where a standard error comes from.
+#' The comparison is *paired* and is made on the quantity `best` minimises.
+#' Every candidate is scored on the same splits, and a candidate qualifies when
+#' its `metric` exceeds that of `best` by no more than one standard error of
+#' the *difference*. The standard error comes from a jackknife over splits:
+#' both metrics are recomputed with each block of `se_block` consecutive
+#' splits left out. For `aggregate = "mean"` with `se_block = 1` it is the
+#' standard error of the mean per-split difference; for the pooled RMSE with
+#' one-period assessment sets it agrees, to first order, with a paired
+#' comparison of the per-forecast squared errors. The textbook unpaired
+#' version compares against the standard error of the best candidate's own
+#' metric, which on time-series splits is dominated by how hard each period is
+#' to forecast, a cost common to every candidate, and so admits nearly the
+#' whole grid. The `std_err` column reports that unpaired standard error, as a
+#' measure of forecast noise.
+#'
+#' @section Failed fits:
+#' When `fit_fn`, `predict_fn` or `metric_fn` fails on a split for some
+#' candidates, or returns missing predictions, that split is left out for
+#' every candidate, so all of them are compared on the same forecasts. A
+#' warning quotes the first failure and `n_ok` counts the splits that remain.
+#' Splits whose assessment periods have no KPI are left out without a warning.
+#' When every candidate fails, the error quotes the first failure and names
+#' the function that raised it.
 #'
 #' @section Start-up bias:
 #' Adstock is cold-started at zero, so the first few periods of a
@@ -126,8 +165,11 @@
 #' `effective_window(0.85)` = 15 weeks. With `initial` at half the series this
 #' rarely decides the answer, but it biases the fit towards short carryover on
 #' short series. `warm_start = TRUE` seeds every candidate with
-#' [adstock_steady_state()]; better still, pass real pre-period spend through
-#' [adstock_state()] and your own `fit_fn` when you have it.
+#' [adstock_steady_state()], averaging spend over `effective_window(decay)`
+#' periods or the first training window, whichever is shorter, so the seed
+#' uses only media that every split trains on. Better still, pass real
+#' pre-period spend through [adstock_state()] and your own `fit_fn` when you
+#' have it.
 #'
 #' @references
 #' Breiman, L., Friedman, J., Olshen, R. and Stone, C. (1984).
@@ -143,7 +185,7 @@
 #'   [adstock_geometric()], [fit_ols()], [effective_window()]
 #'
 #' @examples
-#' # Recover a known decay from data generated with it
+#' # Recover a known decay from data simulated with it
 #' set.seed(42)
 #' n <- 120
 #' spend <- pmax(0, rnorm(n, 500, 250))
@@ -161,10 +203,9 @@
 #' # The shortest carryover the data cannot distinguish from the best
 #' tuned$best_1se$decay
 #'
-#' # Tune against a model with controls rather than the bare default. The
-#' # cleanest way is to residualise the KPI first, which needs no row
-#' # bookkeeping: `tune_carryover()` then sees a response the controls have
-#' # already explained away.
+#' # Tune against a model with controls rather than the bare default. Passed
+#' # as `controls`, the trend and seasonality are fitted inside every training
+#' # window, so no split learns from KPI values that come after it.
 #' season <- sin(2 * pi * seq_len(n) / 52)
 #' trend <- seq_len(n)
 #' kpi2 <- kpi + 40 * trend + 300 * season
@@ -172,15 +213,13 @@
 #' bare <- suppressWarnings(tune_carryover(
 #'   spend, kpi2, max_lags = Inf, decays = seq(0.1, 0.9, by = 0.1)
 #' ))
-#'
-#' controls <- stats::lm(kpi2 ~ trend + season)
-#' residualised <- suppressWarnings(tune_carryover(
-#'   spend, stats::residuals(controls),
-#'   max_lags = Inf, decays = seq(0.1, 0.9, by = 0.1)
-#' ))
+#' with_controls <- tune_carryover(
+#'   spend, kpi2, max_lags = Inf, decays = seq(0.1, 0.9, by = 0.1),
+#'   controls = data.frame(trend, season)
+#' )
 #'
 #' # The truth is 0.7. Ignoring the trend and seasonality moves the answer.
-#' c(truth = 0.7, bare = bare$best$decay, residualised = residualised$best$decay)
+#' c(truth = 0.7, bare = bare$best$decay, controls = with_controls$best$decay)
 #' @export
 tune_carryover <- function(x, y,
                            fit_fn = fit_ols,
@@ -197,12 +236,13 @@ tune_carryover <- function(x, y,
                            cores = 1L,
                            aggregate = c("pooled", "mean"),
                            controls = NULL,
-                           warm_start = FALSE) {
+                           warm_start = FALSE,
+                           se_block = 1L) {
   scheme <- match.arg(scheme)
   aggregate <- match.arg(aggregate)
   metric_name <- .mm_fn_label(substitute(metric_fn))
 
-  x <- .mm_check_numeric(x, "x", allow_na = FALSE)
+  x <- .mm_check_numeric(x, "x", allow_na = FALSE, finite = TRUE)
   y <- .mm_check_numeric(y, "y")
   if (length(x) != length(y)) {
     cli::cli_abort("{.arg x} ({length(x)}) and {.arg y} ({length(y)}) must be \\
@@ -213,11 +253,18 @@ tune_carryover <- function(x, y,
   if (!is.function(metric_fn)) cli::cli_abort("{.arg metric_fn} must be a function.")
   .mm_check_flag(normalise, "normalise")
   .mm_check_flag(warm_start, "warm_start")
-  ctrl <- .mm_control_matrix(controls, length(x))
+  n <- length(x)
+  if (all(x == x[1L])) {
+    cli::cli_abort(c(
+      "{.arg x} is constant.",
+      i = "A series that never changes carries no information about carryover."
+    ))
+  }
+  ctrl <- .mm_control_matrix(controls, n, reserved = "media")
 
   max_lags <- .mm_check_lag_grid(max_lags)
   decays <- .mm_check_decay_grid(decays)
-  n <- length(x)
+  se_block <- .mm_check_count(se_block, "se_block", min = 1L)
 
   splits <- .mm_make_splits(n, scheme = scheme, initial = initial,
                             assess = assess, skip = skip, k = k,
@@ -229,153 +276,113 @@ tune_carryover <- function(x, y,
            {.arg assess} leave nothing to assess on."
     ))
   }
-
-  grid <- expand.grid(max_lag = max_lags, decay = decays,
-                      KEEP.OUT.ATTRS = FALSE, stringsAsFactors = FALSE)
-  # An infinite kernel with decay = 1 cannot be normalised; drop rather than error.
-  drop <- normalise & is.infinite(grid$max_lag) & grid$decay == 1
-  if (any(drop)) {
-    cli::cli_inform(
-      "Dropping {sum(drop)} grid point{?s} with an infinite kernel at \\
-       {.code decay = 1}, which cannot be normalised."
-    )
-    grid <- grid[!drop, , drop = FALSE]
-  }
-  if (nrow(grid) == 0L) cli::cli_abort("The parameter grid is empty.")
+  .mm_check_se_block(se_block, length(splits))
+  warm_periods <- length(splits[[1L]]$train)
+  grid <- .mm_tuning_grid(max_lags, decays, normalise, warm_start)
 
   default_model <- identical(fit_fn, fit_ols) &&
     identical(predict_fn, stats::predict)
   fast <- default_model && is.null(ctrl)
-  if (!is.null(ctrl) && default_model) {
-    fit_fn <- .mm_ols_multi
-    predict_fn <- .mm_ols_multi_predict
-  }
+  ctrl_mat <- if (is.null(ctrl)) NULL else as.matrix(ctrl)
 
   eval_one <- function(i) {
-    st <- if (warm_start) {
-      adstock_steady_state(x, grid$decay[i], max_lag = grid$max_lag[i])
-    } else 0
-    z <- adstock_geometric(x, decay = grid$decay[i], max_lag = grid$max_lag[i],
-                           normalise = normalise, state = st)
-    out <- if (fast) .mm_cv_fast(z, y, splits) else NULL
-    # NULL means the fast path declined this grid point as numerically unsafe.
-    if (is.null(out)) {
-      design <- if (is.null(ctrl)) z else cbind(data.frame(media = z), ctrl)
-      out <- .mm_cv_general(design, y, splits, fit_fn, predict_fn)
+    z <- .mm_adstock_cv(x, grid$decay[i], grid$max_lag[i], normalise,
+                        warm_start, warm_periods)
+    folds <- if (fast) .mm_cv_fast(z, y, splits) else NULL
+    if (!is.null(folds)) return(folds)
+    # The fast path declined this grid point as numerically unsafe, or a
+    # model other than the bare default is in use.
+    if (default_model && !is.null(ctrl)) {
+      return(.mm_cv_ols(cbind(media = z, ctrl_mat), y, splits))
     }
-    .mm_cv_score(out, metric_fn, aggregate)
+    design <- if (is.null(ctrl)) z else cbind(data.frame(media = z), ctrl)
+    .mm_cv_general(design, y, splits, fit_fn, predict_fn)
   }
 
-  scores <- .mm_maybe_parallel(seq_len(nrow(grid)), eval_one, cores,
-                               call = environment())
-  failed <- vapply(scores, function(z) inherits(z, "try-error"), logical(1))
-  if (any(failed)) {
-    first <- conditionMessage(attr(scores[[which(failed)[1L]]], "condition"))
-    cli::cli_warn(c(
-      "{sum(failed)} grid point{?s} failed in a parallel worker.",
-      i = "First error: {first}",
-      i = "Re-run with {.code cores = 1} to see the full traceback."
-    ))
-  }
-  n_sp <- length(splits)
-  blank <- list(metric = NA_real_, split_mean = NA_real_, std_err = NA_real_,
-                vals = rep(NA_real_, n_sp))
-  scores <- lapply(scores, function(z) {
-    if (is.list(z) && length(z$vals) == n_sp) z else blank
-  })
-  metrics <- vapply(scores, `[[`, numeric(1), "metric")
-  std_err <- vapply(scores, `[[`, numeric(1), "std_err")
-  split_vals <- vapply(scores, `[[`, numeric(n_sp), "vals")
-  if (!is.matrix(split_vals)) split_vals <- matrix(split_vals, nrow = n_sp)
-
-  if (all(is.na(metrics))) {
-    cli::cli_abort(c(
-      "Every grid point produced a missing metric.",
-      i = "Check that {.arg fit_fn} and {.arg predict_fn} work on a single \\
-           fold, and that {.arg y} is not constant."
-    ))
-  }
+  raw <- .mm_maybe_parallel(seq_len(nrow(grid)), eval_one, cores,
+                            call = environment())
+  sets <- .mm_worker_failures(raw, length(splits))
+  .mm_warn_worker_failures(sets)
+  sc <- .mm_cv_compare(sets$folds, y, splits, metric_fn, aggregate,
+                       se_block)
+  .mm_check_scores(sc)
+  .mm_warn_lost_splits(sc$lost, sc$n_ok, sc$first_error)
 
   results <- data.frame(
     max_lag = grid$max_lag,
     decay = grid$decay,
-    half_life = ifelse(grid$decay > 0 & grid$decay < 1,
-                       log(0.5) / log(pmin(pmax(grid$decay, 1e-12), 1 - 1e-12)),
-                       NA_real_),
-    metric = metrics,
-    std_err = std_err,
-    n_splits = length(splits),
+    half_life = .mm_grid_half_life(grid$decay, grid$max_lag),
+    metric = sc$metric,
+    std_err = sc$std_err,
+    n_splits = sc$n_ok,
     stringsAsFactors = FALSE
   )
   ord <- order(results$metric, results$max_lag, results$decay)
   results <- results[ord, , drop = FALSE]
-  split_vals <- split_vals[, ord, drop = FALSE]
   rownames(results) <- NULL
+  jack <- if (is.null(sc$jack)) NULL else sc$jack[, ord, drop = FALSE]
 
-  best <- results[which.min(results$metric), , drop = FALSE]
-  rownames(best) <- NULL
-  best_1se <- .mm_one_se(results, split_vals)
+  best <- results[1L, , drop = FALSE]
+  best_1se <- results[.mm_one_se_pick(results, jack, anchor = 1L), ,
+                      drop = FALSE]
+  rownames(best_1se) <- NULL
 
-  .mm_warn_grid_edge(best, max_lags, decays)
+  .mm_warn_grid_edge(list(.mm_edge_notes(best$max_lag, best$decay, grid)))
 
   structure(
     list(best = best, best_1se = best_1se, results = results,
-         metric = metric_name, aggregate = aggregate, scheme = scheme,
-         n_splits = length(splits), normalise = normalise),
+         metric = best$metric, metric_name = metric_name,
+         aggregate = aggregate, scheme = scheme,
+         n_splits = length(splits), n_ok = sc$n_ok, normalise = normalise),
     class = "mm_carryover"
   )
-}
-
-# One-standard-error rule, paired. Candidates are scored on the same splits,
-# so their errors are strongly correlated and the unpaired standard error of
-# each candidate's mean is far wider than the uncertainty in the DIFFERENCE
-# between two of them. Comparing each candidate with the best one split by
-# split, and asking whether the mean difference is within one standard error
-# of that difference, keeps the rule's intent without that inflation. Among
-# candidates that pass, the least carryover wins: lowest decay, then shortest
-# kernel.
-#' @keywords internal
-#' @noRd
-.mm_one_se <- function(results, split_vals) {
-  sm <- colMeans(split_vals, na.rm = TRUE)
-  ok <- is.finite(sm)
-  if (!any(ok)) return(results[1L, , drop = FALSE])
-  i_min <- which(ok)[which.min(sm[ok])]
-  within <- vapply(seq_len(ncol(split_vals)), function(j) {
-    if (!ok[j]) return(FALSE)
-    if (j == i_min) return(TRUE)
-    d <- split_vals[, j] - split_vals[, i_min]
-    d <- d[is.finite(d)]
-    if (length(d) < 2L) return(FALSE)
-    mean(d) <= stats::sd(d) / sqrt(length(d))
-  }, logical(1))
-  cand <- which(within)
-  pick <- cand[order(results$decay[cand], results$max_lag[cand])][1L]
-  out <- results[pick, , drop = FALSE]
-  rownames(out) <- NULL
-  out
 }
 
 #' @export
 print.mm_carryover <- function(x, ...) {
   cli::cli_h3("Carryover tuning")
-  cli::cli_text("{x$scheme} resampling, {x$n_splits} split{?s}, \\
+  scored <- if (isTRUE(x$n_ok < x$n_splits)) {
+    sprintf(" (%d scored)", x$n_ok)
+  } else ""
+  cli::cli_text("{x$scheme} resampling, {x$n_splits} split{?s}{scored}, \\
                  {nrow(x$results)} grid point{?s}")
   b <- x$best
-  lag_txt <- if (is.infinite(b$max_lag)) "infinite" else format(b$max_lag)
-  cli::cli_text("Best: {.field decay} = {round(b$decay, 4)} \\
-                 ({.field half-life} {round(b$half_life, 2)} periods), \\
-                 {.field max_lag} = {lag_txt}")
-  cli::cli_text("{x$metric} ({x$aggregate}) = {signif(b$metric, 6)}, \\
-                 std. error {signif(b$std_err, 3)}")
+  b_note <- .mm_carry_note(b)
+  b_lag <- .mm_lag_text(b)
+  cli::cli_text("Best: {.field decay} = {round(b$decay, 4)}{b_note}, \\
+                 {.field max_lag} = {b_lag}")
+  se_txt <- if (is.finite(b$std_err)) {
+    sprintf(", std. error %s", format(signif(b$std_err, 3)))
+  } else ""
+  cli::cli_text("{x$metric_name} ({x$aggregate}) = {signif(b$metric, 6)}\\
+                 {se_txt}")
   o <- x$best_1se
   if (!is.null(o) && (o$decay != b$decay || o$max_lag != b$max_lag)) {
-    o_lag <- if (is.infinite(o$max_lag)) "infinite" else format(o$max_lag)
-    cli::cli_text("One-SE rule: {.field decay} = {round(o$decay, 4)} \\
-                   ({.field half-life} {round(o$half_life, 2)} periods), \\
-                   {.field max_lag} = {o_lag}. The data cannot separate the two.")
+    o_note <- .mm_carry_note(o)
+    o_lag <- .mm_lag_text(o)
+    cli::cli_text("One-SE rule: {.field decay} = {round(o$decay, 4)}{o_note}, \\
+                   {.field max_lag} = {o_lag}. The data cannot separate the \\
+                   two.")
   }
   invisible(x)
+}
+
+# ---- printing helpers ----------------------------------------------------------
+
+#' @keywords internal
+#' @noRd
+.mm_lag_text <- function(row) {
+  if (is.infinite(row$max_lag)) "infinite" else format(row$max_lag)
+}
+
+# The parenthesis after a selected decay: its half-life, or a plain statement
+# when the kernel carries nothing over.
+#' @keywords internal
+#' @noRd
+.mm_carry_note <- function(row) {
+  if (row$max_lag == 1 || row$decay == 0) return(" (no carryover)")
+  if (!is.finite(row$half_life)) return("")
+  sprintf(" (half-life %s periods)", format(round(row$half_life, 2)))
 }
 
 # ---- resampling --------------------------------------------------------------
@@ -432,6 +439,82 @@ print.mm_carryover <- function(x, ...) {
 
 #' @keywords internal
 #' @noRd
+.mm_check_se_block <- function(se_block, n_splits, call = parent.frame()) {
+  if (se_block > 1L && n_splits %/% se_block < 2L) {
+    cli::cli_abort(c(
+      "{.arg se_block} ({se_block}) leaves fewer than two blocks of splits.",
+      i = "{n_splits} split{?s} {?was/were} formed; use a block of at most \\
+           {max(1L, n_splits %/% 2L)}."
+    ), call = call)
+  }
+  invisible(se_block)
+}
+
+# One candidate's adstocked media.
+#' @keywords internal
+#' @noRd
+.mm_adstock_cv <- function(x, decay, max_lag, normalise, warm_start,
+                           warm_periods) {
+  st <- if (warm_start) .mm_warm_state(x, decay, max_lag, warm_periods) else 0
+  adstock_geometric(x, decay = decay, max_lag = max_lag,
+                    normalise = normalise, state = st)
+}
+
+# A steady-state seed that looks no further ahead than the first training
+# window, which every split trains on. adstock_steady_state() alone averages
+# the first effective window, which can reach past it on a short series.
+#' @keywords internal
+#' @noRd
+.mm_warm_state <- function(x, decay, max_lag, horizon) {
+  window <- if (decay == 0) 1 else if (decay < 1) {
+    ceiling(log(1 - 0.9) / log(decay))
+  } else Inf
+  adstock_steady_state(x, decay, max_lag = max_lag,
+                       periods = min(window, horizon))
+}
+
+# The candidate grid, without the points that cannot be evaluated: an
+# infinite kernel at decay = 1 has infinite mass, so it can neither be
+# normalised nor reach a steady state to warm-start from.
+#' @keywords internal
+#' @noRd
+.mm_tuning_grid <- function(max_lags, decays, normalise, warm_start,
+                            call = parent.frame()) {
+  grid <- expand.grid(max_lag = max_lags, decay = decays,
+                      KEEP.OUT.ATTRS = FALSE, stringsAsFactors = FALSE)
+  drop <- is.infinite(grid$max_lag) & grid$decay == 1 &
+    (normalise || warm_start)
+  if (any(drop)) {
+    why <- if (normalise) "cannot be normalised" else
+      "has no steady state to warm-start from"
+    cli::cli_inform(
+      "Dropping {sum(drop)} grid point{?s} with an infinite kernel at \\
+       {.code decay = 1}, which {why}."
+    )
+    grid <- grid[!drop, , drop = FALSE]
+  }
+  if (nrow(grid) == 0L) {
+    cli::cli_abort("The parameter grid is empty.", call = call)
+  }
+  rownames(grid) <- NULL
+  grid
+}
+
+#' @keywords internal
+#' @noRd
+.mm_grid_half_life <- function(decay, max_lag) {
+  out <- rep(NA_real_, length(decay))
+  live <- decay > 0 & decay < 1 & max_lag > 1
+  out[live] <- log(0.5) / log(decay[live])
+  out
+}
+
+# ---- fitting each split ---------------------------------------------------------
+
+# Every split's predictions from a user-supplied model. A split that fails
+# carries the first line of the reason, naming the function that raised it.
+#' @keywords internal
+#' @noRd
 .mm_cv_general <- function(z, y, splits, fit_fn, predict_fn) {
   rows <- if (is.data.frame(z)) {
     function(i) z[i, , drop = FALSE]
@@ -439,43 +522,48 @@ print.mm_carryover <- function(x, ...) {
     function(i) z[i]
   }
   lapply(splits, function(s) {
-    fit <- try(fit_fn(rows(s$train), y[s$train]), silent = TRUE)
-    if (inherits(fit, "try-error")) return(NULL)
-    pred <- try(predict_fn(fit, rows(s$test)), silent = TRUE)
-    if (inherits(pred, "try-error") || length(pred) != length(s$test)) {
-      return(NULL)
+    fit <- tryCatch(fit_fn(rows(s$train), y[s$train]),
+                    error = function(e) e)
+    if (inherits(fit, "error")) {
+      return(list(error = paste0("`fit_fn` failed: ", conditionMessage(fit))))
+    }
+    pred <- tryCatch(predict_fn(fit, rows(s$test)), error = function(e) e)
+    if (inherits(pred, "error")) {
+      return(list(error = paste0("`predict_fn` failed: ",
+                                 conditionMessage(pred))))
+    }
+    if (length(pred) != length(s$test)) {
+      return(list(error = sprintf(
+        "`predict_fn` returned %d value%s for %d row%s.", length(pred),
+        if (length(pred) == 1L) "" else "s", length(s$test),
+        if (length(s$test) == 1L) "" else "s")))
     }
     list(actual = y[s$test], pred = as.numeric(pred))
   })
 }
 
-# Turn per-split predictions into (pooled or mean) metric, the mean of the
-# per-split metric, and its standard error.
+# The default model: least squares with an intercept on the adstocked media
+# and the controls, given as one numeric matrix. Media and controls are
+# validated finite before they get here, so only a missing KPI drops a row.
+# A coefficient that cannot be estimated contributes nothing to the forecast.
 #' @keywords internal
 #' @noRd
-.mm_cv_score <- function(folds, metric_fn, aggregate) {
-  safe <- function(a, p) {
-    v <- try(metric_fn(a, p), silent = TRUE)
-    if (inherits(v, "try-error") || length(v) != 1L || !is.numeric(v)) {
-      return(NA_real_)
+.mm_cv_ols <- function(X, y, splits) {
+  X <- cbind(`(Intercept)` = 1, X)
+  has_y <- is.finite(y)
+  lapply(splits, function(s) {
+    rows <- s$train[has_y[s$train]]
+    fit <- tryCatch(stats::lm.fit(X[rows, , drop = FALSE], y[rows]),
+                    error = function(e) e)
+    if (inherits(fit, "error")) {
+      return(list(error = paste0("Least squares failed: ",
+                                 conditionMessage(fit))))
     }
-    as.numeric(v)
-  }
-  if (all(vapply(folds, is.null, logical(1)))) {
-    return(list(metric = NA_real_, split_mean = NA_real_, std_err = NA_real_,
-                vals = rep(NA_real_, length(folds))))
-  }
-  all_vals <- vapply(folds, function(f) {
-    if (is.null(f)) NA_real_ else safe(f$actual, f$pred)
-  }, numeric(1))
-  vals <- all_vals[is.finite(all_vals)]
-  split_mean <- if (length(vals)) mean(vals) else NA_real_
-  std_err <- if (length(vals) > 1L) stats::sd(vals) / sqrt(length(vals)) else NA_real_
-  live <- Filter(Negate(is.null), folds)
-  metric <- if (aggregate == "mean") split_mean else safe(
-    unlist(lapply(live, `[[`, "actual")), unlist(lapply(live, `[[`, "pred")))
-  list(metric = metric, split_mean = split_mean, std_err = std_err,
-       vals = all_vals)
+    cf <- fit$coefficients
+    cf[!is.finite(cf)] <- 0
+    list(actual = y[s$test],
+         pred = as.numeric(X[s$test, , drop = FALSE] %*% cf))
+  })
 }
 
 # Prefix-sum path for the default OLS fitter: every expanding-window fit is
@@ -520,6 +608,198 @@ print.mm_carryover <- function(x, ...) {
   })
 }
 
+# ---- scoring -------------------------------------------------------------------
+
+# Score candidates on the splits all of them completed.
+#
+# `fold_sets` holds, for each candidate, one entry per split: either
+# list(actual, pred) or list(error = <reason>). A split counts for a
+# candidate when its predictions are finite wherever the KPI is, and, for
+# `aggregate = "mean"`, when its per-split metric is finite. A split with no
+# finite KPI to train on or to assess carries no information and is left out
+# for everyone. A candidate that completes no split is scored NA; the rest are
+# scored only on the splits every one of them completed, so no candidate is
+# compared on easier splits than another. `lost` counts the informative
+# splits left out that way.
+#
+# With `se = TRUE`, the metric is also recomputed with each block of
+# `se_block` consecutive splits left out. `jack` holds those leave-one-block-out
+# values, one row per block and one column per candidate; the jackknife
+# standard error of a metric, or of the difference between two, comes from
+# their spread.
+#' @keywords internal
+#' @noRd
+.mm_cv_compare <- function(fold_sets, y, splits, metric_fn, aggregate,
+                           se_block = 1L, se = TRUE) {
+  actuals <- lapply(splits, function(s) y[s$test])
+  n_sp <- length(splits)
+  n_cand <- length(fold_sets)
+  first_error <- NULL
+  note <- function(msg) {
+    if (is.null(first_error)) first_error <<- msg
+  }
+  score <- function(a, p) {
+    v <- tryCatch(metric_fn(a, p), error = function(e) e)
+    if (inherits(v, "error")) {
+      note(paste0("`metric_fn` failed: ", conditionMessage(v)))
+      return(NA_real_)
+    }
+    if (!is.numeric(v) || length(v) != 1L) {
+      note("`metric_fn` did not return a single number.")
+      return(NA_real_)
+    }
+    as.numeric(v)
+  }
+
+  informative <- vapply(splits, function(s) {
+    any(is.finite(y[s$test])) && any(is.finite(y[s$train]))
+  }, logical(1))
+  ok <- matrix(FALSE, n_sp, n_cand)
+  vals <- matrix(NA_real_, n_sp, n_cand)
+  for (j in seq_len(n_cand)) {
+    for (s in which(informative)) {
+      f <- fold_sets[[j]][[s]]
+      if (!is.null(f$error)) {
+        note(f$error)
+        next
+      }
+      if (!all(is.finite(f$pred[is.finite(actuals[[s]])]))) {
+        note("`predict_fn` returned missing or non-finite predictions.")
+        next
+      }
+      if (aggregate == "mean") {
+        vals[s, j] <- score(actuals[[s]], f$pred)
+        if (!is.finite(vals[s, j])) next
+      }
+      ok[s, j] <- TRUE
+    }
+  }
+
+  live <- colSums(ok) > 0L
+  common <- informative & rowSums(!ok[, live, drop = FALSE]) == 0L
+  if (!any(live)) common <- logical(n_sp)
+  n_ok <- sum(common)
+  out <- list(metric = rep(NA_real_, n_cand), std_err = rep(NA_real_, n_cand),
+              jack = NULL, n_ok = n_ok,
+              lost = if (any(live)) sum(informative & !common) else 0L,
+              n_informative = sum(informative), first_error = first_error)
+  if (n_ok == 0L) return(out)
+
+  idx <- which(common)
+  n_blocks <- if (se) n_ok %/% se_block else 0L
+  blk <- if (n_blocks >= 2L) ceiling(seq_len(n_ok) * n_blocks / n_ok) else NULL
+  jack <- if (is.null(blk)) NULL else matrix(NA_real_, n_blocks, n_cand)
+  if (aggregate == "pooled") {
+    act <- unlist(actuals[idx], use.names = FALSE)
+    split_of <- rep(seq_len(n_ok), lengths(actuals[idx]))
+  }
+  for (j in which(live)) {
+    if (aggregate == "mean") {
+      v <- vals[idx, j]
+      out$metric[j] <- mean(v)
+      if (!is.null(blk)) {
+        jack[, j] <- (sum(v) - rowsum(v, blk)[, 1L]) / (n_ok - tabulate(blk))
+      }
+    } else {
+      p <- unlist(lapply(fold_sets[[j]][idx], `[[`, "pred"), use.names = FALSE)
+      out$metric[j] <- score(act, p)
+      if (!is.null(blk) && is.finite(out$metric[j])) {
+        b_of <- blk[split_of]
+        jack[, j] <- vapply(seq_len(n_blocks), function(b) {
+          keep <- b_of != b
+          score(act[keep], p[keep])
+        }, numeric(1))
+      }
+    }
+    if (!is.null(blk)) out$std_err[j] <- .mm_jack_se(jack[, j])
+  }
+  out$jack <- jack
+  out$first_error <- first_error
+  out
+}
+
+# Jackknife standard error from leave-one-block-out values.
+#' @keywords internal
+#' @noRd
+.mm_jack_se <- function(theta) {
+  g <- length(theta)
+  if (g < 2L || anyNA(theta)) return(NA_real_)
+  sqrt((g - 1) / g * sum((theta - mean(theta))^2))
+}
+
+# Abort when nothing could be scored, quoting the first failure.
+#' @keywords internal
+#' @noRd
+.mm_check_scores <- function(sc, channel = NULL, call = parent.frame()) {
+  if (any(is.finite(sc$metric))) return(invisible(sc))
+  what <- if (is.null(channel)) "" else sprintf(" for channel %s", channel)
+  first <- sc$first_error
+  if (sc$n_informative == 0L) {
+    cli::cli_abort(c(
+      "No split has a finite value of {.arg y} both to train on and to assess.",
+      i = "Check that {.arg y} is not missing over most of the series."
+    ), call = call)
+  }
+  if (is.null(first)) {
+    cli::cli_abort(c(
+      "Every grid point produced a missing metric{what}.",
+      i = "Check that {.arg metric_fn} returns a finite number for these \\
+           forecasts."
+    ), call = call)
+  }
+  if (sc$lost > 0L && sc$n_ok == 0L) {
+    cli::cli_abort(c(
+      "No split was completed by every grid point{what}.",
+      x = "First failure: {first}",
+      i = "Candidates are only compared on splits all of them completed. \\
+           Narrow the grid to the candidates the model can fit."
+    ), call = call)
+  }
+  cli::cli_abort(c(
+    "Every grid point produced a missing metric{what}.",
+    x = "First failure: {first}",
+    i = "Check that {.arg fit_fn} and {.arg predict_fn} work on a single \\
+         fold."
+  ), call = call)
+}
+
+#' @keywords internal
+#' @noRd
+.mm_warn_lost_splits <- function(lost, n_ok, first) {
+  if (lost == 0L) return(invisible(NULL))
+  cli::cli_warn(c(
+    "{lost} split{?s} {?was/were} left out because a fit failed on \\
+     {?it/them}.",
+    i = "Every candidate is scored on the {n_ok} split{?s} all of them \\
+         completed.",
+    i = "First failure: {first}"
+  ))
+  invisible(NULL)
+}
+
+# One-standard-error rule, paired and anchored on the reported best. A
+# candidate qualifies when its metric exceeds the anchor's by no more than the
+# jackknife standard error of the difference between the two; candidates are
+# scored on the same splits, so that difference is far less noisy than either
+# metric. Among those that qualify, the least carryover wins: lowest decay,
+# then shortest kernel, with a one-period kernel counted as no carryover.
+# Returns a row index.
+#' @keywords internal
+#' @noRd
+.mm_one_se_pick <- function(results, jack, anchor) {
+  m <- results$metric
+  if (is.null(jack) || !is.finite(m[anchor])) return(anchor)
+  within <- vapply(seq_along(m), function(j) {
+    if (j == anchor) return(TRUE)
+    if (!is.finite(m[j])) return(FALSE)
+    se <- .mm_jack_se(jack[, j] - jack[, anchor])
+    is.finite(se) && m[j] - m[anchor] <= se
+  }, logical(1))
+  cand <- which(within)
+  carry <- ifelse(results$max_lag[cand] == 1, 0, results$decay[cand])
+  cand[order(carry, results$max_lag[cand], results$decay[cand])][1L]
+}
+
 # ---- grid helpers ------------------------------------------------------------
 
 #' @keywords internal
@@ -550,32 +830,73 @@ print.mm_carryover <- function(x, ...) {
   unique(as.numeric(decays))
 }
 
+# Which parts of a selection sit on an edge of the grid that was searched.
+# Only the values tried at the selected point count, so a decay of 1
+# dropped from an infinite kernel does not hide an upper edge. Decay 0 and 1,
+# a one-period kernel and an infinite one are bounds of the parameter itself,
+# so a choice there says nothing about the grid. Two candidates have no
+# interior, so a parameter needs three before its edge means anything. Decay
+# has no effect on a one-period kernel, and kernel length none at decay 0.
 #' @keywords internal
 #' @noRd
-.mm_warn_grid_edge <- function(best, max_lags, decays) {
-  finite_lags <- max_lags[is.finite(max_lags)]
-  msgs <- character(0)
-  if (length(decays) > 1L && isTRUE(best$decay == max(decays))) {
-    msgs <- c(msgs, "decay" = sprintf(
-      "The selected decay (%s) is the largest value in `decays`.",
-      format(best$decay)))
+.mm_edge_notes <- function(max_lag, decay, grid) {
+  notes <- character(0)
+  if (max_lag != 1) {
+    d <- sort(unique(grid$decay[grid$max_lag == max_lag]))
+    if (length(d) >= 3L && decay == d[length(d)] && decay < 1) {
+      notes <- c(notes, sprintf(
+        "The selected decay (%s) is the largest value searched.",
+        format(decay)))
+    }
+    if (length(d) >= 3L && decay == d[1L] && decay > 0) {
+      notes <- c(notes, sprintf(
+        "The selected decay (%s) is the smallest value searched.",
+        format(decay)))
+    }
   }
-  if (length(finite_lags) > 1L && is.finite(best$max_lag) &&
-      isTRUE(best$max_lag == max(finite_lags))) {
-    msgs <- c(msgs, "max_lag" = sprintf(
-      "The selected max_lag (%s) is the largest value in `max_lags`.",
-      format(best$max_lag)))
+  if (decay != 0) {
+    l <- sort(unique(grid$max_lag[grid$decay == decay]))
+    if (length(l) >= 3L && max_lag == l[length(l)] && is.finite(max_lag)) {
+      notes <- c(notes, sprintf(
+        "The selected max_lag (%s) is the largest value searched.",
+        format(max_lag)))
+    }
+    if (length(l) >= 3L && max_lag == l[1L] && max_lag > 1) {
+      notes <- c(notes, sprintf(
+        "The selected max_lag (%s) is the smallest value searched.",
+        format(max_lag)))
+    }
+  }
+  notes
+}
+
+# Warn once for every selection on an edge. `notes` is a list of character
+# vectors from .mm_edge_notes(), named by channel for the joint tuner.
+#' @keywords internal
+#' @noRd
+.mm_warn_grid_edge <- function(notes) {
+  labels <- names(notes)
+  msgs <- character(0)
+  for (i in seq_along(notes)) {
+    v <- notes[[i]]
+    if (length(v) == 0L) next
+    if (!is.null(labels) && nzchar(labels[i])) {
+      v <- paste0(labels[i], ": ", tolower(substr(v, 1L, 1L)), substring(v, 2L))
+    }
+    msgs <- c(msgs, v)
   }
   if (length(msgs) == 0L) return(invisible(NULL))
   cli::cli_warn(c(
     "The chosen parameters sit on the edge of the grid.",
-    stats::setNames(unname(msgs), rep("*", length(msgs))),
+    stats::setNames(msgs, rep("*", length(msgs))),
     i = "Widen the grid and re-run. A parameter pinned to a boundary usually \\
          means the optimum is outside it, or that the series is too short to \\
          identify carryover this long."
   ))
   invisible(NULL)
 }
+
+# ---- parallel ----------------------------------------------------------------
 
 #' @keywords internal
 #' @noRd
@@ -585,11 +906,57 @@ print.mm_carryover <- function(x, ...) {
   avail <- parallel::detectCores(logical = FALSE)
   if (is.finite(avail)) cores <- min(cores, avail)
   if (cores <= 1L) return(lapply(idx, fun))
+  each <- .mm_try_each(fun)
   if (.Platform$OS.type == "unix") {
-    return(parallel::mclapply(idx, fun, mc.cores = cores))
+    return(parallel::mclapply(idx, each, mc.cores = cores))
   }
   cl <- parallel::makePSOCKcluster(cores)
   on.exit(parallel::stopCluster(cl), add = TRUE)
   parallel::clusterEvalQ(cl, requireNamespace("mediamix", quietly = TRUE))
-  parallel::parLapply(cl, idx, fun)
+  parallel::parLapply(cl, idx, each)
+}
+
+# Wrap `fun` so an error in one element comes back as that element's
+# try-error. Without it, mclapply()'s prescheduling turns one error into an
+# error for every element sent to the same worker. The wrapper's enclosure
+# holds `fun` alone, so a socket cluster serialises nothing else.
+#' @keywords internal
+#' @noRd
+.mm_try_each <- function(fun) {
+  force(fun)
+  function(i) try(fun(i), silent = TRUE)
+}
+
+# Turn grid points that failed in a parallel worker into candidates that
+# failed on every split, keeping the count and first message for a warning.
+#' @keywords internal
+#' @noRd
+.mm_worker_failures <- function(raw, n_splits) {
+  failed <- vapply(raw, function(z) inherits(z, "try-error"), logical(1))
+  first <- NULL
+  if (any(failed)) {
+    msgs <- vapply(raw[failed], function(z) {
+      cond <- attr(z, "condition")
+      if (is.null(cond)) as.character(z) else conditionMessage(cond)
+    }, character(1))
+    first <- msgs[1L]
+    raw[failed] <- lapply(msgs, function(m) {
+      rep(list(list(error = paste0("A parallel worker failed: ", m))),
+          n_splits)
+    })
+  }
+  list(folds = raw, n_failed = sum(failed), first = first)
+}
+
+#' @keywords internal
+#' @noRd
+.mm_warn_worker_failures <- function(sets) {
+  if (sets$n_failed == 0L) return(invisible(NULL))
+  first <- sets$first
+  cli::cli_warn(c(
+    "{sets$n_failed} grid point{?s} failed in a parallel worker.",
+    i = "First error: {first}",
+    i = "Re-run with {.code cores = 1} to see the full traceback."
+  ))
+  invisible(NULL)
 }
