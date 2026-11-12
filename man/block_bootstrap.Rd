@@ -11,32 +11,64 @@ block_bootstrap(
   block_length = NULL,
   by = NULL,
   level = 0.9,
-  seed = NULL
+  seed = NULL,
+  panel = c("shared", "independent"),
+  index = NULL,
+  circular = FALSE
 )
 }
 \arguments{
 \item{data}{A data frame, rows in time order (within each group when \code{by}
-is supplied). It should hold everything \code{statistic} needs: typically the
-KPI, the \emph{transformed} media, the controls and the raw spend.}
+is supplied), unless \code{index} names a column to order them by. It should
+hold everything \code{statistic} needs: typically the KPI, the \emph{transformed}
+media, the controls and the raw spend.}
 
 \item{statistic}{A function of one data frame returning a named numeric
 vector. It is called once on \code{data} for the point estimate and once per
-replicate on a resampled copy.}
+replicate on a resampled copy. Replicates are matched to the estimate by
+name, so the order of the elements may change between calls; a replicate
+that returns a name the estimate does not have counts as failed, and a
+name it leaves out is missing for that replicate.}
 
-\item{times}{Number of bootstrap replicates.}
+\item{times}{Number of bootstrap replicates, at most 1,000,000.}
 
-\item{block_length}{Rows per block. The default, \code{ceiling(n^(1/3))}, is the
-usual rate-optimal order for the moving block bootstrap; for weekly media
-data a block of at least the carryover's effective window is a sensible
-floor.}
+\item{block_length}{Rows per block, or periods per block when \code{by} is
+supplied with \code{panel = "shared"}. The default, \code{ceiling(n^(1/3))} with \code{n}
+the number of rows of \code{data}, is the usual rate-optimal order for the
+moving block bootstrap. It is often too short for media data; see
+"Choosing the block length".}
 
-\item{by}{Optional character vector of grouping columns. Blocks are then
-drawn within each group, and each group keeps its own size, so a panel
-of geographies is resampled as a panel.}
+\item{by}{Optional character vector of grouping columns, for a panel such
+as one series per geography. How the groups are resampled is set by
+\code{panel}.}
 
 \item{level}{Confidence level of the percentile intervals.}
 
-\item{seed}{Optional random seed, for reproducible intervals.}
+\item{seed}{Optional random seed, one whole number, for reproducible
+intervals. Every replicate's rows are drawn and the point estimate is
+computed after seeding, and the caller's random number stream is restored
+afterwards.}
+
+\item{panel}{How groups are resampled when \code{by} is supplied. \code{"shared"}, the
+default, draws one set of blocks of periods and applies it to every
+group, so a shock that hit every geography in the same week stays
+together in each replicate. \code{"independent"} draws separate blocks for each
+group. That treats the groups as unrelated series, and for a statistic
+pooled across groups it gives intervals that are too narrow whenever the
+groups share shocks.}
+
+\item{index}{Optional name of a numeric, \code{Date} or \code{POSIXct} column holding
+each row's period. Rows are put in period order within each group, and
+with \code{panel = "shared"} they are matched across groups by period, so the
+groups may cover different periods. Without \code{index}, row \code{t} of every
+group is taken to be the same period, and \code{panel = "shared"} needs every
+group to have the same number of rows.}
+
+\item{circular}{If \code{TRUE}, blocks wrap around from the end of each series to
+its start (the circular block bootstrap of Politis and Romano, 1992), so
+every row is equally likely to be drawn. The default \code{FALSE} is the moving
+block bootstrap, which draws the first and last \code{block_length - 1} rows of
+each series less often than the rest.}
 }
 \value{
 An object of class \code{mm_bootstrap}: a data frame with one row per
@@ -44,7 +76,15 @@ element of the statistic -- \code{term}, \code{estimate} (on the original data),
 \code{lower}, \code{upper} (percentile interval) and \code{std_error} -- with the
 replicate matrix attached as the attribute \code{"replicates"} (one row per
 replicate, one column per term). Replicates in which \code{statistic} failed
-are dropped and counted in a message.
+are dropped and counted in a message that quotes the first error. Each
+term's interval and standard error use the replicates in which that term
+is finite; missing or infinite values stay in the replicate matrix and are
+counted per term in a message.
+
+Subsetting the rows keeps the replicate matrix in step with the terms.
+Removing one of the five columns returns a plain data frame, as do
+\code{as.data.frame()} and, with the broom column names \code{std.error}, \code{conf.low}
+and \code{conf.high}, \code{tidy()}.
 }
 \description{
 Puts uncertainty intervals on anything computed from a weekly panel --
@@ -65,7 +105,54 @@ The interval reflects sampling variation given the model specification,
 including the transform parameters. It does not include the uncertainty in
 choosing those parameters unless \code{statistic} re-tunes them, which is
 possible but slow.
+
+Every replicate's rows are drawn before \code{statistic} is first called, so a
+statistic that sets its own seed, as a cross-validated fit often does,
+cannot make the resamples repeat.
 }
+\section{Panels}{
+
+With \code{by} and the default \code{panel = "shared"}, each replicate draws one set
+of blocks of periods and takes every group's rows for those periods, the
+moving blocks bootstrap for panels of Goncalves (2011). Shocks common to
+every group, such as a national holiday or a competitor's launch, then stay
+together, which they must for a statistic pooled across groups. Each
+group's rows are passed to \code{statistic} together, in time order, one group
+after another.
+
+Groups are matched period by period. With \code{index}, a group has no row for
+a period it does not cover, so group sizes vary from replicate to
+replicate. Without \code{index}, row \code{t} of each group is period \code{t}, and groups
+of different lengths are an error: supply \code{index}, or use
+\code{panel = "independent"}.
+
+With \code{panel = "independent"}, every group draws its own blocks and keeps
+its own size. That is only right when the groups share no shocks.
+}
+
+\section{Choosing the block length}{
+
+A block must be long enough to hold the dependence that matters for the
+statistic. In media data that is mostly carryover, so a block at least as
+long as the longest channel's \code{\link[=effective_window]{effective_window()}} is a sensible floor.
+The default \code{ceiling(n^(1/3))} is a rate rather than a length chosen for
+the data, and it is often shorter: 6 for 156 weekly rows.
+
+Percentile intervals from a block bootstrap of a short series cover less
+than their nominal level, and the shortfall grows with the autocorrelation.
+For the mean of 156 values from an AR(1) process, nominal 90\% intervals
+from 200 replicates covered the true mean in about 84\% of 400 simulated
+series when the autocorrelation was 0.5 and blocks were 6 rows long, and in
+about 66\% when it was 0.8, rising to about 76\% with blocks of 13 rows.
+Circular blocks gave much the same figures. Read the intervals as a lower
+bound on the uncertainty.
+
+The block length is checked against the series it resamples: longer than
+half the shortest series gives a warning, because few distinct resamples
+remain, and as long as the series is an error, because every replicate
+would repeat the data.
+}
+
 \examples{
 data(mm_weekly)
 north <- mm_weekly[mm_weekly$geo == "north", ]
@@ -91,12 +178,25 @@ average_roi <- function(d) {
 boot <- block_bootstrap(d, average_roi, times = 50, block_length = 13,
                         seed = 1)
 boot
+
+# A panel: every geography takes the same blocks of weeks.
+pooled_mean <- function(d) c(revenue = mean(d$revenue))
+block_bootstrap(mm_weekly, pooled_mean, times = 50, block_length = 13,
+                by = "geo", index = "date", seed = 1)
 }
 \references{
+Goncalves, S. (2011). The moving blocks bootstrap for panel linear
+regression models with individual fixed effects. \emph{Econometric Theory},
+27(5), 1048--1082.
+
 Kunsch, H. R. (1989). The jackknife and the bootstrap for general stationary
 observations. \emph{The Annals of Statistics}, 17(3), 1217--1241.
 
 Lahiri, S. N. (2003). \emph{Resampling Methods for Dependent Data}. Springer.
+
+Politis, D. N. and Romano, J. P. (1992). A circular block-resampling
+procedure for stationary data. In R. LePage and L. Billard (eds.),
+\emph{Exploring the Limits of Bootstrap}, 263--270. Wiley.
 }
 \seealso{
 \code{\link[=contributions]{contributions()}}, \code{\link[=roi]{roi()}}, \code{\link[=marginal_roi]{marginal_roi()}}
