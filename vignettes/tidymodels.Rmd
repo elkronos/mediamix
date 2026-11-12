@@ -43,8 +43,9 @@ channels <- c("tv", "video", "search", "social", "display")
 
 ## The problem the step solves
 
-Adstock is a filter with memory. Prepare a recipe on the first two years and
-bake it on the third, and the first rows of the third year have no history.
+Adstock is a filter with memory. Prepare a recipe on the first two and a half
+years and bake it on the rest, and the first rows of the new data have no
+history.
 
 `recipes::step_lag()` answers this by emitting `NA`, silently. Its documented
 remedy, `step_naomit()`, changes the row count — and a step that changes the
@@ -174,15 +175,22 @@ keeps the parameters apart in the search:
 ```{r}
 per_channel <- recipe(revenue ~ ., data = train)
 for (ch in channels) {
-  per_channel <- step_adstock(per_channel, all_of(ch), index = "date",
+  # `!!` puts the channel name into the step now. A bare `all_of(ch)` is
+  # evaluated at prep(), after the loop has finished, so every step would
+  # select the last channel.
+  per_channel <- step_adstock(per_channel, all_of(!!ch), index = "date",
                               by = "geo",
                               decay = hardhat::tune(paste0("decay_", ch)))
 }
 per_channel <- step_saturation(per_channel, all_of(channels),
                                half_max = hardhat::tune(),
                                shape = hardhat::tune())
-vapply(per_channel$steps[1:5], function(s) as.character(s$decay[[2]]),
-       character(1))
+data.frame(
+  selects = vapply(per_channel$steps[1:5],
+                   function(s) rlang::quo_text(s$terms[[1]]), character(1)),
+  decay = vapply(per_channel$steps[1:5],
+                 function(s) as.character(s$decay[[2]]), character(1))
+)
 ```
 
 Swap `per_channel` for `tune_rec` in the workflow below and the search covers
@@ -254,9 +262,8 @@ show_best(res, metric = "rmse", n = 5)
 ```{r eval = !has_tune, echo = FALSE, comment = NA}
 cat("The full tidymodels stack (rsample, parsnip, workflows, tune, dials,\n",
     "yardstick, glmnet) is not installed here, so the joint-tuning chunk was\n",
-    "not run. The recipe it builds is prepped and checked in the package's\n",
-    "test suite, so the code above is known to run once those packages are\n",
-    "present.\n", sep = "")
+    "not run. It runs in the package's continuous integration, where those\n",
+    "packages are installed.\n", sep = "")
 ```
 
 Four parameters, one search, one resampling scheme, correct train/test
