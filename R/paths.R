@@ -530,7 +530,7 @@ build_paths <- function(events,
   # removing the conversion rows changes which touches a journey has, never
   # whether or when it converted.
   if (conversion_touch == "drop") {
-    dt <- dt[conversion == 0L]
+    dt <- dt[dt$conversion == 0L]
     if (nrow(dt) == 0L) {
       cli::cli_warn(c(
         "Every touchpoint was a conversion event; no journeys remain.",
