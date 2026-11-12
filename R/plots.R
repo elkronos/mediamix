@@ -421,8 +421,8 @@ plot.mm_contributions <- function(x, type = c("time", "total"), ...) {
 #' is extrapolation.
 #'
 #' @param x A data frame from [response_curve()].
-#' @param observed Optional numeric vector of the spend levels actually seen
-#'   (for example the adstocked series); its range is left unshaded.
+#' @param observed Optional numeric vector of the spend levels seen in the
+#'   data (for example the adstocked series); its range is left unshaded.
 #' @param ... Ignored.
 #'
 #' @return `x`, invisibly.

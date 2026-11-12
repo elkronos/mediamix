@@ -9,8 +9,8 @@
 \arguments{
 \item{x}{A data frame from \code{\link[=response_curve]{response_curve()}}.}
 
-\item{observed}{Optional numeric vector of the spend levels actually seen
-(for example the adstocked series); its range is left unshaded.}
+\item{observed}{Optional numeric vector of the spend levels seen in the
+data (for example the adstocked series); its range is left unshaded.}
 
 \item{...}{Ignored.}
 }
