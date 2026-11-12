@@ -85,6 +85,7 @@ reference:
   desc: Recipe steps and tuning parameters for tuning carryover, saturation and a model penalty together.
   contents:
   - step_adstock
+  - step_adstock_channels
   - step_saturation
   - mediamix_params
 - title: Contributions and return on investment
