@@ -19,7 +19,8 @@
 #'       journey, which happens under `split_on = "none"` or `"gap"`.}
 #'     \item{`conversions_observed`}{Journeys that contained a conversion.}
 #'     \item{`conversions_unattributable`}{Converting journeys that lost every
-#'       touchpoint to a direct-traffic rule, and so cannot be credited to any
+#'       touchpoint to a direct-traffic rule or to
+#'       `conversion_touch = "drop"`, and so cannot be credited to any
 #'       channel. That number should be reported, not absorbed.}
 #'     \item{`journeys_before_filtering`}{Journeys found before post-conversion
 #'       touches, direct traffic, the lookback and null paths were removed.}

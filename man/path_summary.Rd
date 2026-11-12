@@ -23,7 +23,8 @@ exceeds \code{conversions_observed} when several conversions fall inside one
 journey, which happens under \code{split_on = "none"} or \code{"gap"}.}
 \item{\code{conversions_observed}}{Journeys that contained a conversion.}
 \item{\code{conversions_unattributable}}{Converting journeys that lost every
-touchpoint to a direct-traffic rule, and so cannot be credited to any
+touchpoint to a direct-traffic rule or to
+\code{conversion_touch = "drop"}, and so cannot be credited to any
 channel. That number should be reported, not absorbed.}
 \item{\code{journeys_before_filtering}}{Journeys found before post-conversion
 touches, direct traffic, the lookback and null paths were removed.}

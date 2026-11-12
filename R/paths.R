@@ -67,6 +67,26 @@
 #'   timestamp, conversion flag and conversion value, as when a tracking pixel
 #'   fires twice; without this a duplicated conversion row becomes a second
 #'   converting journey. [path_summary()] reports how many rows were dropped.
+#' @param keep Names of other columns of `events` to carry into the result,
+#'   such as campaign, device or cost, or `NULL` (the default) for none. They
+#'   travel per touch, each row of the result taking its values from the
+#'   event it was built from, since one journey can span several campaigns or
+#'   devices. Kept columns play no part in building journeys. Duplicates are
+#'   still found on the five columns `dedupe` names, and a run that
+#'   `collapse_repeats` merges keeps its first event's values, so a cost
+#'   column then holds that event's cost rather than the run's total; set
+#'   `collapse_repeats = FALSE` to keep every event. A kept column cannot share
+#'   a name with a column of the result, or with `credit` and `credit_value`,
+#'   which the credit rules add.
+#' @param conversion_touch Does the channel recorded on a conversion event
+#'   count as a touch? `"keep"` (the default) makes each conversion event the
+#'   last touch of its journey, so a sale logged on `"email"` gives email a
+#'   touch. `"drop"` removes conversion events from the touches once the
+#'   journey's conversion time and value have been read from them; use it when
+#'   the conversion row records where the sale happened, such as a checkout
+#'   page, rather than a marketing touch. A touch sharing the conversion's
+#'   timestamp stays. A journey whose only event was its conversion is left
+#'   with no touches, and its conversion is reported as unattributable.
 #'
 #' @return An object of class `mm_paths`, a data frame with one row per retained
 #'   touchpoint and the columns
@@ -82,8 +102,8 @@
 #'     \item{`time_to_conversion`}{Time from this touch to the journey's
 #'       conversion, in `units`. `NA` for non-converting journeys.}
 #'   }
-#'   Construction counts are attached as attributes and reported by
-#'   [path_summary()].
+#'   followed by the columns named in `keep`, in that order. Construction
+#'   counts are attached as attributes and reported by [path_summary()].
 #'
 #' @details
 #' Seven things go wrong between an event log and a set of journeys. All seven
@@ -130,9 +150,11 @@
 #' tie-break makes first-touch and last-touch results unreproducible.
 #'
 #' **Accounting.** A direct-traffic rule can strip a converting journey of every
-#' touchpoint, leaving a conversion that no channel can be credited with. (A
-#' lookback alone cannot do this: the conversion touch is always inside its own
-#' window.) Those conversions are counted and reported by [path_summary()] as
+#' touchpoint, leaving a conversion that no channel can be credited with, and
+#' so can `conversion_touch = "drop"`, alone or with a lookback. (A lookback
+#' alone cannot do this while the conversion event is a touch, since it is
+#' always inside its own window.) Those conversions are counted and reported by
+#' [path_summary()] as
 #' `conversions_unattributable` rather than disappearing -- including in the
 #' degenerate case where filtering removes every row and the returned table is
 #' empty.
@@ -206,6 +228,15 @@
 #'   gap = 14
 #' )
 #' path_summary(paths30)
+#'
+#' # Carry a campaign column, and stop counting the checkout page as a touch
+#' ev <- data.frame(
+#'   id = "a", ch = c("display", "search", "checkout"), ts = 1:3,
+#'   conv = c(0, 0, 1), campaign = c("spring", "brand", NA)
+#' )
+#' build_paths(ev, id = "id", channel = "ch", timestamp = "ts",
+#'             conversion = "conv", keep = "campaign",
+#'             conversion_touch = "drop")
 #' @export
 build_paths <- function(events,
                         id,
@@ -224,8 +255,11 @@ build_paths <- function(events,
                                           "(none)", "(not set)", "unknown", ""),
                         tz = "UTC",
                         timestamp_format = NULL,
-                        dedupe = TRUE) {
+                        dedupe = TRUE,
+                        keep = NULL,
+                        conversion_touch = c("keep", "drop")) {
   direct <- match.arg(direct)
+  conversion_touch <- match.arg(conversion_touch)
   units_given <- !missing(units)
   units <- match.arg(units)
   if (missing(split_on)) {
@@ -254,6 +288,8 @@ build_paths <- function(events,
   cols <- .mm_resolve_cols(events, id = id, channel = channel,
                            timestamp = timestamp, conversion = conversion,
                            value = value)
+  keep <- .mm_check_keep(events, keep)
+  kept_proto <- .mm_kept_values(events, keep, integer(0))
   ts_raw <- events[[cols$timestamp]]
   # A numeric timestamp is a bare index with no calendar behind it, so its
   # durations cannot be in days or hours, whatever `units` says.
@@ -273,7 +309,15 @@ build_paths <- function(events,
        {.val {cols$timestamp}} does not hold text."
     )
   }
-  if (nrow(events) == 0L) return(.mm_empty_paths(out_units))
+  if (conversion_touch == "drop" && is.null(cols$conversion)) {
+    cli::cli_warn(
+      '{.arg conversion_touch} = "drop" has no effect without a \\
+       {.arg conversion} column.'
+    )
+  }
+  if (nrow(events) == 0L) {
+    return(.mm_empty_paths(out_units, kept = kept_proto))
+  }
 
   n_events_in <- nrow(events)
   ids <- .mm_id_chr(events[[cols$id]])
@@ -476,10 +520,30 @@ build_paths <- function(events,
           "No conversions were observed in the input."
         }
       ))
-      return(.mm_empty_paths(out_units, counts))
+      return(.mm_empty_paths(out_units, counts, kept_proto))
     }
   }
   dt[, ".is_direct" := NULL]
+
+  # --- the conversion event as a touch ---------------------------------------
+  # Conversion time, value and the lookback anchor are already fixed, so
+  # removing the conversion rows changes which touches a journey has, never
+  # whether or when it converted.
+  if (conversion_touch == "drop") {
+    dt <- dt[conversion == 0L]
+    if (nrow(dt) == 0L) {
+      cli::cli_warn(c(
+        "Every touchpoint was a conversion event; no journeys remain.",
+        i = if (n_conv_journeys > 0L) {
+          "All {n_conv_journeys} observed conversion{?s} {?is/are} \\
+           unattributable under these settings."
+        } else {
+          "No conversions were observed in the input."
+        }
+      ))
+      return(.mm_empty_paths(out_units, counts, kept_proto))
+    }
+  }
 
   # --- lookback --------------------------------------------------------------
   if (!is.null(lookback)) {
@@ -495,7 +559,7 @@ build_paths <- function(events,
           "No conversions were observed in the input."
         }
       ))
-      return(.mm_empty_paths(out_units, counts))
+      return(.mm_empty_paths(out_units, counts, kept_proto))
     }
   }
   dt[, "anchor" := NULL]
@@ -515,7 +579,7 @@ build_paths <- function(events,
   if (!keep_null_paths) dt <- dt[converted == TRUE]
   if (nrow(dt) == 0L) {
     cli::cli_warn("No journeys remain after filtering.")
-    return(.mm_empty_paths(out_units, counts))
+    return(.mm_empty_paths(out_units, counts, kept_proto))
   }
 
   # --- ranks -----------------------------------------------------------------
@@ -529,10 +593,12 @@ build_paths <- function(events,
 
   n_conv_attributable <- length(unique(dt$.j[dt$converted]))
 
-  keep <- c("path_id", "id", "channel", "timestamp", "touch_rank", "touch_n",
+  core <- c("path_id", "id", "channel", "timestamp", "touch_rank", "touch_n",
             "converted", "conversion_value", "time_to_conversion")
-  out <- as.data.frame(dt[, keep, with = FALSE])
+  out <- as.data.frame(dt[, core, with = FALSE])
   rownames(out) <- NULL
+  kept <- .mm_kept_values(events, keep, dt$.row_id)
+  for (nm in keep) out[[nm]] <- kept[[nm]]
 
   structure(
     out,
@@ -553,7 +619,8 @@ build_paths <- function(events,
     mm_settings = list(split_on = split_on, lookback = lookback, gap = gap,
                        collapse_repeats = collapse_repeats,
                        keep_null_paths = keep_null_paths, direct = direct,
-                       dedupe = dedupe)
+                       dedupe = dedupe, keep = keep,
+                       conversion_touch = conversion_touch)
   )
 }
 
@@ -906,7 +973,7 @@ print.mm_paths <- function(x, ...) {
 
 #' @keywords internal
 #' @noRd
-.mm_empty_paths <- function(units, counts = NULL) {
+.mm_empty_paths <- function(units, counts = NULL, kept = NULL) {
   out <- data.frame(
     path_id = character(0), id = character(0), channel = character(0),
     timestamp = as.POSIXct(character(0)), touch_rank = integer(0),
@@ -914,6 +981,7 @@ print.mm_paths <- function(x, ...) {
     conversion_value = numeric(0), time_to_conversion = numeric(0),
     stringsAsFactors = FALSE
   )
+  for (nm in names(kept)) out[[nm]] <- kept[[nm]]
   if (is.null(counts)) {
     counts <- list(events_in = 0L, events_out = 0L, direct_events = 0L,
                    journeys = 0L, journeys_before_filtering = 0L,
@@ -923,6 +991,64 @@ print.mm_paths <- function(x, ...) {
   }
   structure(out, class = c("mm_paths", "data.frame"), mm_units = units,
             mm_counts = counts, mm_settings = list())
+}
+
+# Columns of `events` that build_paths() carries through. A name the journey
+# table already uses, or one the credit rules add, would be overwritten or
+# would overwrite a structural column.
+#' @keywords internal
+#' @noRd
+.mm_check_keep <- function(events, keep, call = parent.frame()) {
+  if (is.null(keep) || (is.character(keep) && length(keep) == 0L)) {
+    return(character(0))
+  }
+  if (!is.character(keep) || anyNA(keep) || !all(nzchar(keep))) {
+    cli::cli_abort(
+      "{.arg keep} must be a character vector of column names, not \\
+       {.obj_type_friendly {keep}}.",
+      call = call
+    )
+  }
+  keep <- unique(keep)
+  absent <- setdiff(keep, names(events))
+  if (length(absent) > 0L) {
+    cli::cli_abort(c(
+      "{cli::qty(length(absent))}Column{?s} {.val {absent}} (given as \\
+       {.arg keep}) {?is/are} not in the data.",
+      i = "Available: {.val {utils::head(names(events), 12)}}."
+    ), call = call)
+  }
+  taken <- intersect(keep, c("id", .mm_path_cols(), "credit", "credit_value"))
+  if (length(taken) > 0L) {
+    cli::cli_abort(c(
+      "{.arg keep} cannot carry {cli::qty(length(taken))}column{?s} \\
+       {.val {taken}}: the journey table uses {?that name/those names}.",
+      i = "Rename {cli::qty(length(taken))}{?it/them} in {.arg events} first."
+    ), call = call)
+  }
+  nested <- keep[!vapply(keep, function(nm) is.null(dim(events[[nm]])),
+                         logical(1))]
+  if (length(nested) > 0L) {
+    cli::cli_abort(
+      "{.arg keep} takes vector columns; {.val {nested}} {?is a/are} matrix \\
+       or data frame column{?s}.",
+      call = call
+    )
+  }
+  keep
+}
+
+# The kept columns of `events` at `rows`, as a named list. Date-times stored
+# as POSIXlt become POSIXct, as data.frame() would make them.
+#' @keywords internal
+#' @noRd
+.mm_kept_values <- function(events, keep, rows) {
+  out <- lapply(keep, function(nm) {
+    v <- events[[nm]]
+    if (inherits(v, "POSIXlt")) v <- as.POSIXct(v)
+    v[rows]
+  })
+  stats::setNames(out, keep)
 }
 
 #' @keywords internal

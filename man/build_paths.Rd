@@ -21,7 +21,9 @@ build_paths(
   direct_labels = c("direct", "(direct)", "none", "(none)", "(not set)", "unknown", ""),
   tz = "UTC",
   timestamp_format = NULL,
-  dedupe = TRUE
+  dedupe = TRUE,
+  keep = NULL,
+  conversion_touch = c("keep", "drop")
 )
 }
 \arguments{
@@ -103,6 +105,28 @@ to \code{TRUE}. Two rows are duplicates when they share the customer, channel,
 timestamp, conversion flag and conversion value, as when a tracking pixel
 fires twice; without this a duplicated conversion row becomes a second
 converting journey. \code{\link[=path_summary]{path_summary()}} reports how many rows were dropped.}
+
+\item{keep}{Names of other columns of \code{events} to carry into the result,
+such as campaign, device or cost, or \code{NULL} (the default) for none. They
+travel per touch, each row of the result taking its values from the
+event it was built from, since one journey can span several campaigns or
+devices. Kept columns play no part in building journeys. Duplicates are
+still found on the five columns \code{dedupe} names, and a run that
+\code{collapse_repeats} merges keeps its first event's values, so a cost
+column then holds that event's cost rather than the run's total; set
+\code{collapse_repeats = FALSE} to keep every event. A kept column cannot share
+a name with a column of the result, or with \code{credit} and \code{credit_value},
+which the credit rules add.}
+
+\item{conversion_touch}{Does the channel recorded on a conversion event
+count as a touch? \code{"keep"} (the default) makes each conversion event the
+last touch of its journey, so a sale logged on \code{"email"} gives email a
+touch. \code{"drop"} removes conversion events from the touches once the
+journey's conversion time and value have been read from them; use it when
+the conversion row records where the sale happened, such as a checkout
+page, rather than a marketing touch. A touch sharing the conversion's
+timestamp stays. A journey whose only event was its conversion is left
+with no touches, and its conversion is reported as unattributable.}
 }
 \value{
 An object of class \code{mm_paths}, a data frame with one row per retained
@@ -119,8 +143,8 @@ touchpoint and the columns
 \item{\code{time_to_conversion}}{Time from this touch to the journey's
 conversion, in \code{units}. \code{NA} for non-converting journeys.}
 }
-Construction counts are attached as attributes and reported by
-\code{\link[=path_summary]{path_summary()}}.
+followed by the columns named in \code{keep}, in that order. Construction
+counts are attached as attributes and reported by \code{\link[=path_summary]{path_summary()}}.
 }
 \description{
 Turns a table of individual touchpoint events into the journeys that
@@ -173,9 +197,11 @@ common in logs written at second resolution, and a non-deterministic
 tie-break makes first-touch and last-touch results unreproducible.
 
 \strong{Accounting.} A direct-traffic rule can strip a converting journey of every
-touchpoint, leaving a conversion that no channel can be credited with. (A
-lookback alone cannot do this: the conversion touch is always inside its own
-window.) Those conversions are counted and reported by \code{\link[=path_summary]{path_summary()}} as
+touchpoint, leaving a conversion that no channel can be credited with, and
+so can \code{conversion_touch = "drop"}, alone or with a lookback. (A lookback
+alone cannot do this while the conversion event is a touch, since it is
+always inside its own window.) Those conversions are counted and reported by
+\code{\link[=path_summary]{path_summary()}} as
 \code{conversions_unattributable} rather than disappearing -- including in the
 degenerate case where filtering removes every row and the returned table is
 empty.
@@ -251,6 +277,15 @@ paths30 <- build_paths(
   gap = 14
 )
 path_summary(paths30)
+
+# Carry a campaign column, and stop counting the checkout page as a touch
+ev <- data.frame(
+  id = "a", ch = c("display", "search", "checkout"), ts = 1:3,
+  conv = c(0, 0, 1), campaign = c("spring", "brand", NA)
+)
+build_paths(ev, id = "id", channel = "ch", timestamp = "ts",
+            conversion = "conv", keep = "campaign",
+            conversion_touch = "drop")
 }
 \seealso{
 \code{\link[=credit_linear]{credit_linear()}} and friends for assigning credit,

@@ -497,6 +497,276 @@ test_that("journey facts computed on runs match a per-journey calculation", {
   expect_identical(got, unname(ref))
 })
 
+# ---- keep ----------------------------------------------------------------------
+
+# Data columns only, so that attributes such as the settings do not count.
+cols_of <- function(p, nms = names(p)) as.list(as.data.frame(p))[nms]
+
+test_that("keep carries columns per touch, in their own type, and changes nothing else", {
+  data(mm_events)
+  ev <- mm_events
+  ev$device <- factor(ifelse(seq_len(nrow(ev)) %% 3 == 0, "mobile", "desktop"))
+  ev$cost <- seq_len(nrow(ev)) / 100
+  ev$day <- as.Date("2025-01-01") + seq_len(nrow(ev)) %% 30
+  B <- function(...) {
+    build_paths(ev, id = "customer_id", channel = "channel",
+                timestamp = "timestamp", conversion = "conversion",
+                value = "value", ...)
+  }
+  plain <- B()
+  kept <- B(keep = c("device", "cost", "day", "customer_id"))
+  expect_identical(names(kept), c(names(plain), "device", "cost", "day",
+                                  "customer_id"))
+  expect_identical(cols_of(kept, names(plain)), cols_of(plain))
+  expect_identical(attr(kept, "mm_counts"), attr(plain, "mm_counts"))
+  expect_identical(attr(kept, "mm_settings")$keep,
+                   c("device", "cost", "day", "customer_id"))
+
+  # cost is unique per event, so it identifies the row each touch came from.
+  src <- match(kept$cost, ev$cost)
+  expect_identical(kept$id, ev$customer_id[src])
+  expect_identical(kept$timestamp, ev$timestamp[src])
+  expect_identical(kept$device, ev$device[src])
+  expect_identical(kept$day, ev$day[src])
+  expect_identical(levels(kept$device), c("desktop", "mobile"))
+})
+
+test_that("kept values come from the first event of a collapsed run and survive dedupe", {
+  ev <- data.frame(id = "a", ch = c("tv", "tv", "tv", "search"),
+                   ts = c(1, 2, 3, 4), conv = c(0, 0, 0, 1),
+                   cost = c(5, 6, 7, 8))
+  p <- build_paths(ev, id = "id", channel = "ch", timestamp = "ts",
+                   conversion = "conv", keep = "cost")
+  expect_identical(p$cost, c(5, 8))
+  every <- build_paths(ev, id = "id", channel = "ch", timestamp = "ts",
+                       conversion = "conv", keep = "cost",
+                       collapse_repeats = FALSE)
+  expect_identical(every$cost, c(5, 6, 7, 8))
+
+  # A pixel firing twice is still one event when a kept column differs.
+  dup <- data.frame(id = "a", ch = c("tv", "search", "search"),
+                    ts = c(1, 2, 2), conv = c(0, 1, 1),
+                    tag = c("x", "first", "second"))
+  expect_message(
+    pd <- build_paths(dup, id = "id", channel = "ch", timestamp = "ts",
+                      conversion = "conv", keep = "tag"),
+    "duplicate conversion"
+  )
+  expect_identical(pd$tag, c("x", "first"))
+  expect_identical(unique(pd$path_id), "a#1")
+})
+
+test_that("keep handles list columns, POSIXlt and a single journey", {
+  ev <- data.frame(id = "a", ch = c("tv", "search"), ts = c(1, 2),
+                   conv = c(0, 1))
+  ev$items <- list(1:2, "basket")
+  ev$seen <- as.POSIXlt(as.POSIXct(c("2024-01-01 10:00", "2024-01-02 11:00"),
+                                   tz = "UTC"))
+  p <- build_paths(ev, id = "id", channel = "ch", timestamp = "ts",
+                   conversion = "conv", keep = c("items", "seen"))
+  expect_identical(p$items, list(1:2, "basket"))
+  expect_s3_class(p$seen, "POSIXct")
+  expect_equal(credit_last(p)$credit, c(0, 1))
+})
+
+test_that("kept columns are typed in an empty result", {
+  ev <- data.frame(id = c("a", "b"), ch = "direct", ts = c(1, 2),
+                   conv = c(1, 0), device = factor(c("x", "y")))
+  none <- build_paths(ev[0, ], id = "id", channel = "ch", timestamp = "ts",
+                      conversion = "conv", keep = "device")
+  expect_identical(nrow(none), 0L)
+  expect_s3_class(none$device, "factor")
+  expect_warning(
+    gone <- build_paths(ev, id = "id", channel = "ch", timestamp = "ts",
+                        conversion = "conv", keep = "device",
+                        direct = "drop"),
+    "direct traffic"
+  )
+  expect_identical(levels(gone$device), c("x", "y"))
+  expect_identical(nrow(attribute(gone)), 0L)
+})
+
+test_that("keep validates its column names", {
+  ev <- data.frame(id = "a", ch = c("tv", "search"), ts = c(1, 2),
+                   conv = c(0, 1), touch_n = 1, credit = 2)
+  B <- function(keep) {
+    build_paths(ev, id = "id", channel = "ch", timestamp = "ts",
+                conversion = "conv", keep = keep)
+  }
+  expect_error(B(1), "character vector")
+  expect_error(B(NA_character_), "character vector")
+  expect_error(B(""), "character vector")
+  expect_error(B("device"), "not in the data")
+  expect_error(B("touch_n"), "journey table uses")
+  expect_error(B("credit"), "credit")
+  ev$m <- matrix(1:4, 2)
+  expect_error(B("m"), "vector columns")
+  # Repeated names are kept once; an empty vector keeps nothing.
+  expect_identical(names(B(c("ch", "ch")))[10], "ch")
+  expect_identical(ncol(B(character(0))), 9L)
+})
+
+test_that("kept columns travel through binding, subsetting and every consumer", {
+  ev <- data.frame(
+    id = c("a", "a", "a", "b", "b", "c"),
+    ch = c("tv", "search", "email", "tv", "email", "search"),
+    ts = c(1, 2, 3, 1, 2, 1), conv = c(0, 0, 1, 0, 0, 1),
+    val = c(NA, NA, 40, NA, NA, 25),
+    device = c("pc", "pc", "phone", "pc", "pc", "phone")
+  )
+  B <- function(...) {
+    build_paths(ev, id = "id", channel = "ch", timestamp = "ts",
+                conversion = "conv", value = "val", ...)
+  }
+  plain <- B()
+  kept <- B(keep = "device")
+
+  # Every result is the same as without the extra column.
+  expect_identical(attribute(kept), attribute(plain))
+  expect_identical(markov_removal(kept), markov_removal(plain))
+  expect_identical(as_channel_paths(kept), as_channel_paths(plain))
+  expect_identical(path_diagnostics(kept), path_diagnostics(plain))
+  expect_identical(credit_linear(kept)$credit, credit_linear(plain)$credit)
+
+  # Subsetting keeps the column and the class.
+  sub <- kept[kept$device == "pc", ]
+  expect_s3_class(sub, "mm_paths")
+  expect_true(all(sub$device == "pc"))
+  expect_s3_class(kept[, c(mediamix:::.mm_path_cols(), "device")], "mm_paths")
+
+  # Binding keeps it; tables with different columns do not bind.
+  both <- bind_paths(one = kept, two = kept)
+  expect_identical(both$device, rep(kept$device, 2))
+  expect_identical(attr(both, "mm_settings")$keep, "device")
+  expect_error(bind_paths(kept, plain), "different columns")
+  other <- build_paths(transform(ev, id = paste0(id, "2")), id = "id",
+                       channel = "ch", timestamp = "ts", conversion = "conv",
+                       value = "val", keep = "device")
+  expect_identical(rbind(kept, other)$device, c(kept$device, other$device))
+
+  pdf(NULL)
+  on.exit(grDevices::dev.off(), add = TRUE)
+  expect_no_error(plot(attribute(kept)))
+})
+
+test_that("dplyr verbs keep the kept columns", {
+  skip_if_not_installed("dplyr")
+  ev <- data.frame(id = c("a", "a", "b"), ch = c("tv", "search", "email"),
+                   ts = c(1, 2, 1), conv = c(0, 1, 1),
+                   device = c("pc", "phone", "phone"))
+  p <- build_paths(ev, id = "id", channel = "ch", timestamp = "ts",
+                   conversion = "conv", keep = "device")
+  f <- dplyr::filter(p, device == "phone")
+  expect_s3_class(f, "mm_paths")
+  expect_identical(f$touch_rank, c(1L, 1L))
+  expect_identical(f$touch_n, c(1L, 1L))
+  m <- dplyr::mutate(p, device = toupper(device))
+  expect_identical(m$device, c("PC", "PHONE", "PHONE"))
+  expect_s3_class(m, "mm_paths")
+})
+
+# ---- conversion_touch ------------------------------------------------------------
+
+test_that("conversion_touch = 'drop' removes the conversion event but not the conversion", {
+  ev <- data.frame(id = "a", ch = c("display", "search", "checkout"),
+                   ts = c(1, 2, 4), conv = c(0, 0, 1), val = c(NA, NA, 80))
+  B <- function(...) {
+    build_paths(ev, id = "id", channel = "ch", timestamp = "ts",
+                conversion = "conv", value = "val", ...)
+  }
+  kept <- B()
+  dropped <- B(conversion_touch = "drop")
+  expect_identical(kept$channel, c("display", "search", "checkout"))
+  expect_identical(dropped$channel, c("display", "search"))
+  expect_true(all(dropped$converted))
+  expect_identical(unique(dropped$conversion_value), 80)
+  expect_identical(dropped$time_to_conversion, c(3, 2))
+  expect_identical(dropped$touch_n, c(2L, 2L))
+  expect_equal(credit_last(dropped)$credit, c(0, 1))
+  expect_identical(attr(dropped, "mm_settings")$conversion_touch, "drop")
+  expect_identical(attr(kept, "mm_settings")$conversion_touch, "keep")
+  expect_identical(path_summary(dropped)$converting_journeys, 1L)
+  expect_identical(path_summary(dropped)$events_out, 2L)
+  expect_error(B(conversion_touch = "omit"), "should be one of")
+})
+
+test_that("a touch tied with the conversion stays when the conversion row goes", {
+  ev <- data.frame(id = "a", ch = c("checkout", "email", "tv"),
+                   ts = c(5, 5, 1), conv = c(1, 0, 0))
+  p <- build_paths(ev, id = "id", channel = "ch", timestamp = "ts",
+                   conversion = "conv", conversion_touch = "drop")
+  expect_identical(p$channel, c("tv", "email"))
+  expect_identical(p$time_to_conversion, c(4, 0))
+})
+
+test_that("a journey whose only event was its conversion becomes unattributable", {
+  ev <- data.frame(id = c("a", "b", "b"), ch = c("direct", "tv", "direct"),
+                   ts = c(1, 1, 2), conv = c(1, 0, 1), val = c(30, NA, 50))
+  p <- build_paths(ev, id = "id", channel = "ch", timestamp = "ts",
+                   conversion = "conv", value = "val",
+                   conversion_touch = "drop")
+  expect_identical(unique(p$path_id), "b#1")
+  s <- path_summary(p)
+  expect_identical(s$conversions_observed, 2L)
+  expect_identical(s$converting_journeys, 1L)
+  expect_identical(s$conversions_unattributable, 1L)
+  expect_equal(sum(credit_linear(p)$credit), 1)
+  expect_match(paste(capture.output(print(p)), collapse = "\n"),
+               "cannot be attributed")
+
+  # With a lookback, a converting journey can now lose every touch.
+  expect_warning(
+    lb <- build_paths(ev, id = "id", channel = "ch", timestamp = "ts",
+                      conversion = "conv", conversion_touch = "drop",
+                      lookback = 0.5),
+    "lookback window removed"
+  )
+  expect_identical(nrow(lb), 0L)
+  expect_identical(path_summary(lb)$conversions_unattributable, 2L)
+})
+
+test_that("dropping every conversion event warns and returns an empty table", {
+  ev <- data.frame(id = c("a", "b"), ch = c("tv", "email"), ts = c(1, 1),
+                   conv = c(1, 1), device = c("pc", "phone"))
+  expect_warning(
+    p <- build_paths(ev, id = "id", channel = "ch", timestamp = "ts",
+                     conversion = "conv", conversion_touch = "drop",
+                     keep = "device"),
+    "conversion event"
+  )
+  expect_identical(nrow(p), 0L)
+  expect_identical(names(p)[10], "device")
+  expect_identical(path_summary(p)$conversions_unattributable, 2L)
+})
+
+test_that("conversion_touch = 'drop' removes every conversion row in a journey", {
+  ev <- data.frame(id = "a", ch = c("tv", "shop", "tv", "shop", "email"),
+                   ts = 1:5, conv = c(0, 1, 0, 1, 0))
+  expect_message(
+    p <- build_paths(ev, id = "id", channel = "ch", timestamp = "ts",
+                     conversion = "conv", split_on = "none",
+                     conversion_touch = "drop", collapse_repeats = FALSE),
+    "more than one conversion"
+  )
+  expect_identical(p$channel, c("tv", "tv"))
+  collapsed <- suppressMessages(
+    build_paths(ev, id = "id", channel = "ch", timestamp = "ts",
+                conversion = "conv", split_on = "none",
+                conversion_touch = "drop")
+  )
+  expect_identical(collapsed$channel, "tv")
+})
+
+test_that("conversion_touch = 'drop' without a conversion column warns", {
+  ev <- data.frame(id = "a", ch = c("tv", "search"), ts = c(1, 2))
+  expect_warning(
+    p <- build_paths(ev, id = "id", channel = "ch", timestamp = "ts",
+                     split_on = "none", conversion_touch = "drop"),
+    "no effect"
+  )
+  expect_identical(p$channel, c("tv", "search"))
+})
+
 # ---- [.mm_paths --------------------------------------------------------------
 
 test_that("[.mm_paths keeps the class on a row subset and drops it when structural columns go", {
