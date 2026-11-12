@@ -52,9 +52,12 @@ d$variation
 ```
 
 Read `zero_share` as the worst geography's dark-week rate, not an overall
-average: with `by` supplied, every column here reports the worst case across
-series, which is what you want from a diagnostic. `video` goes dark in 42% of
-weeks in its worst geography and `display` in a third. That is normal — media
+average. With `by` supplied, `cv`, `distinct` and `zero_share` report the worst
+case across series, which is what you want from a diagnostic, while `mean` and
+`sd` are averages over the series. `video` goes dark in
+`r round(100 * d$variation$zero_share[d$variation$channel == "video"])`% of
+weeks in its worst geography and `display` in
+`r round(100 * d$variation$zero_share[d$variation$channel == "display"])`%. That is normal — media
 is flighted — but it means those channels carry less information than
 156 weeks per geography suggests.
 
@@ -183,10 +186,12 @@ threshold effect below which media barely registers.
 
 ## Composing them, in the right order
 
-Saturation goes *after* adstock. Saturating first caps each period's spend in
-isolation and then lets carryover accumulate the capped values past the
-ceiling, which defeats the point of having a ceiling. `media_transform()`
-composes them correctly and refuses to do it backwards quietly.
+Saturation goes *after* adstock. Saturating first puts each period's spend
+through the curve in isolation, so carryover from earlier periods never counts
+towards saturation; with `normalise = FALSE` the kernel weights sum to more
+than one and carryover also lifts the result past the ceiling.
+`media_transform()` composes them in the right order and warns if asked to
+reverse it.
 
 ```{r}
 truth <- attr(mm_weekly, "truth")
@@ -221,13 +226,18 @@ model_data$seasonality <- north$seasonality
 model_data$holiday <- north$holiday
 
 fit <- lm(north$revenue ~ ., data = model_data)
-round(coef(fit)[channels])
-round(truth$beta[channels])
+estimates <- rbind(estimate = coef(fit)[channels],
+                   truth = truth$beta[channels])
+round(estimates)
+round(100 * (estimates["estimate", ] / estimates["truth", ] - 1))
 ```
 
-Close, not exact — 156 weekly observations of flighted, partly collinear media
-is a genuinely hard estimation problem, and pretending otherwise is how
-marketing mix models acquire their reputation.
+Close, not exact: the estimates miss the truth by between
+`r min(abs(round(100 * (estimates["estimate", ] / estimates["truth", ] - 1))))`%
+and `r max(abs(round(100 * (estimates["estimate", ] / estimates["truth", ] - 1))))`%.
+156 weekly observations of flighted, partly collinear media is a hard
+estimation problem, and pretending otherwise is how marketing mix models
+acquire their reputation.
 
 The controls are doing real work. Drop them and the media coefficients absorb
 the trend and the price effect instead:
@@ -266,7 +276,7 @@ plot(contrib)
 
 The dip at the very start of 2023 is the cold start: television's long
 carryover takes weeks to fill from zero. `adstock_steady_state()` removes it
-when that matters — see `vignette("carryover")`.
+when that matters; see `vignette("carryover")`.
 
 Pooling it that way is what makes the arithmetic close exactly:
 
@@ -297,15 +307,15 @@ reallocation.
 The tempting shortcut is to differentiate the saturation curve at the mean
 adstocked level and multiply by the kernel's first weight, `1 - decay`, on the
 grounds that a pound spent this week only adds that much to this week's
-adstock. It does — but it also adds to every later week's adstock, and under a
+adstock. It does, but it also adds to every later week's adstock, and under a
 normalised kernel those contributions sum to the whole pound. The shortcut
 measures the return *inside the week of spend* and ignores the rest, which for
 a slow channel is most of it.
 
 `marginal_roi()` avoids the calculus altogether. It re-runs the full transform
 on a budget 1% larger in every week and divides the extra response by the
-extra spend — the definition used by Jin et al. (2017) and by Meridian —
-so carryover and flighting are both handled by construction, and the result is
+extra spend, the definition used by Jin et al. (2017) and by Meridian, so
+carryover and flighting are both handled by construction, and the result is
 a total over the same weeks as the average:
 
 ```{r}
@@ -335,16 +345,40 @@ The shortcut understates television's marginal return about six-fold, and a
 reallocation built on it would strip budget from exactly the channel whose
 effect arrives late.
 
-Read the simulated column instead. Display's average pound returns about 1.5,
-but its *next* pound returns less than it costs: it is over-funded, and the
-average-ROI table hides that completely. Search and social have average
-returns roughly double their marginal ones — concave curves, well up the
-slope. Television is the odd one out: its marginal return is close to its
+Read the simulated column instead. In this fitted model display's average
+pound returns about
+`r round(marginal$roi[marginal$channel == "display"], 1)`, but its *next* pound
+returns `r round(marginal$mroi[marginal$channel == "display"], 2)`, less than it
+costs, and the average-ROI table hides that completely. Search and social have
+average returns roughly double their marginal ones: concave curves, well up
+the slope. Television is the odd one out: its marginal return is close to its
 average, because its S-shaped curve (`shape = 1.6`) is still near its steepest
 section at this budget. Under a concave curve marginal is below average
 everywhere; under an S-curve it can be close to or even above it below the
 inflection point, and assuming otherwise is how a threshold channel stays
 starved.
+
+Every figure above comes from a model fitted to 156 noisy weeks. The data were
+simulated, so the fitted marginal returns can be set against the ones the true
+coefficients give:
+
+```{r}
+true_mroi <- vapply(channels, function(ch) marginal_roi(
+  north[[ch]], coefficient = truth$beta[[ch]],
+  adstock = list(decay = truth$decay[[ch]]),
+  saturation = list(half_max = truth$half_max[[ch]],
+                    shape = truth$shape[[ch]])
+)$mroi, numeric(1))
+round(rbind(fitted = stats::setNames(marginal$mroi, marginal$channel)[channels],
+            truth = true_mroi), 2)
+```
+
+With the true coefficients display's next pound returns
+`r round(true_mroi[["display"]], 2)`, and the channels rank differently. Sampling
+noise in three years of weekly data is enough to move a marginal return across
+break-even, which is why a reallocation suggested by these numbers should be
+tested before it is made; `vignette("carryover")` and the budget walkthrough
+on the package website take this further.
 
 The full curve, and its inverse:
 

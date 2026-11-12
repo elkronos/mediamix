@@ -72,8 +72,8 @@ round(rbind(forward = forward, backward = backward), 6)
 all.equal(forward, backward)
 ```
 
-Identical. Not analogous — identical. Drawn on one time axis, with the
-event at zero, the two are mirror images:
+The two are identical, not merely analogous. Drawn on one time axis, with the
+event at zero, they are mirror images:
 
 ```{r mirror}
 ink <- mm_palette(role = "ink")
@@ -133,8 +133,11 @@ three-week television half-life estimated from weekly sales describes how
 aggregate demand responds to aggregate spend. A time-decay half-life on a
 journey describes how a convention weights one customer's clicks against each
 other, usually over days. There is no reason for the two numbers to agree, and
-an MMM half-life is not by itself a defensible attribution lookback — read
-that off the journeys with `conversion_lag()` instead.
+an MMM half-life is not by itself a defensible attribution lookback; read that
+off the journeys with `conversion_lag()` instead. The units differ too: an
+adstock `decay` applies per row of the series (a week, in `mm_weekly`), while
+`credit_time_decay()` applies its `decay` per `period` of elapsed time, which
+is one day by default.
 
 ## What the symmetry does not give you
 
@@ -142,9 +145,10 @@ It is a symmetry of *arithmetic*, not of evidence.
 
 Adstock is a claim about a causal mechanism: money spent in week one still
 moves sales in week three, and a regression on adstocked spend estimates how
-much. It can be wrong, and it is testable — the transform either improves
-out-of-sample prediction of the KPI or it does not, which is exactly what
-`tune_carryover()` measures.
+much. It can be wrong. `tune_carryover()` checks whether the transform
+improves out-of-sample prediction of the KPI, which is evidence about its
+predictive value; whether the mechanism is causal is a separate question,
+answered by experiments rather than by forecasts.
 
 Time-decay credit is a claim about nothing. It is a convention for dividing an
 observed conversion among observed touchpoints. Recency is a reasonable basis

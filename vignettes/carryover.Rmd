@@ -89,8 +89,8 @@ tuned <- tune_carryover(
 tuned
 ```
 
-Recovered exactly. The profile shows how sharply the data identifies it —
-a clear valley here, which is what a well-identified carryover looks like:
+Recovered exactly. The profile shows how sharply the data identifies it: a
+clear valley, which is what a well-identified carryover looks like:
 
 ```{r}
 plot(tuned, truth = truth)
@@ -192,9 +192,9 @@ ask.
 
 `tune_carryover_joint()` puts all five channels and the controls into one
 model and chooses each channel's decay with the others' effects accounted for.
-It searches by coordinate descent — one channel at a time, holding the rest,
-repeating until nothing moves — so it costs a few sweeps of the one-channel
-grid rather than the full five-dimensional grid:
+It searches by coordinate descent, one channel at a time with the others held
+fixed, repeating until nothing moves, so it costs a few sweeps of the
+one-channel grid rather than the full five-dimensional grid:
 
 ```{r}
 controls <- data.frame(week = seq_len(nrow(north)), price = north$price,
@@ -205,24 +205,41 @@ joint <- tune_carryover_joint(north[channels], north$revenue,
                               controls = controls, decays = grid)
 joint
 
-rbind(true = truth_params$decay[channels],
-      one_at_a_time = one_at_a_time,
-      residualised = residualised,
-      joint = joint$best$decay,
-      joint_1se = joint$best_1se$decay)
+comparison <- rbind(true = truth_params$decay[channels],
+                    one_at_a_time = one_at_a_time,
+                    residualised = residualised,
+                    joint = joint$best$decay,
+                    joint_1se = joint$best_1se$decay)
+comparison
+
+# Mean absolute distance from the true decays
+miss <- rowMeans(abs(sweep(comparison[-1, ], 2, comparison["true", ])))
+round(miss, 2)
 ```
 
-Much closer, and the profiles show where the remaining doubt lies:
+The joint search lands closer to the truth than tuning one channel at a time
+(`r round(miss[["joint"]], 2)` against `r round(miss[["one_at_a_time"]], 2)` on
+average) and matches residualising (`r round(miss[["residualised"]], 2)`), but
+it is not uniformly better: for search it picks
+`r comparison["joint", "search"]` against a truth of
+`r comparison["true", "search"]`. The profiles show where the doubt lies:
 
 ```{r fig.height = 5.5}
 plot(joint, truth = truth_params$decay)
 ```
 
-Television, video and social have clear valleys. Search's profile barely
-moves across the whole range: the data cannot tell a search half-life of a
-fraction of a week from one of several, and the one-standard-error choice
-falls back to the short end, near the truth. That flatness is itself the
-finding, and a point estimate without the profile would hide it.
+Search's profile barely moves across the whole range: the data cannot tell a
+search half-life of a fraction of a week from one of several, and that
+flatness is itself the finding, which a point estimate without the profile
+would hide. The one-standard-error choices fall to the bottom of the grid for
+search, social and display. For search that is near the truth; for social and
+display, whose true decays are
+`r comparison["true", "social"]` and `r comparison["true", "display"]`, it is
+not. A one-SE choice at the edge of the grid says the data cannot rule out a
+short carryover, not that the carryover is short. The printed result also
+reports the cross-validated error of the one-SE set as a whole, which is
+worse than the best set's because each channel's choice was made with the
+others held at their best.
 
 The model here is still linear in adstocked media, with no saturation, so it
 is not the model the data came from. For carryover tuned jointly with
@@ -239,21 +256,25 @@ The `results` grid is worth looking at rather than just taking `best`. If the
 metric is nearly flat across a wide band of decay, the data does not identify
 carryover tightly and a confident point estimate would be overstating things.
 
-Two things in the output help with that. `std_err` is the standard error of
-the per-split errors, which says how far apart two candidates need to be before
-the difference means anything. And `best_1se` applies the
-one-standard-error rule (Breiman et al., 1984; Hastie, Tibshirani and
-Friedman, 2009): the *shortest* carryover whose error is within one standard
-error of the minimum.
+Two things in the output help with that. `std_err` is a jackknife standard
+error of each candidate's metric over the splits, a measure of how noisy the
+forecasts are. And `best_1se` applies the one-standard-error rule (Breiman et
+al., 1984; Hastie, Tibshirani and Friedman, 2009): the *shortest* carryover
+whose metric exceeds the best's by no more than one standard error of the
+*paired difference* between the two. The paired comparison matters: both
+candidates face the same hard-to-forecast weeks, so the difference between
+them is much less noisy than either metric on its own.
 
 ```{r}
 rbind(best = tuned$best, one_se = tuned$best_1se)
 ```
 
 When the two agree, the data has spoken clearly. When they do not, the data
-cannot tell them apart, and the shorter carryover is the more conservative
-claim to put in front of a client — a long carryover flatters a channel by
-crediting it with sales weeks after it ran.
+cannot tell them apart. The shorter carryover is the more conservative claim
+when the question is how much credit a channel earns weeks after it ran,
+because a long carryover flatters a channel; it is not conservative for every
+decision, since a shorter carryover also lowers that channel's marginal
+return.
 
 By default the metric is *pooled*: every out-of-sample forecast across all
 splits is collected and `metric_fn` is evaluated once, so `rmse` is the root
