@@ -45,8 +45,8 @@
   as.numeric(x)
 }
 
-# `max` bounds the finite values a caller accepts; it is optional so that
-# every existing count keeps its behaviour.
+# `max` bounds the finite values a caller accepts; the default `Inf` sets no
+# bound beyond the integer range.
 #' @keywords internal
 #' @noRd
 .mm_check_count <- function(x, arg, min = 1L, allow_inf = FALSE,
@@ -187,7 +187,8 @@
   is.character(x) && length(x) == 1L && !is.na(x)
 }
 
-# Numeric spacing between index values, in whatever unit the index uses.
+# The index as plain numbers, in its own unit: days for a Date, seconds for a
+# POSIXct.
 #' @keywords internal
 #' @noRd
 .mm_index_numeric <- function(index, arg = "index", call = parent.frame()) {
@@ -201,9 +202,10 @@
   )
 }
 
-# Join several key columns into one grouping label. The separator is a
-# control character that cannot occur in text read from a file, so two
-# distinct key combinations can never collide into one group.
+# Join several key columns into one grouping label. The separator is the
+# ASCII unit separator, a control character that text read from a file almost
+# never contains, so distinct key combinations collide into one group only
+# when a key value itself contains it.
 #' @keywords internal
 #' @noRd
 .mm_key_sep <- function() "\x1f"
@@ -259,11 +261,10 @@
 
 # Is this argument a `tune()` placeholder rather than a value? Recipe steps
 # accept `tune()` in place of any tunable argument, so validation has to stand
-# aside for it -- eagerly checking the value would make the argument
-# untunable, which is the whole reason the step exists.
+# aside for it: eagerly checking the value would make the argument untunable.
 #
-# `hardhat::tune()` returns a call; older tidymodels wrapped it in a quosure.
-# Both are handled, without taking a dependency on rlang.
+# `hardhat::tune()` returns a call. A quosure or formula wrapped around one is
+# unwrapped first.
 #' @keywords internal
 #' @noRd
 .mm_is_tune <- function(x) {

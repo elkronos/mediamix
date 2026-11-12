@@ -1,6 +1,5 @@
-# The contiguity guard. This is the load-bearing piece of the recipes layer and
-# the only part with no prior art to copy, so it is written and tested on its
-# own before any filter maths depends on it.
+# The contiguity guard behind step_adstock(). It is kept apart from the filter
+# maths and tested on its own, in tests/testthat/test-contiguity.R.
 #
 # The question it answers: given a series the step has already seen at the
 # time points `train_index`, observed at spacing `period`, does a new block of
@@ -52,7 +51,8 @@
 #
 # `tol` is a *relative* tolerance on the step size, and it is loose on purpose.
 # Calendar months are 28 to 31 days long, so a monthly series steps by 0.90 to
-# 1.10 inferred periods and a tight tolerance would call every February a gap.
+# 1.10 inferred periods and a tight tolerance would call the short step out of
+# every February misaligned.
 # It must stay below 0.5 so that one period, two periods and a start part-way
 # through a period remain distinct.
 #' @keywords internal
