@@ -146,6 +146,83 @@ test_that("markov_removal() matches one linear solve per removed channel", {
   expect_equal(mk$removal_effect, unname(ref[mk$channel]), tolerance = 1e-10)
 })
 
+test_that("markov_removal() returns the fitted chain behind its removal effects", {
+  ev <- data.frame(id = c("j1", "j1", "j2", "j3"), ch = c("a", "b", "a", "b"),
+                   ts = c(1, 2, 1, 1), conv = c(0, 1, 0, 1))
+  p <- build_paths(ev, id = "id", channel = "ch", timestamp = "ts",
+                   conversion = "conv")
+  mk <- markov_removal(p)
+  expect_identical(names(mk), c("channel", "removal_effect", "conversions",
+                                "share", "p_without"))
+  expect_equal(mk$p_without[mk$channel == "a"], 1 / 3)
+  expect_equal(mk$p_without[mk$channel == "b"], 0)
+  expect_equal(mk$removal_effect,
+               1 - mk$p_without / attr(mk, "p_conversion"))
+
+  states <- list(from = c("(start)", "a", "b"),
+                 to = c("a", "b", "(conversion)", "(null)"))
+  counts <- matrix(c(2, 0, 0, 1, 1, 0, 0, 0, 2, 0, 1, 0), 3, 4,
+                   dimnames = states)
+  expect_equal(attr(mk, "transition_counts"), counts)
+  expect_equal(attr(mk, "transitions"), counts / rowSums(counts))
+  expect_equal(unname(rowSums(attr(mk, "transitions"))), rep(1, 3))
+})
+
+test_that("p_without matches removing each channel from the transition matrix", {
+  # Redirect every transition into channel s to null and solve the chain.
+  without <- function(P, s) {
+    k <- nrow(P) - 1L
+    Q <- cbind(0, P[, seq_len(k), drop = FALSE])
+    Q[, s + 1L] <- 0
+    absorb <- P[, k + 1L]
+    keep <- setdiff(seq_len(k + 1L), s + 1L)
+    solve(diag(length(keep)) - Q[keep, keep, drop = FALSE],
+          absorb[keep])[1L]
+  }
+  data(mm_events)
+  paths <- build_paths(mm_events, id = "customer_id", channel = "channel",
+                       timestamp = "timestamp", conversion = "conversion",
+                       collapse_repeats = FALSE)
+  mk <- markov_removal(paths)
+  P <- attr(mk, "transitions")
+  k <- nrow(P) - 1L
+  expect_identical(rownames(P)[-1L], colnames(P)[seq_len(k)])
+  expect_true(any(diag(P[-1L, seq_len(k)]) > 0))
+  ref <- vapply(seq_len(k), function(s) without(P, s), numeric(1))
+  expect_equal(mk$p_without, unname(ref[match(mk$channel, rownames(P)[-1L])]),
+               tolerance = 1e-10)
+  base <- solve(diag(k + 1L) - cbind(0, P[, seq_len(k)]), P[, k + 1L])[1L]
+  expect_equal(attr(mk, "p_conversion"), unname(base), tolerance = 1e-10)
+  expect_equal(unname(rowSums(attr(mk, "transition_counts"))[1L]),
+               length(unique(paths$path_id)))
+})
+
+test_that("markov_removal() reports its chain at the edges", {
+  none <- build_paths(data.frame(id = c("a", "b"), ch = c("x", "y"),
+                                 ts = c(1, 1), conv = c(0, 0)),
+                      id = "id", channel = "ch", timestamp = "ts",
+                      conversion = "conv")
+  mk <- markov_removal(none)
+  expect_identical(attr(mk, "p_conversion"), 0)
+  expect_identical(mk$p_without, c(0, 0))
+  expect_equal(unname(attr(mk, "transitions")[c("x", "y"), "(null)"]), c(1, 1))
+
+  single <- build_paths(data.frame(id = "a", ch = c("x", "y"), ts = c(1, 2),
+                                   conv = c(0, 1)),
+                        id = "id", channel = "ch", timestamp = "ts",
+                        conversion = "conv")
+  mk1 <- suppressWarnings(markov_removal(single))
+  expect_identical(attr(mk1, "p_conversion"), 1)
+  expect_identical(mk1$p_without, c(0, 0))
+  expect_true(all(attr(mk1, "transitions")[, "(null)"] == 0))
+
+  empty <- single[0, ]
+  mk0 <- markov_removal(empty)
+  expect_identical(nrow(mk0), 0L)
+  expect_true("p_without" %in% names(mk0))
+  expect_null(attr(mk0, "transitions"))
+})
+
 test_that("the warning for a table without null paths does not claim a direction", {
   ev <- data.frame(id = c("j1", "j1", "j2"), ch = c("a", "b", "b"),
                    ts = c(1, 2, 1), conv = c(0, 1, 1))
