@@ -73,7 +73,7 @@
 #' markov_removal(paths)
 #' @export
 markov_removal <- function(paths) {
-  .mm_check_paths(paths)
+  paths <- .mm_check_paths(paths)
   empty <- data.frame(channel = character(0), removal_effect = numeric(0),
                       conversions = numeric(0), share = numeric(0),
                       stringsAsFactors = FALSE)

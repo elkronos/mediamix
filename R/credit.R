@@ -108,28 +108,28 @@ NULL
 #' @rdname credit
 #' @export
 credit_linear <- function(paths) {
-  .mm_check_paths(paths)
+  paths <- .mm_check_paths(paths)
   .mm_assign_credit(paths, function(rank, n, recency) rep(1 / n[1L], length(rank)))
 }
 
 #' @rdname credit
 #' @export
 credit_first <- function(paths) {
-  .mm_check_paths(paths)
+  paths <- .mm_check_paths(paths)
   .mm_assign_credit(paths, function(rank, n, recency) as.numeric(rank == 1L))
 }
 
 #' @rdname credit
 #' @export
 credit_last <- function(paths) {
-  .mm_check_paths(paths)
+  paths <- .mm_check_paths(paths)
   .mm_assign_credit(paths, function(rank, n, recency) as.numeric(rank == n))
 }
 
 #' @rdname credit
 #' @export
 credit_position <- function(paths, first_weight = 0.4, last_weight = 0.4) {
-  .mm_check_paths(paths)
+  paths <- .mm_check_paths(paths)
   first_weight <- .mm_check_scalar(first_weight, "first_weight", lower = 0, upper = 1)
   last_weight <- .mm_check_scalar(last_weight, "last_weight", lower = 0, upper = 1)
   if (first_weight + last_weight > 1) {
@@ -159,7 +159,7 @@ credit_position <- function(paths, first_weight = 0.4, last_weight = 0.4) {
 #' @export
 credit_time_decay <- function(paths, decay = decay_from_half_life(7),
                               period = 1) {
-  .mm_check_paths(paths)
+  paths <- .mm_check_paths(paths)
   decay <- .mm_check_scalar(decay, "decay", lower = 0, upper = 1,
                             inclusive = c(TRUE, FALSE))
   period <- .mm_check_scalar(period, "period", lower = 0,
@@ -188,7 +188,7 @@ credit_time_decay <- function(paths, decay = decay_from_half_life(7),
 #' @rdname credit
 #' @export
 credit_custom <- function(paths, fn, normalise = TRUE) {
-  .mm_check_paths(paths)
+  paths <- .mm_check_paths(paths)
   if (!is.function(fn)) cli::cli_abort("{.arg fn} must be a function.")
   .mm_check_flag(normalise, "normalise")
   .mm_assign_credit(paths, fn, normalise = normalise, user_supplied = TRUE)

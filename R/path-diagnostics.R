@@ -40,7 +40,7 @@
 #' path_summary(paths)
 #' @export
 path_summary <- function(paths) {
-  .mm_check_paths(paths)
+  paths <- .mm_check_paths(paths)
   cnt <- attr(paths, "mm_counts")
   if (is.null(cnt)) {
     cnt <- list(events_out = nrow(paths),
@@ -88,7 +88,7 @@ path_summary <- function(paths) {
 #' path_lengths(paths)
 #' @export
 path_lengths <- function(paths) {
-  .mm_check_paths(paths)
+  paths <- .mm_check_paths(paths)
   if (nrow(paths) == 0L) {
     return(data.frame(length = integer(0), journeys = integer(0),
                       converting = integer(0), conversion_rate = numeric(0)))
@@ -133,7 +133,7 @@ path_lengths <- function(paths) {
 #' channel_positions(paths)
 #' @export
 channel_positions <- function(paths, converting_only = TRUE) {
-  .mm_check_paths(paths)
+  paths <- .mm_check_paths(paths)
   .mm_check_flag(converting_only, "converting_only")
   p <- if (converting_only) paths[paths$converted, , drop = FALSE] else paths
   if (nrow(p) == 0L) {
@@ -184,7 +184,7 @@ channel_positions <- function(paths, converting_only = TRUE) {
 #' round(assisted_conversions(paths, normalise = TRUE), 3)
 #' @export
 assisted_conversions <- function(paths, normalise = FALSE) {
-  .mm_check_paths(paths)
+  paths <- .mm_check_paths(paths)
   .mm_check_flag(normalise, "normalise")
   p <- paths[paths$converted, , drop = FALSE]
   chans <- sort(unique(paths$channel))
@@ -244,7 +244,7 @@ assisted_conversions <- function(paths, normalise = FALSE) {
 #' top_paths(paths, n = 8)
 #' @export
 top_paths <- function(paths, n = 10, sep = " > ", converting_only = FALSE) {
-  .mm_check_paths(paths)
+  paths <- .mm_check_paths(paths)
   n <- .mm_check_count(n, "n", min = 1L)
   .mm_check_flag(converting_only, "converting_only")
   p <- if (converting_only) paths[paths$converted, , drop = FALSE] else paths
@@ -289,7 +289,7 @@ top_paths <- function(paths, n = 10, sep = " > ", converting_only = FALSE) {
 #' conversion_lag(paths)
 #' @export
 conversion_lag <- function(paths, probs = c(0.5, 0.75, 0.9, 0.95, 0.99, 1)) {
-  .mm_check_paths(paths)
+  paths <- .mm_check_paths(paths)
   units <- attr(paths, "mm_units")
   p <- paths[paths$converted, , drop = FALSE]
   if (nrow(p) == 0L) {
@@ -332,7 +332,7 @@ conversion_lag <- function(paths, probs = c(0.5, 0.75, 0.9, 0.95, 0.99, 1)) {
 #' diag$summary
 #' @export
 path_diagnostics <- function(paths, n = 10) {
-  .mm_check_paths(paths)
+  paths <- .mm_check_paths(paths)
   list(
     summary = path_summary(paths),
     lengths = path_lengths(paths),

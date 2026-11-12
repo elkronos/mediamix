@@ -892,23 +892,76 @@ print.mm_paths <- function(x, ...) {
       x = "Missing: {.val {missing_cols}}."
     ), call = call)
   }
-  invisible(paths)
+  if (nrow(paths) == 0L) return(paths)
+
+  na_cols <- c("path_id", "channel", "touch_rank", "touch_n", "converted")
+  has_na <- vapply(na_cols, function(nm) anyNA(paths[[nm]]), logical(1))
+  if (any(has_na)) {
+    cli::cli_abort(c(
+      "{.arg paths} has missing values in {.field {na_cols[has_na]}}.",
+      i = "Every touch needs a journey id, a channel, a rank and a \\
+           conversion flag."
+    ), call = call)
+  }
+  if (!is.logical(paths$converted)) {
+    cli::cli_abort(
+      "{.field converted} in {.arg paths} must be logical, not \\
+       {.obj_type_friendly {paths$converted}}.",
+      call = call
+    )
+  }
+  # Objects can reach here without passing through `[` or a dplyr verb: from
+  # rbind() in an older session, data.table, or columns edited by hand. A
+  # journey whose touches disagree on `converted` cannot be repaired, since
+  # nothing says which flag is right; stale ranks can.
+  st <- .mm_rank_state(paths)
+  if (length(st$mixed) > 0L) {
+    cli::cli_abort(c(
+      "{length(st$mixed)} journey{?s} in {.arg paths} {?has/have} touches \\
+       that disagree on {.field converted}, for example \\
+       {.val {utils::head(st$mixed, 3)}}.",
+      i = "Every {.fn build_paths} call numbers journeys from 1, so tables \\
+           built separately reuse ids. Combine them with {.fn bind_paths}."
+    ), call = call)
+  }
+  if (any(st$stale)) {
+    n_stale <- length(unique(paths$path_id[st$stale]))
+    cli::cli_inform(c(
+      "Recomputed {.field touch_rank} and {.field touch_n} in {n_stale} \\
+       journey{?s} where they did not match the rows present.",
+      i = "The construction counts no longer describe the table and were \\
+           dropped."
+    ))
+    paths$touch_rank <- st$rank
+    paths$touch_n <- st$total
+    attr(paths, "mm_counts") <- NULL
+  }
+  paths
 }
 
 #' Subset a journey table
 #'
-#' Behaves exactly like subsetting a data frame, with one addition: if the
-#' result no longer carries the columns that make a journey table a journey
-#' table, the `mm_paths` class is dropped and a plain data frame is returned.
-#' This stops a column subset from producing an object that claims to be an
-#' `mm_paths` but cannot answer any question about journeys.
+#' Behaves like subsetting a data frame, with three additions. If the result
+#' no longer carries the columns that make a journey table a journey table,
+#' the `mm_paths` class is dropped and a plain data frame is returned, so a
+#' column subset cannot produce an object that claims to be an `mm_paths` but
+#' cannot answer any question about journeys. Rows selected by a missing
+#' (`NA`) row index are dropped with a message, as [subset()] drops them. And
+#' `touch_rank` and `touch_n` are recomputed whenever they no longer match the
+#' rows present.
 #'
-#' When a row subset removes part of a journey -- dropping one channel, say --
-#' `touch_rank` and `touch_n` are recomputed from the touches that remain, so
-#' the result is a valid journey table in its own right and every credit rule
-#' sums to 1 per converting journey. The first remaining touch becomes rank 1.
-#' Convert with `as.data.frame()` first if you want to inspect the original
-#' ranks of a partial selection.
+#' When a row subset removes part of a journey, dropping one channel say,
+#' the first remaining touch becomes rank 1 and the result is a valid journey
+#' table in its own right, so every credit rule sums to 1 per converting
+#' journey. A row selected twice counts as two touches. Construction counts
+#' describe the table [build_paths()] returned, so they are dropped once rows
+#' change. Convert with `as.data.frame()` first to inspect the original ranks
+#' of a partial selection.
+#'
+#' The \pkg{dplyr} verbs follow the same rules: `filter()`, `slice()`,
+#' `arrange()` and `distinct()` subset rows as `[` does, and `mutate()` and
+#' the joins recompute ranks the same way. Journey tables built by separate
+#' [build_paths()] calls share journey ids; combine them with [bind_paths()].
 #'
 #' @param x An `mm_paths` object.
 #' @param ... Passed to the data frame method.
@@ -916,7 +969,7 @@ print.mm_paths <- function(x, ...) {
 #' @return An `mm_paths` object when the structural columns survive, otherwise
 #'   a plain data frame.
 #'
-#' @seealso [build_paths()], [path_summary()]
+#' @seealso [build_paths()], [path_summary()], [bind_paths()]
 #'
 #' @examples
 #' data(mm_events)
@@ -933,48 +986,326 @@ print.mm_paths <- function(x, ...) {
   keep_attrs <- attributes(x)[c("mm_units", "mm_counts", "mm_settings")]
   n_before <- nrow(x)
   out <- NextMethod()
-  if (!is.data.frame(out) || !all(.mm_path_cols() %in% names(out))) {
-    if (is.data.frame(out)) class(out) <- "data.frame"
-    return(out)
-  }
+  if (!is.data.frame(out)) return(out)
+  if (!all(.mm_path_cols() %in% names(out))) return(.mm_as_plain(out))
   for (nm in names(keep_attrs)) {
     if (!is.null(keep_attrs[[nm]])) attr(out, nm) <- keep_attrs[[nm]]
   }
-  # Construction counts describe the table `build_paths()` produced. Once rows
-  # are removed they no longer describe this object, and carrying them would
-  # make `path_summary()` mix parent counts with subset statistics. Strip them
-  # explicitly: `[.data.frame` propagates unknown attributes by itself.
-  if (!identical(nrow(out), n_before)) {
-    attr(out, "mm_counts") <- NULL
-    out <- .mm_rerank(out)
+  class(out) <- "data.frame"
+  # A missing value in a logical row index selects a row of missing values,
+  # which belongs to no journey and breaks every function downstream.
+  na_rows <- is.na(out$path_id)
+  if (any(na_rows)) {
+    cli::cli_inform(
+      "Dropped {sum(na_rows)} row{?s} selected by a missing ({.code NA}) \\
+       row index."
+    )
+    out <- out[!na_rows, , drop = FALSE]
   }
+  # Construction counts describe the table `build_paths()` produced. Once rows
+  # change they no longer describe this object, and carrying them would make
+  # `path_summary()` mix parent counts with subset statistics. They are
+  # removed explicitly because `[.data.frame` keeps unknown attributes.
+  out <- .mm_rerank(out, rows_changed = nrow(out) != n_before || any(na_rows))
   class(out) <- c("mm_paths", "data.frame")
   out
 }
 
-# Re-derive `touch_rank` and `touch_n` from the rows actually present. Every
-# credit rule and journey diagnostic reads these two columns, so after a row
-# subset that removes part of a journey -- dropping one channel, say -- the
-# stored values would describe touches that are no longer there: first-touch
-# credit would go to nobody, and a two-touch remnant of a five-touch journey
-# would be scored as a middle. Original order within a journey is kept.
+# dplyr verbs bypass `[`. Row verbs (filter(), slice(), arrange(),
+# distinct()) call dplyr_row_slice(), which here subsets with `[` so that
+# both routes give the same journeys. mutate(), the joins and bind_rows()
+# rebuild the result with dplyr_reconstruct(). Both methods are registered
+# only once dplyr is loaded.
+#' @exportS3Method dplyr::dplyr_row_slice
+#' @noRd
+dplyr_row_slice.mm_paths <- function(data, i, ...) {
+  out <- data[i, , drop = FALSE]
+  if (is.data.frame(out)) rownames(out) <- NULL
+  out
+}
+
+#' @exportS3Method dplyr::dplyr_reconstruct
+#' @noRd
+dplyr_reconstruct.mm_paths <- function(data, template) {
+  out <- NextMethod()
+  if (!all(.mm_path_cols() %in% names(out))) return(.mm_as_plain(out))
+  rows_changed <- nrow(out) != nrow(template)
+  if (nrow(out) == 0L || anyNA(out$path_id)) {
+    if (rows_changed) attr(out, "mm_counts") <- NULL
+    return(out)
+  }
+  st <- .mm_rank_state(out)
+  # Added rows that repeat a journey's rank come from binding tables whose
+  # ids collide, or from a join that matched a touch twice. Re-ranking would
+  # merge different journeys without a trace.
+  if (nrow(out) > nrow(template) && length(st$repeated) > 0L) {
+    cli::cli_abort(c(
+      "{length(st$repeated)} journey{?s} would hold two touches with the \\
+       same {.field touch_rank}, for example \\
+       {.val {utils::head(st$repeated, 3)}}.",
+      i = "Every {.fn build_paths} call numbers journeys from 1, so binding \\
+           tables built separately merges different journeys. Combine them \\
+           with {.fn bind_paths}.",
+      i = "A join that matches a touch more than once repeats it the same \\
+           way."
+    ), call = NULL)
+  }
+  if (any(st$stale)) {
+    out$touch_rank <- st$rank
+    out$touch_n <- st$total
+    rows_changed <- TRUE
+  }
+  if (rows_changed) attr(out, "mm_counts") <- NULL
+  out
+}
+
+#' Combine journey tables
+#'
+#' Stacks journey tables built by separate [build_paths()] calls, such as
+#' monthly batches of one event log. Every call numbers each customer's
+#' journeys from 1, so the same `path_id` names different journeys in
+#' different tables, and stacking them with `rbind()` would merge those
+#' journeys. `bind_paths()` keeps them apart by prefixing each table's journey
+#' ids with a batch label.
+#'
+#' @param ... `mm_paths` objects to combine, or a single list of them. When
+#'   every table is named the names label the batches; otherwise the batches
+#'   are labelled `1`, `2` and so on.
+#' @param rekey Prefix journey ids with the batch label? Defaults to `TRUE`,
+#'   which turns `"a#1"` from the batch labelled `jan` into `"jan:a#1"`. With
+#'   `FALSE` ids are kept as they are, and an id found in more than one table
+#'   is an error.
+#' @param deparse.level Ignored; present for compatibility with [rbind()].
+#'
+#' @return An `mm_paths` object with every table's rows. Construction counts
+#'   describe one [build_paths()] call each, so they are dropped and
+#'   [path_summary()] reports the input-side columns as `NA`. Settings are kept
+#'   when every table was built with the same ones.
+#'
+#' @details
+#' A journey that crosses a batch boundary is two journeys here, because each
+#' batch was split on its own. When that happens often, build the journeys
+#' from the combined event log instead.
+#'
+#' The tables must share their columns, their time units and the class of
+#' their timestamps. `rbind()` on journey tables behaves like
+#' `bind_paths(rekey = FALSE)`: ids are kept, and an id found in more than one
+#' table is an error rather than a merged journey. `dplyr::bind_rows()`
+#' cannot tell the tables apart, and aborts when the combined rows repeat a
+#' journey's touch ranks.
+#'
+#' @seealso [build_paths()]
+#'
+#' @examples
+#' jan <- data.frame(id = "a", ch = c("tv", "search"), ts = c(1, 2),
+#'                   conv = c(0, 0))
+#' feb <- data.frame(id = "a", ch = c("email", "display"), ts = c(40, 41),
+#'                   conv = c(0, 1))
+#' p_jan <- build_paths(jan, id = "id", channel = "ch", timestamp = "ts",
+#'                      conversion = "conv")
+#' p_feb <- build_paths(feb, id = "id", channel = "ch", timestamp = "ts",
+#'                      conversion = "conv")
+#' unique(p_jan$path_id)
+#' unique(p_feb$path_id)
+#'
+#' both <- bind_paths(jan = p_jan, feb = p_feb)
+#' unique(both$path_id)
+#' sum(credit_linear(both)$credit)
+#' @export
+bind_paths <- function(..., rekey = TRUE) {
+  batches <- list(...)
+  if (length(batches) == 1L && is.list(batches[[1L]]) &&
+      !is.data.frame(batches[[1L]])) {
+    batches <- batches[[1L]]
+  }
+  .mm_check_flag(rekey, "rekey")
+  batches <- batches[!vapply(batches, is.null, logical(1))]
+  if (length(batches) == 0L) {
+    cli::cli_abort("{.fn bind_paths} needs at least one {.cls mm_paths} object.")
+  }
+  not_paths <- which(!vapply(batches, inherits, logical(1), "mm_paths"))
+  if (length(not_paths) > 0L) {
+    cli::cli_abort(c(
+      "Every table given to {.fn bind_paths} must be an {.cls mm_paths} \\
+       object.",
+      x = "Table{?s} {not_paths} {?is/are} not."
+    ))
+  }
+  labels <- NULL
+  if (rekey) {
+    nms <- names(batches)
+    if (is.null(nms)) {
+      labels <- as.character(seq_along(batches))
+    } else if (any(is.na(nms) | !nzchar(nms)) || anyDuplicated(nms) > 0L) {
+      cli::cli_abort(
+        "Name every table given to {.fn bind_paths} or none, with unique \\
+         names."
+      )
+    } else if (any(grepl(":", nms, fixed = TRUE))) {
+      cli::cli_abort(
+        'Table names become the prefix of {.code name:id} journey ids, so \\
+         they cannot contain ":".'
+      )
+    } else {
+      labels <- nms
+    }
+  }
+  .mm_bind(unname(batches), labels)
+}
+
+#' @rdname bind_paths
+#' @export
+rbind.mm_paths <- function(..., deparse.level = 1) {
+  batches <- list(...)
+  batches <- batches[!vapply(batches, is.null, logical(1))]
+  if (length(batches) == 1L) return(batches[[1L]])
+  not_df <- which(!vapply(batches, is.data.frame, logical(1)))
+  if (length(not_df) > 0L) {
+    cli::cli_abort(
+      "{.fn rbind} on a journey table takes data frames only; argument{?s} \\
+       {not_df} {?is/are} not."
+    )
+  }
+  .mm_bind(unname(batches), labels = NULL)
+}
+
+# Stack journey tables, prefixing ids with `labels` or, when `labels` is
+# NULL, refusing ids found in more than one table.
 #' @keywords internal
 #' @noRd
-.mm_rerank <- function(x) {
+.mm_bind <- function(batches, labels = NULL, call = parent.frame()) {
+  lacking <- which(!vapply(batches, function(b) {
+    all(.mm_path_cols() %in% names(b))
+  }, logical(1)))
+  if (length(lacking) > 0L) {
+    cli::cli_abort(
+      "Table{?s} {lacking} {?lacks/lack} the journey columns of an \\
+       {.cls mm_paths} object.",
+      call = call
+    )
+  }
+  units <- unique(unlist(lapply(batches, attr, "mm_units")))
+  if (length(units) > 1L) {
+    cli::cli_abort(c(
+      "The tables measure time in different units: {.val {units}}.",
+      i = "Build them with the same {.arg units}, so that \\
+           {.field time_to_conversion} means one thing."
+    ), call = call)
+  }
+  ts_class <- unique(vapply(batches, function(b) class(b$timestamp)[1L],
+                            character(1)))
+  if (length(ts_class) > 1L) {
+    cli::cli_abort(c(
+      "The tables store timestamps in different classes: {.cls {ts_class}}.",
+      i = "Convert them to one class before combining."
+    ), call = call)
+  }
+  cols <- names(batches[[1L]])
+  differ <- which(!vapply(batches, function(b) setequal(names(b), cols),
+                          logical(1)))
+  if (length(differ) > 0L) {
+    cli::cli_abort(
+      "Table{?s} {differ} {?has/have} different columns from the first.",
+      call = call
+    )
+  }
+  if (is.null(labels)) {
+    ids <- unlist(lapply(batches, function(b) unique(b$path_id)),
+                  use.names = FALSE)
+    shared <- unique(ids[duplicated(ids)])
+    if (length(shared) > 0L) {
+      cli::cli_abort(c(
+        "{length(shared)} journey id{?s} appear{?s/} in more than one table, \\
+         for example {.val {utils::head(shared, 3)}}.",
+        i = "Every {.fn build_paths} call numbers journeys from 1, so the \\
+             same id can name different journeys.",
+        i = "Use {.fn bind_paths}, which prefixes each table's ids with a \\
+             label."
+      ), call = call)
+    }
+  }
+  settings <- lapply(batches, attr, "mm_settings")
+  same_settings <- all(vapply(settings, identical, logical(1), settings[[1L]]))
+  plain <- lapply(seq_along(batches), function(k) {
+    b <- as.data.frame(batches[[k]])[cols]
+    if (!is.null(labels)) b$path_id <- paste0(labels[[k]], ":", b$path_id)
+    b
+  })
+  out <- as.data.frame(data.table::rbindlist(plain, use.names = TRUE))
+  rownames(out) <- NULL
+  out <- structure(
+    out,
+    class = c("mm_paths", "data.frame"),
+    mm_units = if (length(units) > 0L) units else "days",
+    mm_settings = if (same_settings && !is.null(settings[[1L]])) {
+      settings[[1L]]
+    } else {
+      list()
+    }
+  )
+  .mm_rerank(out, rows_changed = TRUE)
+}
+
+# The journey structure the rows present imply: the rank each touch should
+# have and its journey's length, the rows whose stored values disagree, the
+# journeys whose touches disagree on `converted`, and the journeys holding
+# two touches with the same stored rank. Every credit rule and diagnostic
+# reads `touch_rank` and `touch_n`, so after a subset that removes part of a
+# journey the stored values would describe touches that are no longer there:
+# first-touch credit would go to nobody, and a two-touch remnant of a
+# five-touch journey would be scored as a middle. Order within a journey is
+# kept.
+#' @keywords internal
+#' @noRd
+.mm_rank_state <- function(x) {
   n <- nrow(x)
-  if (n == 0L) return(x)
-  o <- order(x$path_id, x$touch_rank)
+  if (n == 0L) {
+    return(list(rank = integer(0), total = integer(0), stale = logical(0),
+                mixed = character(0), repeated = character(0)))
+  }
+  o <- order(x$path_id, x$touch_rank, method = "radix")
   pid <- x$path_id[o]
   starts <- c(TRUE, pid[-1L] != pid[-n])
   run <- cumsum(starts)
   first_pos <- which(starts)
   rank <- integer(n)
   rank[o] <- seq_len(n) - first_pos[run] + 1L
-  len <- tabulate(run)
   total <- integer(n)
-  total[o] <- len[run]
-  x[["touch_rank"]] <- rank
-  x[["touch_n"]] <- total
+  total[o] <- tabulate(run)[run]
+  stale <- x$touch_rank != rank | x$touch_n != total
+  stale[is.na(stale)] <- TRUE
+  conv <- x$converted[o]
+  mixed <- conv != conv[first_pos][run]
+  stored <- x$touch_rank[o]
+  repeated <- !starts & stored == c(stored[1L], stored[-n])
+  list(rank = rank, total = total, stale = stale,
+       mixed = unique(pid[!is.na(mixed) & mixed]),
+       repeated = unique(pid[!is.na(repeated) & repeated]))
+}
+
+# Recompute `touch_rank` and `touch_n` where they no longer match the rows
+# present, and drop the construction counts once the rows have changed.
+#' @keywords internal
+#' @noRd
+.mm_rerank <- function(x, rows_changed = FALSE) {
+  if (nrow(x) > 0L) {
+    st <- .mm_rank_state(x)
+    if (any(st$stale)) {
+      x[["touch_rank"]] <- st$rank
+      x[["touch_n"]] <- st$total
+      rows_changed <- TRUE
+    }
+  }
+  if (rows_changed) attr(x, "mm_counts") <- NULL
+  x
+}
+
+# A data frame that has lost the journey columns is no longer a journey table.
+#' @keywords internal
+#' @noRd
+.mm_as_plain <- function(x) {
+  for (nm in c("mm_units", "mm_counts", "mm_settings")) attr(x, nm) <- NULL
+  class(x) <- "data.frame"
   x
 }
 

@@ -499,6 +499,148 @@ test_that("row subsets drop the construction counts they no longer describe", {
   expect_equal(s$events_out, nrow(sub))
 })
 
+test_that("an NA in a logical row index drops those rows instead of keeping NA rows", {
+  data(mm_events)
+  paths <- build_paths(mm_events, id = "customer_id", channel = "channel",
+                       timestamp = "timestamp", conversion = "conversion")
+  expect_message(sub <- paths[paths$time_to_conversion <= 3, ], "Dropped")
+  expect_false(anyNA(sub$path_id))
+  expect_true(all(sub$converted))
+  expect_no_error(suppressWarnings(markov_removal(sub)))
+  expect_equal(sum(credit_linear(sub)$credit),
+               length(unique(sub$path_id)))
+})
+
+test_that("a row selected twice is re-ranked even when the row count is unchanged", {
+  ev <- data.frame(id = "a", ch = c("x", "y", "z"), ts = 1:3, conv = c(0, 0, 1))
+  p <- build_paths(ev, id = "id", channel = "ch", timestamp = "ts",
+                   conversion = "conv")
+  twice <- p[c(1, 1, 3), ]
+  expect_identical(twice$touch_rank, 1:3)
+  expect_identical(twice$touch_n, rep(3L, 3))
+  expect_null(attr(twice, "mm_counts"))
+  expect_equal(credit_last(twice)$credit, c(0, 0, 1))
+})
+
+# ---- journey invariants ------------------------------------------------------
+
+test_that("consumers recompute stale ranks with a message and refuse mixed journeys", {
+  ev <- data.frame(id = c("a", "a", "a", "b"), ch = c("x", "y", "z", "x"),
+                   ts = c(1, 2, 3, 1), conv = c(0, 0, 1, 0))
+  p <- build_paths(ev, id = "id", channel = "ch", timestamp = "ts",
+                   conversion = "conv")
+  stale <- p
+  stale$touch_rank <- 1L
+  expect_message(last <- credit_last(stale), "Recomputed")
+  expect_equal(last$credit, c(0, 0, 1, 0))
+  expect_identical(last$touch_rank, c(1L, 2L, 3L, 1L))
+  expect_true(is.na(suppressMessages(path_summary(stale))$events_in))
+
+  mixed <- p
+  mixed$converted[1L] <- FALSE
+  expect_error(credit_linear(mixed), "disagree")
+  expect_error(credit_linear(mixed), "bind_paths")
+
+  holes <- p
+  holes$path_id[2L] <- NA
+  expect_error(attribute(holes), "missing values")
+})
+
+test_that("dplyr verbs keep ranks and counts in step with the rows", {
+  skip_if_not_installed("dplyr")
+  data(mm_events)
+  paths <- build_paths(mm_events, id = "customer_id", channel = "channel",
+                       timestamp = "timestamp", conversion = "conversion")
+  f <- dplyr::filter(paths, channel != "display")
+  b <- paths[paths$channel != "display", ]
+  rownames(b) <- NULL
+  expect_identical(f, b)
+  n_conv <- length(unique(f$path_id[f$converted]))
+  expect_equal(sum(credit_first(f)$credit), n_conv)
+  expect_equal(sum(credit_last(f)$credit), n_conv)
+  s <- path_summary(f)
+  expect_true(is.na(s$events_in))
+  expect_identical(s$journeys, length(unique(f$path_id)))
+
+  # Verbs that keep every row keep the construction counts.
+  expect_false(is.null(attr(dplyr::arrange(paths, channel), "mm_counts")))
+  expect_false(is.null(attr(dplyr::mutate(paths, k = 1), "mm_counts")))
+  expect_s3_class(dplyr::mutate(paths, k = 1), "mm_paths")
+  expect_identical(class(dplyr::select(paths, channel, touch_rank)),
+                   "data.frame")
+
+  sl <- dplyr::slice(paths, c(1, 1, 3:nrow(paths)))
+  expect_false(any(mediamix:::.mm_rank_state(sl)$stale))
+})
+
+test_that("bind_rows() of tables whose journey ids collide aborts", {
+  skip_if_not_installed("dplyr")
+  jan <- data.frame(id = "a", ch = c("tv", "search"), ts = c(1, 2),
+                    conv = c(0, 1))
+  feb <- data.frame(id = "a", ch = c("email", "display"), ts = c(40, 41),
+                    conv = c(0, 1))
+  pj <- build_paths(jan, id = "id", channel = "ch", timestamp = "ts",
+                    conversion = "conv")
+  pf <- build_paths(feb, id = "id", channel = "ch", timestamp = "ts",
+                    conversion = "conv")
+  expect_error(dplyr::bind_rows(pj, pf), "bind_paths")
+})
+
+test_that("bind_paths() keeps journeys from separate batches apart", {
+  jan <- data.frame(id = "a", ch = c("tv", "search"), ts = c(1, 2),
+                    conv = c(0, 0))
+  feb <- data.frame(id = "a", ch = c("email", "display"), ts = c(40, 41),
+                    conv = c(0, 1), val = c(NA, 30))
+  pj <- build_paths(jan, id = "id", channel = "ch", timestamp = "ts",
+                    conversion = "conv")
+  pf <- build_paths(feb, id = "id", channel = "ch", timestamp = "ts",
+                    conversion = "conv")
+  both <- bind_paths(jan = pj, feb = pf)
+  expect_s3_class(both, "mm_paths")
+  expect_identical(unique(both$path_id), c("jan:a#1", "feb:a#1"))
+  expect_equal(sum(credit_linear(both)$credit), 1)
+  expect_equal(credit_linear(both)$credit, c(0, 0, 0.5, 0.5))
+  s <- path_summary(both)
+  expect_true(is.na(s$events_in))
+  expect_identical(s$journeys, 2L)
+  expect_identical(attr(both, "mm_units"), "index")
+
+  # A list works too, with numbered labels when the tables are unnamed.
+  expect_identical(unique(bind_paths(list(pj, pf))$path_id),
+                   c("1:a#1", "2:a#1"))
+  expect_error(bind_paths(pj, pf, rekey = FALSE), "more than one table")
+  expect_error(bind_paths(pj, as.data.frame(pf)), "mm_paths")
+  expect_error(bind_paths(a = pj, a = pf), "unique")
+  expect_error(bind_paths(`x:y` = pj, z = pf), "cannot contain")
+
+  cal <- build_paths(data.frame(id = "b", ch = "tv", conv = 1,
+                                ts = as.POSIXct("2024-01-01", tz = "UTC")),
+                     id = "id", channel = "ch", timestamp = "ts",
+                     conversion = "conv")
+  expect_error(bind_paths(pj, cal), "different units")
+})
+
+test_that("rbind() refuses journey ids found in more than one table", {
+  jan <- data.frame(id = "a", ch = c("tv", "search"), ts = c(1, 2),
+                    conv = c(0, 0))
+  feb <- data.frame(id = "a", ch = c("email", "display"), ts = c(40, 41),
+                    conv = c(0, 1))
+  pj <- build_paths(jan, id = "id", channel = "ch", timestamp = "ts",
+                    conversion = "conv")
+  pf <- build_paths(feb, id = "id", channel = "ch", timestamp = "ts",
+                    conversion = "conv")
+  expect_error(rbind(pj, pf), "bind_paths")
+  expect_error(rbind(pj, pj), "more than one table")
+
+  other <- build_paths(transform(feb, id = "b"), id = "id", channel = "ch",
+                       timestamp = "ts", conversion = "conv")
+  ok <- rbind(pj, other)
+  expect_s3_class(ok, "mm_paths")
+  expect_null(attr(ok, "mm_counts"))
+  expect_identical(unique(ok$path_id), c("a#1", "b#1"))
+  expect_equal(sum(credit_linear(ok)$credit), 1)
+})
+
 # ---- print.mm_paths ---------------------------------------------------------
 
 test_that("print.mm_paths runs without error on populated and empty paths", {

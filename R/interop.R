@@ -40,7 +40,7 @@
 #' }
 #' @export
 as_channel_paths <- function(paths, sep = " > ") {
-  .mm_check_paths(paths)
+  paths <- .mm_check_paths(paths)
   if (!.mm_is_string(sep)) cli::cli_abort("{.arg sep} must be a single string.")
   if (nrow(paths) == 0L) {
     return(data.frame(path = character(0), total_conversions = numeric(0),

@@ -51,7 +51,7 @@ attribute <- function(paths,
                                 "time_decay", "markov"),
                       first_weight = 0.4, last_weight = 0.4,
                       decay = decay_from_half_life(7), period = 1) {
-  .mm_check_paths(paths)
+  paths <- .mm_check_paths(paths)
   rules <- match.arg(rules, c("linear", "first", "last", "position",
                               "time_decay", "markov"), several.ok = TRUE)
 
