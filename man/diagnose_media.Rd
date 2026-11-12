@@ -12,7 +12,8 @@ diagnose_media(
   by = NULL,
   vif_threshold = 5,
   cv_threshold = 0.15,
-  decay = NULL
+  decay = NULL,
+  date = NULL
 )
 }
 \arguments{
@@ -45,9 +46,17 @@ as insufficiently varying.}
 with one per channel (unnamed channels are left raw). Adstock smooths each
 series, and smoothed series are usually more correlated than the raw
 spend, so this is the collinearity the model will face. Rows must be in
-time order within each group. Missing spend is treated as zero for the
-adstock, and a message counts the values affected. Variation and
-flighting are always reported on the raw spend.}
+time order within each group; pass \code{date} to check that they are. Missing
+spend is treated as zero for the adstock, and a message counts the values
+affected. Variation and flighting are always reported on the raw spend.}
+
+\item{date}{Optional name of the time column, as a string. The column must
+be numeric, \code{Date} or \code{POSIXct}, with no missing values. Each series (each
+group of \code{by}) is checked for rows that come earlier than the row above
+them, for periods that appear more than once, and for missing periods,
+judged against the series' usual spacing. Adstock treats adjacent rows as
+adjacent periods, so each of these changes what a decay means. See
+\emph{Time order} below.}
 }
 \value{
 An object of class \code{mm_diagnosis}: a named list with elements
@@ -68,6 +77,15 @@ the row number), with the series median and an outlier flag, when
 \code{spend} and \code{impressions} are supplied; with \code{by}, the median and
 outlier rule are computed within each series and a \code{group} column is
 added. \code{NULL} otherwise.}
+\item{\code{dates}}{One row per series when \code{date} is supplied, \code{NULL}
+otherwise: \code{group} (with \code{by}), \code{rows}, the \code{start} and \code{end} of the
+series, its \code{period}, and the counts \code{out_of_order} (rows that come
+earlier than the row above them), \code{duplicated} (rows that repeat a
+period already in the series), \code{missing} (whole periods absent
+between \code{start} and \code{end}) and \code{irregular} (steps between consecutive
+time points that differ from \code{period} by more than a quarter of it).
+\code{period} is the median step between the series' distinct time points,
+in the units of \code{date}: days for a \code{Date}, seconds for a \code{POSIXct}.}
 \item{\code{flags}}{Character vector of the problems found, in the order they
 should be dealt with. Empty when nothing was found.}
 \item{\code{n_obs}, \code{n_groups}, \code{grouped}, \code{adstocked}}{Rows examined,
@@ -112,6 +130,26 @@ deviations from its series' median. When more than half of a series' CPMs
 are identical the median absolute deviation is zero, and a period is
 flagged instead when its CPM is at least twice or at most half the median.
 }
+\section{Time order}{
+
+Adstock treats adjacent rows as adjacent periods. \code{\link[=adstock_geometric]{adstock_geometric()}} and
+\code{\link[=media_transform]{media_transform()}} have no time index, so they take each series' rows in
+the order given: a row out of order mixes later spend into earlier weeks, a
+period that appears twice is carried over twice, and a missing week lets
+the decay act once across what were two weeks. None of these raises an
+error. With \code{date}, each series is checked for all three, and the result is
+in \code{dates}.
+
+The usual spacing of a series is the median step between its distinct time
+points, as in \code{\link[=step_adstock]{step_adstock()}}; a series with a single time point takes the
+median of the other series' spacings. A step counts as irregular when it
+differs from that spacing by more than a quarter of it, so calendar months
+of 28 to 31 days are regular. A gap of about two periods counts one
+missing period, of about three periods two, and so on. Rows out of order
+are counted in the order of \code{data}, one for each row whose time point is
+earlier than that of the row above it in the same series.
+}
+
 \examples{
 data(mm_weekly)
 channels <- c("tv", "video", "search", "social", "display")
@@ -132,6 +170,15 @@ diagnose_media(mm_weekly, media = channels, by = "geo",
 fake <- mm_weekly[mm_weekly$geo == "north", ]
 fake$twin <- fake$tv * 1.02 + 5
 diagnose_media(fake, media = c("tv", "twin", "search"))$collinearity
+
+# Adstock treats adjacent rows as adjacent periods, so check the dates too.
+# Here one week of north is dropped and two others swap places.
+messy <- mm_weekly[-10, ]
+messy[2:3, ] <- messy[3:2, ]
+checked <- diagnose_media(messy, media = channels, by = "geo",
+                          date = "date")
+checked$dates
+checked$flags
 }
 \seealso{
 \code{\link[=adstock_geometric]{adstock_geometric()}}, \code{\link[=contributions]{contributions()}}
