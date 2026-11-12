@@ -3,7 +3,7 @@
 #' A bare intercept-and-slope least squares fit of `y` on transformed media,
 #' supplied so that [tune_carryover()] has a sensible default and the simple
 #' case stays one line. It exists to be replaced: pass your own `fit_fn` and
-#' `predict_fn` to tune carryover against the model you actually intend to fit.
+#' `predict_fn` to tune carryover against the model you intend to fit.
 #'
 #' @param x For `fit_ols()`, a numeric vector of transformed (adstocked)
 #'   media. For `print()`, an `mm_ols` object.
@@ -15,29 +15,34 @@
 #'
 #' @return `fit_ols()` returns an object of class `mm_ols`: a list with elements
 #'   `intercept`, `slope`, `n` and `fitted.values`, the fitted values of the
-#'   `n` complete pairs used. `predict()` returns a numeric vector the same
+#'   `n` finite pairs used. `predict()` returns a numeric vector the same
 #'   length as `newdata`. `coef()` returns the intercept and slope, named
 #'   `(Intercept)` and `media`, so a fit on a column named `media` works with
 #'   [contributions()]. `fitted()` returns `fitted.values`.
 #'
 #' @details
-#' This is deliberately the simplest possible model. It has no seasonality, no
-#' price term, no baseline and no controls, so carryover parameters chosen
-#' against it absorb whatever those omitted terms would have explained. That is
-#' fine for a first pass and wrong for a deliverable.
+#' This is deliberately the simplest possible model. It has no trend, no
+#' seasonality, no price term and no other controls, so carryover parameters
+#' chosen against it absorb whatever those omitted terms would have explained.
+#' That is fine for a first pass and wrong for a deliverable.
 #'
 #' To tune against a model with controls, pass them to [tune_carryover()]'s
 #' `controls` argument, which switches the default model to least squares on
 #' the adstocked media plus the controls and keeps every row aligned with every
 #' split. For several channels at once use [tune_carryover_joint()], and for
 #' carryover tuned jointly with saturation and a model penalty, [step_adstock()]
-#' in a \pkg{recipes} pipeline. All three are worked through in
-#' `vignette("carryover")` and `vignette("tidymodels")`.
+#' in a \pkg{recipes} pipeline. The examples of [tune_carryover()] show the
+#' first; `vignette("carryover")` and `vignette("tidymodels")` work through
+#' the other two.
 #'
-#' The slope is set to zero only when `x` has no spread relative to its own
-#' scale, so the answer does not depend on the units `x` is measured in.
+#' Pairs where `x` or `y` is missing or non-finite are dropped before fitting.
+#' With fewer than two pairs left the slope is zero and the intercept is the
+#' one remaining `y`, or `NA` when none remains. Otherwise the slope is set to
+#' zero when `x` has no spread relative to its own scale, so the answer does
+#' not depend on the units `x` is measured in.
 #'
-#' @seealso [tune_carryover()]
+#' @seealso [tune_carryover()], which uses `fit_ols()` and [rmse()] as its
+#'   defaults.
 #'
 #' @examples
 #' set.seed(1)
@@ -63,11 +68,10 @@ fit_ols <- function(x, y) {
   if (n < 2L) {
     out <- list(intercept = if (n == 1L) y else NA_real_, slope = 0, n = n)
   } else {
-    # Centred cross-products. Computing these as `sum(x*x) - sum(x)^2/n` would
-    # make the singularity test an absolute one on a quantity that scales with
-    # x-squared, so expressing x in pounds rather than thousands of pounds could
-    # flip a real slope to zero. Centring first keeps the test relative to the
-    # actual spread of x.
+    # Centred cross-products. The shortcut `sum(x*x) - sum(x)^2/n` subtracts
+    # two nearly equal numbers when the mean of x is large next to its spread,
+    # and can lose most of the digits of the result. Centring first keeps `sxx`
+    # and `sxy` accurate for the singularity test and the slope.
     xbar <- mean(x)
     ybar <- mean(y)
     dx <- x - xbar

@@ -34,7 +34,7 @@ omitted, \code{predict()} returns the fitted values.}
 \value{
 \code{fit_ols()} returns an object of class \code{mm_ols}: a list with elements
 \code{intercept}, \code{slope}, \code{n} and \code{fitted.values}, the fitted values of the
-\code{n} complete pairs used. \code{predict()} returns a numeric vector the same
+\code{n} finite pairs used. \code{predict()} returns a numeric vector the same
 length as \code{newdata}. \code{coef()} returns the intercept and slope, named
 \code{(Intercept)} and \code{media}, so a fit on a column named \code{media} works with
 \code{\link[=contributions]{contributions()}}. \code{fitted()} returns \code{fitted.values}.
@@ -43,24 +43,28 @@ length as \code{newdata}. \code{coef()} returns the intercept and slope, named
 A bare intercept-and-slope least squares fit of \code{y} on transformed media,
 supplied so that \code{\link[=tune_carryover]{tune_carryover()}} has a sensible default and the simple
 case stays one line. It exists to be replaced: pass your own \code{fit_fn} and
-\code{predict_fn} to tune carryover against the model you actually intend to fit.
+\code{predict_fn} to tune carryover against the model you intend to fit.
 }
 \details{
-This is deliberately the simplest possible model. It has no seasonality, no
-price term, no baseline and no controls, so carryover parameters chosen
-against it absorb whatever those omitted terms would have explained. That is
-fine for a first pass and wrong for a deliverable.
+This is deliberately the simplest possible model. It has no trend, no
+seasonality, no price term and no other controls, so carryover parameters
+chosen against it absorb whatever those omitted terms would have explained.
+That is fine for a first pass and wrong for a deliverable.
 
 To tune against a model with controls, pass them to \code{\link[=tune_carryover]{tune_carryover()}}'s
 \code{controls} argument, which switches the default model to least squares on
 the adstocked media plus the controls and keeps every row aligned with every
 split. For several channels at once use \code{\link[=tune_carryover_joint]{tune_carryover_joint()}}, and for
 carryover tuned jointly with saturation and a model penalty, \code{\link[=step_adstock]{step_adstock()}}
-in a \pkg{recipes} pipeline. All three are worked through in
-\code{vignette("carryover")} and \code{vignette("tidymodels")}.
+in a \pkg{recipes} pipeline. The examples of \code{\link[=tune_carryover]{tune_carryover()}} show the
+first; \code{vignette("carryover")} and \code{vignette("tidymodels")} work through
+the other two.
 
-The slope is set to zero only when \code{x} has no spread relative to its own
-scale, so the answer does not depend on the units \code{x} is measured in.
+Pairs where \code{x} or \code{y} is missing or non-finite are dropped before fitting.
+With fewer than two pairs left the slope is zero and the intercept is the
+one remaining \code{y}, or \code{NA} when none remains. Otherwise the slope is set to
+zero when \code{x} has no spread relative to its own scale, so the answer does
+not depend on the units \code{x} is measured in.
 }
 \examples{
 set.seed(1)
@@ -73,5 +77,6 @@ coef(m)
 predict(m, spend)
 }
 \seealso{
-\code{\link[=tune_carryover]{tune_carryover()}}
+\code{\link[=tune_carryover]{tune_carryover()}}, which uses \code{fit_ols()} and \code{\link[=rmse]{rmse()}} as its
+defaults.
 }
