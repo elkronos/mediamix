@@ -943,6 +943,27 @@ test_that("a cold start under start = 'zero' is unchanged for every kernel", {
   }
 })
 
+test_that("a single training row is enough to start every kernel at steady state", {
+  skip_if_not_installed("recipes")
+  d <- data.frame(y = 1, t = 1:4, tv = c(40, 10, 0, 20))
+  for (nm in c("geometric", "weibull_cdf", "delayed")) {
+    case <- kernel_cases[[nm]]
+    rec <- recipes::prep(do.call(
+      step_adstock,
+      c(list(recipes::recipe(y ~ ., data = d[1, ]), quote(tv), index = "t",
+             period = 1, start = "steady"),
+        case$args)
+    ))
+    full <- case$run(d$tv, state = case$seed(d$tv[1]))
+    expect_equal(recipes::juice(rec)$tv, full[1], tolerance = 1e-10,
+                 info = nm)
+    expect_equal(recipes::bake(rec, new_data = d[2, ])$tv, full[2],
+                 tolerance = 1e-10, info = nm)
+    expect_equal(recipes::bake(rec, new_data = d[2:4, ])$tv, full[2:4],
+                 tolerance = 1e-10, info = nm)
+  }
+})
+
 test_that("missing media under start = 'steady' count as zero spend", {
   skip_if_not_installed("recipes")
   d <- data.frame(y = 1, t = 1:8, x = c(10, NA, 30, 40, 50, NA, 70, 80))

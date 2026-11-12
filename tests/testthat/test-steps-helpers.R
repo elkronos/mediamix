@@ -50,6 +50,35 @@ test_that("each channel gets its own step, selector, id and decay", {
   expect_identical(baked, recipes::bake(by_hand, new_data = te))
 })
 
+test_that("the helper builds what the per-channel loop in vignette('tidymodels') builds", {
+  skip_if_not_installed("recipes")
+  skip_if_not_installed("hardhat")
+  skip_if_not_installed("dials")
+  data(mm_weekly)
+  channels <- c("tv", "video", "search", "social", "display")
+  train <- mm_weekly[mm_weekly$date < as.Date("2025-07-01"), ]
+
+  loop <- recipes::recipe(revenue ~ ., data = train)
+  for (ch in channels) {
+    loop <- step_adstock(loop, all_of(!!ch), index = "date", by = "geo",
+                         decay = hardhat::tune(paste0("decay_", ch)))
+  }
+  helper <- recipes::recipe(revenue ~ ., data = train) |>
+    step_adstock_channels(channels, index = "date", by = "geo",
+                          decay = hardhat::tune())
+  expect_identical(hardhat::extract_parameter_set_dials(helper)$id,
+                   hardhat::extract_parameter_set_dials(loop)$id)
+
+  # With the placeholders filled in, every step selects its own channel.
+  fixed <- function(rec) {
+    for (i in seq_along(rec$steps)) rec$steps[[i]]$decay <- 0.5
+    recipes::prep(rec)
+  }
+  expect_identical(lapply(fixed(loop)$steps, `[[`, "columns"),
+                   as.list(channels))
+  expect_identical(recipes::juice(fixed(helper)), recipes::juice(fixed(loop)))
+})
+
 test_that("shared arguments reach every step", {
   skip_if_not_installed("recipes")
   d <- data.frame(y = 1, t = 1:6, a = c(1, 0, 0, 2, 0, 0),
