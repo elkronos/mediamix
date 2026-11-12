@@ -24,8 +24,10 @@
 #'   contain, in `(0, 1)`.
 #'
 #' @return A single number. `decay_from_half_life()` returns a decay
-#'   coefficient, `half_life()` returns a number of periods, and
-#'   `effective_window()` returns an integer number of periods.
+#'   coefficient, `half_life()` returns the half-life in the time unit of
+#'   `period` (a number of periods with the default `period = 1`; days for
+#'   `half_life(decay, period = 7)` on weekly data), and `effective_window()`
+#'   returns an integer number of periods.
 #'
 #' @details
 #' The geometric kernel places weight \eqn{\theta^i} on lag \eqn{i}, so the
@@ -34,7 +36,10 @@
 #'
 #' `effective_window()` returns the smallest \eqn{n} for which the first
 #' \eqn{n} lags carry at least `coverage` of the infinite kernel's total mass,
-#' that is the smallest \eqn{n} with \eqn{1 - \theta^n \ge} `coverage`. It is
+#' that is the smallest \eqn{n} with \eqn{1 - \theta^n \ge} `coverage`. At an
+#' exact boundary, such as a coverage of 0.5 for a decay built from a whole
+#' half-life, the comparison allows for rounding error, so
+#' `effective_window(decay_from_half_life(3), 0.5)` is 3. It is
 #' the honest way to choose `max_lag` for a truncated kernel, and a useful
 #' sanity check on a fitted decay: a decay implying a 40-week effective window
 #' on 104 weeks of data is not identified by the data.
@@ -89,8 +94,7 @@ effective_window <- function(decay, coverage = 0.9) {
                             inclusive = c(TRUE, FALSE))
   coverage <- .mm_check_scalar(coverage, "coverage", lower = 0, upper = 1,
                                inclusive = c(FALSE, FALSE))
-  if (decay == 0) return(1L)
-  n <- ceiling(log(1 - coverage) / log(decay))
+  n <- .mm_window(decay, coverage)
   int_max <- .Machine$integer.max
   if (!is.finite(n) || n > int_max) {
     cli::cli_abort(c(
@@ -102,4 +106,17 @@ effective_window <- function(decay, coverage = 0.9) {
     ))
   }
   as.integer(n)
+}
+
+# The effective window as a double, without range checks. When coverage is
+# exactly 1 - decay^k, rounding in the logarithms can put the ratio a hair
+# above k and ceiling() one period too far, so a window one period shorter is
+# taken when it meets the coverage to within rounding.
+#' @keywords internal
+#' @noRd
+.mm_window <- function(decay, coverage) {
+  if (decay == 0) return(1)
+  n <- max(1, ceiling(log1p(-coverage) / log(decay)))
+  if (n > 1 && decay^(n - 1) <= (1 - coverage) * (1 + 1e-10)) n <- n - 1
+  n
 }

@@ -81,6 +81,25 @@ test_that("effective_window() requires decay in [0, 1) and coverage in (0, 1)", 
   expect_error(effective_window(0.5, coverage = -0.1), class = "rlang_error")
 })
 
+test_that("effective_window() is exact at whole half-life boundaries", {
+  # With coverage 0.5 the window is the half-life itself. Rounding in the logs
+  # used to push 2, 3 and 7 one period too far.
+  for (h in 1:60) {
+    expect_identical(effective_window(decay_from_half_life(h), 0.5),
+                     as.integer(h), info = paste("half-life", h))
+  }
+  expect_identical(effective_window(0.5, 0.75), 2L)
+  expect_identical(effective_window(0.5, 0.7499), 2L)
+  expect_identical(effective_window(0.5, 0.7501), 3L)
+  # A coverage too small for 1 - coverage to differ from 1 still needs one period.
+  expect_identical(effective_window(0.5, 1e-20), 1L)
+})
+
+test_that("half_life() reports the half-life in the unit of period", {
+  expect_equal(half_life(decay_from_half_life(21, period = 7), period = 7), 21)
+  expect_equal(half_life(decay_from_half_life(3)), 3)
+})
+
 test_that("the decay vocabulary is shared with adstock_geometric()", {
   theta <- decay_from_half_life(2)
   spend <- c(100, 0, 0, 0, 0)

@@ -34,8 +34,10 @@ contain, in \verb{(0, 1)}.}
 }
 \value{
 A single number. \code{decay_from_half_life()} returns a decay
-coefficient, \code{half_life()} returns a number of periods, and
-\code{effective_window()} returns an integer number of periods.
+coefficient, \code{half_life()} returns the half-life in the time unit of
+\code{period} (a number of periods with the default \code{period = 1}; days for
+\code{half_life(decay, period = 7)} on weekly data), and \code{effective_window()}
+returns an integer number of periods.
 }
 \description{
 Practitioners reason about media carryover in half-lives ("television keeps
@@ -53,7 +55,10 @@ effect halves after \eqn{h} periods when \eqn{\theta^h = 0.5}. Hence
 
 \code{effective_window()} returns the smallest \eqn{n} for which the first
 \eqn{n} lags carry at least \code{coverage} of the infinite kernel's total mass,
-that is the smallest \eqn{n} with \eqn{1 - \theta^n \ge} \code{coverage}. It is
+that is the smallest \eqn{n} with \eqn{1 - \theta^n \ge} \code{coverage}. At an
+exact boundary, such as a coverage of 0.5 for a decay built from a whole
+half-life, the comparison allows for rounding error, so
+\code{effective_window(decay_from_half_life(3), 0.5)} is 3. It is
 the honest way to choose \code{max_lag} for a truncated kernel, and a useful
 sanity check on a fitted decay: a decay implying a 40-week effective window
 on 104 weeks of data is not identified by the data.
