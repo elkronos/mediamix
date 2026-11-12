@@ -55,6 +55,8 @@
 #'   `mm_attribution_segments` and the attribute `"segments"`, naming the
 #'   segment columns. With intervals it also has class
 #'   `mm_attribution_intervals` and the attributes `"level"` and `"times"`.
+#'   For these two classes [plot()] draws each rule's share per channel; see
+#'   [plot.mm_attribution_intervals()].
 #'
 #' @section Segments:
 #' A segment holds whole journeys, so a column given to `by` must take one
@@ -96,7 +98,8 @@
 #' draws advance the session's stream.
 #'
 #' @seealso [credit_linear()] and friends, [markov_removal()],
-#'   [attribution_spread()]
+#'   [attribution_spread()], [plot.mm_attribution()],
+#'   [plot.mm_attribution_intervals()]
 #'
 #' @examples
 #' data(mm_events)

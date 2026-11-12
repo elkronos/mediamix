@@ -75,6 +75,8 @@ The result has class \code{mm_attribution}. With \code{by} it also has class
 \code{mm_attribution_segments} and the attribute \code{"segments"}, naming the
 segment columns. With intervals it also has class
 \code{mm_attribution_intervals} and the attributes \code{"level"} and \code{"times"}.
+For these two classes \code{\link[=plot]{plot()}} draws each rule's share per channel; see
+\code{\link[=plot.mm_attribution_intervals]{plot.mm_attribution_intervals()}}.
 }
 \description{
 Runs a set of credit rules over the same journey table and returns their
@@ -156,5 +158,6 @@ by_device[by_device$channel == "display", ]
 }
 \seealso{
 \code{\link[=credit_linear]{credit_linear()}} and friends, \code{\link[=markov_removal]{markov_removal()}},
-\code{\link[=attribution_spread]{attribution_spread()}}
+\code{\link[=attribution_spread]{attribution_spread()}}, \code{\link[=plot.mm_attribution]{plot.mm_attribution()}},
+\code{\link[=plot.mm_attribution_intervals]{plot.mm_attribution_intervals()}}
 }
