@@ -18,9 +18,12 @@ expected. The `reprex` package formats this well. Include the result of
    and passes after.
 4. If you change roxygen comments, run `devtools::document()` and commit the
    regenerated files in `man/` and `NAMESPACE`.
-5. Run `devtools::check()` and make sure it reports no errors or warnings.
-6. Add a bullet to the development section of `NEWS.md` describing the
-   user-visible change.
+5. If you change `README.Rmd`, run `devtools::build_readme()` and commit
+   `README.md` with any figures it rewrites in `man/figures/`. Do not edit
+   `README.md` by hand.
+6. Run `devtools::check()` and make sure it reports no errors or warnings.
+7. Add a bullet to the development section of `NEWS.md`, under the heading
+   that fits, describing the user-visible change.
 
 Commit messages use an imperative subject line under 72 characters, with a
 body when the reason for the change is not obvious from the diff.
