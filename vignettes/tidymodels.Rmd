@@ -217,15 +217,17 @@ iterations on values that trade off against the intercept.
 One search covers carryover, saturation and the model's penalty together,
 scored on rolling-origin resampling of the north geography:
 
+```{r}
+north <- mm_weekly[mm_weekly$geo == "north", ]
+north <- north[order(north$date), ]
+```
+
 ```{r eval = has_tune}
 library(rsample)
 library(parsnip)
 library(workflows)
 library(tune)
 library(dials)
-
-north <- mm_weekly[mm_weekly$geo == "north", ]
-north <- north[order(north$date), ]
 
 folds <- rolling_origin(north, initial = 104, assess = 13, skip = 12,
                         cumulative = TRUE)
@@ -280,38 +282,31 @@ short. Channels rarely share a carryover: in `mm_weekly` the true decays,
 stored in `attr(mm_weekly, "truth")`, run from
 `r attr(mm_weekly, "truth")$decay[["search"]]` for search to
 `r attr(mm_weekly, "truth")$decay[["tv"]]` for television, so for a real
-model give each channel its own step. `tune()` takes an identifier, which
-keeps the five decays apart in the search:
+model give each channel its own step. `step_adstock_channels()` adds one
+`step_adstock()` per channel, and with `decay = tune()` it gives each step a
+tuning parameter of its own, named after the channel:
 
-```{r eval = has_tune}
+```{r}
 per_channel <- recipe(revenue ~ ., data = north) |>
   update_role(date, new_role = "index") |>
-  step_rm(geo)
-for (ch in channels) {
-  # `!!` puts the channel name into the step now. A bare `all_of(ch)` is
-  # evaluated at prep(), after the loop has finished, so every step would
-  # select the last channel.
-  per_channel <- step_adstock(per_channel, all_of(!!ch), index = "date",
-                              decay = tune(paste0("decay_", ch)))
-}
-per_channel <- per_channel |>
-  step_saturation(all_of(channels), half_max = tune(), shape = tune()) |>
+  step_rm(geo) |>
+  # tune() is hardhat's; the tune package re-exports it.
+  step_adstock_channels(channels, index = "date", decay = hardhat::tune()) |>
+  step_saturation(all_of(channels), half_max = hardhat::tune(),
+                  shape = hardhat::tune()) |>
   step_normalize(all_numeric_predictors())
 
-adstock_steps <- Filter(function(s) inherits(s, "step_adstock"),
-                        per_channel$steps)
-data.frame(
-  selects = vapply(adstock_steps,
-                   function(s) rlang::quo_text(s$terms[[1]]), character(1)),
-  decay = vapply(adstock_steps,
-                 function(s) as.character(s$decay[[2]]), character(1))
-)
+hardhat::extract_parameter_set_dials(per_channel)
 ```
 
-Each `step_adstock()` selects one channel and carries its own identifier. The
-rest of the recipe is `tune_rec`'s, so `update_recipe(wf, per_channel)` swaps
-it into the workflow and the search covers five decays instead of one; give
-`tune_bayes()` a larger `initial` and `iter` to match.
+The parameter set now holds five decays, `decay_tv` to `decay_display`, beside
+the shared `half_max` and `shape`. Each step selects its channel by name, fixed
+when the step is added; a loop of `step_adstock()` calls with `all_of(ch)`
+would select the last channel in every step, because selectors are evaluated
+at `prep()`, after the loop has finished. The rest of the recipe is
+`tune_rec`'s, so `update_recipe(wf, per_channel)` swaps it into the workflow
+and the search covers five decays instead of one; give `tune_bayes()` a larger
+`initial` and `iter` to match.
 
 ## Leakage, since a reviewer will ask
 
