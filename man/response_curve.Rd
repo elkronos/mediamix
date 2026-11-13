@@ -10,8 +10,10 @@ response_curve(spend, coefficient, type = "hill", ...)
 spend_for(target, coefficient, type = "hill", max_spend = NULL, ...)
 }
 \arguments{
-\item{spend}{Numeric vector of spend levels to evaluate. \code{response_curve()}
-only; \code{spend_for()} has no such argument.}
+\item{spend}{Numeric vector of adstocked spend levels to evaluate, in the
+units the saturation curve was fitted on (see \emph{Details}), finite and
+non-negative. \code{response_curve()} only; \code{spend_for()} has no such
+argument.}
 
 \item{coefficient}{The channel's fitted coefficient.}
 
@@ -30,27 +32,39 @@ Defaults to 1000 times the curve's spend-scaled parameter (\code{half_max},
 parameter, so \code{max_spend} is required there.}
 }
 \value{
-\code{response_curve()} returns a data frame with columns \code{spend},
-\code{response} and \code{marginal}, one row per element of \code{spend} and in the same
-order. \code{spend_for()} returns a single number, or \code{NA_real_} with a warning
-when the target is not reachable within \code{max_spend}. A target that no
-amount of spend can reach, such as a negative response from a channel
-with a positive coefficient, is an error.
+\code{response_curve()} returns a data frame with columns \code{spend} (the
+levels given), \code{response} (the coefficient times the curve at each level)
+and \code{marginal} (the slope of \code{response} there, as \code{\link[=mroi]{mroi()}} computes it),
+one row per element of \code{spend} and in the same order. It has class
+\code{mm_response_curve}, with a \link[=plot.mm_response_curve]{plot()} method.
+\code{spend_for()} returns a single adstocked spend level, or \code{NA_real_} with a
+warning when the target is not reachable within \code{max_spend}. A target
+that no amount of spend can reach, such as a negative response from a
+channel with a positive coefficient, is an error.
 }
 \description{
-Predicted response across a range of spend, derived from the fitted
-saturation parameters. \code{spend_for()} is the inverse: the spend that achieves
-a target response.
+Predicted response across a range of adstocked spend, derived from the
+fitted saturation parameters. \code{spend_for()} is the inverse: the adstocked
+spend that achieves a target response.
 }
 \details{
-These describe the \emph{response curve the model fitted}, which is not the same
-thing as what would happen if you actually spent that much. The curve is
-identified only over the range of spend the data contains; asking a saturated
-Hill curve what happens at ten times the observed maximum returns a number,
-and that number is extrapolation. \code{spend_for()} returns \code{NA} rather than a
-fabricated answer when the target lies beyond \code{max_spend}, but it cannot tell
-you that a reachable target is outside the data's support. Check the observed
-spend range yourself.
+\code{spend} is the saturation curve's input. When the regressor came from
+\code{\link[=media_transform]{media_transform()}}, that is adstocked spend: the media pressure in a
+period, carryover included, rather than the spend of that period alone.
+Under a normalised kernel, the default, a steady spend per period settles
+at the same adstocked level, so a level can be read as the steady spend
+per period that holds the channel there.
+
+Both functions describe the \emph{response curve the model fitted}, which is not
+the same thing as what would happen if you actually spent that much. The
+curve is identified only over the range of spend the data contains; asking
+a saturated Hill curve what happens at ten times the observed maximum
+returns a number, and that number is extrapolation. \code{spend_for()} returns
+\code{NA} rather than a fabricated answer when the target lies beyond
+\code{max_spend}, but it cannot tell you that a reachable target is outside the
+data's support. Check the range of the adstocked series yourself;
+\link[=plot.mm_response_curve]{plot()} shades the levels outside it when given
+the series as \code{observed}.
 }
 \examples{
 # The curve mm_weekly's television was simulated with: coefficient 5200,
@@ -79,7 +93,7 @@ s_curve <- response_curve(
 s_curve
 s_curve$spend[which.max(s_curve$marginal)]
 
-# What spend achieves a response of 2000?
+# What adstocked spend achieves a response of 2000?
 spend_for(target = 2000, coefficient = 5200, half_max = 2250, shape = 1.6)
 
 # An unbounded curve needs an explicit search range
@@ -87,5 +101,7 @@ spend_for(target = 200000, coefficient = 5200, type = "power",
           exponent = 0.5, max_spend = 1e6)
 }
 \seealso{
-\code{\link[=saturate]{saturate()}}, \code{\link[=mroi]{mroi()}}
+\code{\link[=plot.mm_response_curve]{plot.mm_response_curve()}}, \code{\link[=saturate]{saturate()}}, \code{\link[=mroi]{mroi()}}, and
+\code{\link[=marginal_roi]{marginal_roi()}} for the marginal return on raw spend through the full
+transform
 }

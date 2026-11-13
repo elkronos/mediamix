@@ -5,8 +5,8 @@
 #' coefficients, but the answer to "how much of last year's revenue did each
 #' channel produce, and what would have happened anyway".
 #'
-#' @param media A data frame of the *transformed* media regressors -- adstocked
-#'   and saturated -- exactly as they entered the model. Column names must match
+#' @param media A data frame of the *transformed* media regressors (adstocked
+#'   and saturated), exactly as they entered the model. Column names must match
 #'   the model's coefficient names. Backticks in a coefficient name are
 #'   ignored, so a column named `TV Spend` matches the coefficient
 #'   `` `TV Spend` ``. Numeric columns that match no coefficient are left out,
@@ -21,7 +21,8 @@
 #'   explicitly when passing a bare coefficient vector without an
 #'   `"(Intercept)"` element.
 #' @param index Optional vector, the same length as `nrow(media)`, labelling the
-#'   periods. Used as the `period` column of the result.
+#'   periods. Used as the `period` column of the result; defaults to the row
+#'   numbers.
 #' @param by Optional grouping vector, the same length as `nrow(media)`.
 #' @param newdata Optional data frame holding every variable `model` needs, one
 #'   row per row of `media`, for periods the model was not fitted on: a holdout,
@@ -31,7 +32,8 @@
 #'
 #' @return A data frame in long format with columns `period`, `group` (present
 #'   only when `by` is supplied), `channel` and `contribution`. The baseline
-#'   appears as a channel named `"(baseline)"`.
+#'   appears as a channel named `"(baseline)"`. The result has class
+#'   `mm_contributions`, with a [plot()][plot.mm_contributions] method.
 #'
 #'   The baseline is the model's prediction minus the media effect, so the
 #'   contributions in each period sum to that prediction. Which prediction is
@@ -52,12 +54,12 @@
 #'
 #' @details
 #' Contributions are computed as \eqn{\beta_j x_{jt}} for each channel, with
-#' everything else -- intercept, trend, price, seasonality, controls -- pooled
+#' everything else (intercept, trend, price, seasonality, controls) pooled
 #' into `"(baseline)"`. That pooling is a deliberate simplification: it is what
 #' makes contributions sum exactly to the fitted value, and it means the
 #' baseline is not "organic demand" but "everything this decomposition does not
-#' attribute to media". Reporting it as organic demand is the single most common
-#' way a marketing mix deliverable overstates its own precision.
+#' attribute to media". Reporting it as organic demand makes a marketing mix
+#' deliverable look more precise than it is.
 #'
 #' Contributions inherit whatever the model's identification is worth. If two
 #' channels are collinear the split between them is arbitrary even when the
@@ -69,9 +71,6 @@
 #' On panel data, pass one geography at a time or supply `by`. `index` is used
 #' as a label, not a key: with `by` supplied and one date per geography, a
 #' `tapply()` over `period` alone silently adds the geographies together.
-#'
-#'   The result has class `mm_contributions`, with a [plot()][plot.mm_contributions]
-#'   method.
 #'
 #' @section Models with a link function:
 #' For a generalised linear model whose link is not the identity, such as a
@@ -96,13 +95,12 @@
 #' # Transform with the parameters the data was generated from, so the example
 #' # shows a correctly specified decomposition rather than a misspecified one.
 #' truth <- attr(mm_weekly, "truth")
-#' transformed <- as.data.frame(Map(
-#'   function(x, d, h, sh) media_transform(
-#'     x, adstock = list(decay = d),
-#'     saturation = list(half_max = h, shape = sh)),
-#'   north[channels], truth$decay[channels], truth$half_max[channels],
-#'   truth$shape[channels]
+#' spec <- lapply(stats::setNames(channels, channels), function(ch) list(
+#'   adstock = list(decay = truth$decay[[ch]]),
+#'   saturation = list(half_max = truth$half_max[[ch]],
+#'                     shape = truth$shape[[ch]])
 #' ))
+#' transformed <- transform_plan(north[channels], spec)
 #'
 #' # Include the controls the data was simulated with. Without them, the media
 #' # coefficients absorb price, trend and seasonality and two of them flip sign.
@@ -121,8 +119,8 @@
 #' all.equal(totals, unname(stats::fitted(fit)))
 #'
 #' # Channel totals over the three years. "(baseline)" is everything the model
-#' # predicts that is not attributed to these five columns -- trend, price,
-#' # seasonality and the intercept. It is not organic demand.
+#' # predicts that is not attributed to these five columns: trend, price,
+#' # seasonality, holidays and the intercept. It is not organic demand.
 #' round(tapply(contrib$contribution, contrib$channel, sum))
 #'
 #' # A period the model was not fitted on: fit on the first two years and
@@ -497,7 +495,8 @@ contributions <- function(media, model, intercept = NULL, index = NULL,
 #'   `periods` selects contributions only, and the totals must cover the same
 #'   periods.
 #' @param spend_level Current spend level for the channel, in the same units the
-#'   saturation curve was fitted on.
+#'   saturation curve was fitted on: the adstocked level, for a curve applied
+#'   after adstock as in [media_transform()].
 #' @param coefficient The channel's fitted coefficient.
 #' @param delta Increment used for the numerical derivative, as a fraction of
 #'   `spend_level`.
@@ -527,27 +526,27 @@ contributions <- function(media, model, intercept = NULL, index = NULL,
 #' unit return. Only the second one should drive a reallocation, and the two can
 #' point in opposite directions.
 #'
-#' Where they sit relative to each other depends on the shape of the curve, and
-#' it is worth being precise because the usual summary of this is wrong.
+#' Where they sit relative to each other depends on the shape of the curve.
 #'
-#' For a **concave** response -- `saturate_hill()` with `shape = 1`,
-#' Michaelis--Menten, negative exponential, `saturate_power()` -- marginal ROI
+#' For a **concave** response (`saturate_hill()` with `shape <= 1`,
+#' Michaelis--Menten, negative exponential, `saturate_power()`), marginal ROI
 #' is below average ROI everywhere, and the gap widens the further up the curve
 #' a channel sits. Reallocating on average ROI then systematically over-funds
 #' channels that are already saturated, which are exactly the channels that look
 #' best on an average-ROI table.
 #'
-#' For an **S-shaped** response -- `saturate_hill()` with `shape > 1`, the usual
-#' way to represent a threshold effect -- the curve is *convex* below its
-#' inflection point, and there marginal ROI is **above** average ROI. A channel
+#' For an **S-shaped** response (`saturate_hill()` with `shape > 1`, the usual
+#' way to represent a threshold effect), the curve is *convex* below its
+#' inflection point, and there marginal ROI is *above* average ROI. A channel
 #' in that region has not saturated: each extra pound works harder than the
 #' pounds already spent, so a cut there loses more per pound than the average
 #' return suggests. Whether the channel should get more budget still depends on
 #' how its marginal return compares with other channels' and with break-even.
 #'
 #' `mroi()` differentiates the fitted response curve numerically, so it works
-#' for any curve [saturate()] supports, with a step that scales with the curve's
-#' own spend parameter (`half_max`, `km`, or the half-life of `rate`). At
+#' for any curve [saturate()] supports, with a step of `delta` times
+#' `spend_level` that never falls below a small fraction of the curve's own
+#' spend parameter (`half_max`, `km`, or the half-life of `rate`). At
 #' `spend_level = 0` it is finite and correct wherever the curve's slope at
 #' zero is finite: Hill curves with `shape >= 1`, Michaelis--Menten,
 #' exponential and `"none"`. A Hill curve with `shape < 1` and a power curve
@@ -556,10 +555,9 @@ contributions <- function(media, model, intercept = NULL, index = NULL,
 #' derivative.
 #'
 #' @section Marginal return when the regressor was adstocked:
-#' `mroi()` is the slope of the saturation curve with respect to the quantity
-#' the coefficient multiplies -- the *transformed* media -- at a single level.
-#' It is a property of the curve, not yet a return on spend, and two things
-#' separate the two.
+#' `mroi()` is the slope of the coefficient times the saturation curve at a
+#' single level of the curve's input, the *adstocked* media. It is a property
+#' of the curve, not yet a return on spend, and two things separate the two.
 #'
 #' Carryover spreads a unit of spend over many periods. Under a normalised
 #' kernel the weights sum to one, so the *total* extra response to one more
@@ -585,13 +583,12 @@ contributions <- function(media, model, intercept = NULL, index = NULL,
 #' channels <- c("tv", "video", "search", "social", "display")
 #' truth <- attr(mm_weekly, "truth")
 #'
-#' transformed <- as.data.frame(Map(
-#'   function(x, d, h, sh) media_transform(
-#'     x, adstock = list(decay = d),
-#'     saturation = list(half_max = h, shape = sh)),
-#'   north[channels], truth$decay[channels], truth$half_max[channels],
-#'   truth$shape[channels]
+#' spec <- lapply(stats::setNames(channels, channels), function(ch) list(
+#'   adstock = list(decay = truth$decay[[ch]]),
+#'   saturation = list(half_max = truth$half_max[[ch]],
+#'                     shape = truth$shape[[ch]])
 #' ))
+#' transformed <- transform_plan(north[channels], spec)
 #'
 #' model_data <- transformed
 #' model_data$week <- seq_len(nrow(model_data))
@@ -615,17 +612,10 @@ contributions <- function(media, model, intercept = NULL, index = NULL,
 #'
 #' # Average and marginal return are different questions. marginal_roi()
 #' # re-runs the whole transform on a 1% larger budget, so carryover and
-#' # flighting are both accounted for. Display's average pound returns about
-#' # 1.5, but its next pound returns less than it costs.
-#' avg <- roi(contrib, north[channels])
-#' for (ch in channels) {
-#'   m <- marginal_roi(north[[ch]], coefficient = stats::coef(fit)[[ch]],
-#'                     adstock = list(decay = truth$decay[[ch]]),
-#'                     saturation = list(half_max = truth$half_max[[ch]],
-#'                                       shape = truth$shape[[ch]]))
-#'   cat(sprintf("%-8s average %.2f  marginal %.2f\n",
-#'               ch, avg$roi[avg$channel == ch], m$mroi))
-#' }
+#' # flighting are both accounted for; its `roi` column matches
+#' # roi(contrib, north[channels]). Display's average pound returns about 1.5,
+#' # but its next pound returns less than it costs.
+#' marginal_roi(north, stats::coef(fit), spec = spec)
 #' @export
 roi <- function(contributions, spend, by = NULL, index = NULL,
                 periods = NULL) {
@@ -976,10 +966,10 @@ mroi <- function(spend_level, coefficient, type = "hill", delta = 0.01, ...) {
   # shape 1 it gives a relative error of about 3e-6 at zero, at any scale.
   scale <- .mm_curve_scale(type, list(...), default = 1)
   h <- pmax(x * delta, .Machine$double.eps^(1 / 3) * scale)
-  # Clamp the lower point at zero -- spend cannot be negative -- and divide by
-  # the interval spanned. Dividing by `h` regardless would halve the answer at
-  # `spend_level = 0`, which is the single most decision-relevant query: what
-  # does the first pound into a dark channel return?
+  # Clamp the lower point at zero, since spend cannot be negative, and divide
+  # by the interval spanned. Dividing by `h` regardless would halve the answer
+  # at `spend_level = 0`, the query that asks what the first pound into a dark
+  # channel returns.
   lo_s <- pmax(0, x - h / 2)
   hi_s <- x + h / 2
   lo <- .mm_curve(lo_s, type, ...)
@@ -1020,12 +1010,14 @@ mroi <- function(spend_level, coefficient, type = "hill", delta = 0.01, ...) {
 
 #' Response curve for a channel
 #'
-#' Predicted response across a range of spend, derived from the fitted
-#' saturation parameters. `spend_for()` is the inverse: the spend that achieves
-#' a target response.
+#' Predicted response across a range of adstocked spend, derived from the
+#' fitted saturation parameters. `spend_for()` is the inverse: the adstocked
+#' spend that achieves a target response.
 #'
-#' @param spend Numeric vector of spend levels to evaluate. `response_curve()`
-#'   only; `spend_for()` has no such argument.
+#' @param spend Numeric vector of adstocked spend levels to evaluate, in the
+#'   units the saturation curve was fitted on (see *Details*), finite and
+#'   non-negative. `response_curve()` only; `spend_for()` has no such
+#'   argument.
 #' @param coefficient The channel's fitted coefficient.
 #' @param type Saturation curve type, as in [saturate()], or `"none"` for a
 #'   linear response.
@@ -1038,24 +1030,38 @@ mroi <- function(spend_level, coefficient, type = "hill", delta = 0.01, ...) {
 #'   parameter, so `max_spend` is required there.
 #' @param ... Passed to [saturate()], for example `half_max` and `shape`.
 #'
-#' @return `response_curve()` returns a data frame with columns `spend`,
-#'   `response` and `marginal`, one row per element of `spend` and in the same
-#'   order. `spend_for()` returns a single number, or `NA_real_` with a warning
-#'   when the target is not reachable within `max_spend`. A target that no
-#'   amount of spend can reach, such as a negative response from a channel
-#'   with a positive coefficient, is an error.
+#' @return `response_curve()` returns a data frame with columns `spend` (the
+#'   levels given), `response` (the coefficient times the curve at each level)
+#'   and `marginal` (the slope of `response` there, as [mroi()] computes it),
+#'   one row per element of `spend` and in the same order. It has class
+#'   `mm_response_curve`, with a [plot()][plot.mm_response_curve] method.
+#'   `spend_for()` returns a single adstocked spend level, or `NA_real_` with a
+#'   warning when the target is not reachable within `max_spend`. A target
+#'   that no amount of spend can reach, such as a negative response from a
+#'   channel with a positive coefficient, is an error.
 #'
 #' @details
-#' These describe the *response curve the model fitted*, which is not the same
-#' thing as what would happen if you actually spent that much. The curve is
-#' identified only over the range of spend the data contains; asking a saturated
-#' Hill curve what happens at ten times the observed maximum returns a number,
-#' and that number is extrapolation. `spend_for()` returns `NA` rather than a
-#' fabricated answer when the target lies beyond `max_spend`, but it cannot tell
-#' you that a reachable target is outside the data's support. Check the observed
-#' spend range yourself.
+#' `spend` is the saturation curve's input. When the regressor came from
+#' [media_transform()], that is adstocked spend: the media pressure in a
+#' period, carryover included, rather than the spend of that period alone.
+#' Under a normalised kernel, the default, a steady spend per period settles
+#' at the same adstocked level, so a level can be read as the steady spend
+#' per period that holds the channel there.
 #'
-#' @seealso [saturate()], [mroi()]
+#' Both functions describe the *response curve the model fitted*, which is not
+#' the same thing as what would happen if you actually spent that much. The
+#' curve is identified only over the range of spend the data contains; asking
+#' a saturated Hill curve what happens at ten times the observed maximum
+#' returns a number, and that number is extrapolation. `spend_for()` returns
+#' `NA` rather than a fabricated answer when the target lies beyond
+#' `max_spend`, but it cannot tell you that a reachable target is outside the
+#' data's support. Check the range of the adstocked series yourself;
+#' [plot()][plot.mm_response_curve] shades the levels outside it when given
+#' the series as `observed`.
+#'
+#' @seealso [plot.mm_response_curve()], [saturate()], [mroi()], and
+#'   [marginal_roi()] for the marginal return on raw spend through the full
+#'   transform
 #'
 #' @examples
 #' # The curve mm_weekly's television was simulated with: coefficient 5200,
@@ -1084,7 +1090,7 @@ mroi <- function(spend_level, coefficient, type = "hill", delta = 0.01, ...) {
 #' s_curve
 #' s_curve$spend[which.max(s_curve$marginal)]
 #'
-#' # What spend achieves a response of 2000?
+#' # What adstocked spend achieves a response of 2000?
 #' spend_for(target = 2000, coefficient = 5200, half_max = 2250, shape = 1.6)
 #'
 #' # An unbounded curve needs an explicit search range

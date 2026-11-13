@@ -38,7 +38,8 @@ data frame, \code{periods} needs \code{index}. When \code{spend} gives totals,
 periods.}
 
 \item{spend_level}{Current spend level for the channel, in the same units the
-saturation curve was fitted on.}
+saturation curve was fitted on: the adstocked level, for a curve applied
+after adstock as in \code{\link[=media_transform]{media_transform()}}.}
 
 \item{coefficient}{The channel's fitted coefficient.}
 
@@ -78,27 +79,27 @@ period as a whole. Marginal ROI is the decision variable: what would the next
 unit return. Only the second one should drive a reallocation, and the two can
 point in opposite directions.
 
-Where they sit relative to each other depends on the shape of the curve, and
-it is worth being precise because the usual summary of this is wrong.
+Where they sit relative to each other depends on the shape of the curve.
 
-For a \strong{concave} response -- \code{saturate_hill()} with \code{shape = 1},
-Michaelis--Menten, negative exponential, \code{saturate_power()} -- marginal ROI
+For a \strong{concave} response (\code{saturate_hill()} with \code{shape <= 1},
+Michaelis--Menten, negative exponential, \code{saturate_power()}), marginal ROI
 is below average ROI everywhere, and the gap widens the further up the curve
 a channel sits. Reallocating on average ROI then systematically over-funds
 channels that are already saturated, which are exactly the channels that look
 best on an average-ROI table.
 
-For an \strong{S-shaped} response -- \code{saturate_hill()} with \code{shape > 1}, the usual
-way to represent a threshold effect -- the curve is \emph{convex} below its
-inflection point, and there marginal ROI is \strong{above} average ROI. A channel
+For an \strong{S-shaped} response (\code{saturate_hill()} with \code{shape > 1}, the usual
+way to represent a threshold effect), the curve is \emph{convex} below its
+inflection point, and there marginal ROI is \emph{above} average ROI. A channel
 in that region has not saturated: each extra pound works harder than the
 pounds already spent, so a cut there loses more per pound than the average
 return suggests. Whether the channel should get more budget still depends on
 how its marginal return compares with other channels' and with break-even.
 
 \code{mroi()} differentiates the fitted response curve numerically, so it works
-for any curve \code{\link[=saturate]{saturate()}} supports, with a step that scales with the curve's
-own spend parameter (\code{half_max}, \code{km}, or the half-life of \code{rate}). At
+for any curve \code{\link[=saturate]{saturate()}} supports, with a step of \code{delta} times
+\code{spend_level} that never falls below a small fraction of the curve's own
+spend parameter (\code{half_max}, \code{km}, or the half-life of \code{rate}). At
 \code{spend_level = 0} it is finite and correct wherever the curve's slope at
 zero is finite: Hill curves with \code{shape >= 1}, Michaelis--Menten,
 exponential and \code{"none"}. A Hill curve with \code{shape < 1} and a power curve
@@ -108,10 +109,9 @@ derivative.
 }
 \section{Marginal return when the regressor was adstocked}{
 
-\code{mroi()} is the slope of the saturation curve with respect to the quantity
-the coefficient multiplies -- the \emph{transformed} media -- at a single level.
-It is a property of the curve, not yet a return on spend, and two things
-separate the two.
+\code{mroi()} is the slope of the coefficient times the saturation curve at a
+single level of the curve's input, the \emph{adstocked} media. It is a property
+of the curve, not yet a return on spend, and two things separate the two.
 
 Carryover spreads a unit of spend over many periods. Under a normalised
 kernel the weights sum to one, so the \emph{total} extra response to one more
@@ -135,13 +135,12 @@ north <- mm_weekly[mm_weekly$geo == "north", ]
 channels <- c("tv", "video", "search", "social", "display")
 truth <- attr(mm_weekly, "truth")
 
-transformed <- as.data.frame(Map(
-  function(x, d, h, sh) media_transform(
-    x, adstock = list(decay = d),
-    saturation = list(half_max = h, shape = sh)),
-  north[channels], truth$decay[channels], truth$half_max[channels],
-  truth$shape[channels]
+spec <- lapply(stats::setNames(channels, channels), function(ch) list(
+  adstock = list(decay = truth$decay[[ch]]),
+  saturation = list(half_max = truth$half_max[[ch]],
+                    shape = truth$shape[[ch]])
 ))
+transformed <- transform_plan(north[channels], spec)
 
 model_data <- transformed
 model_data$week <- seq_len(nrow(model_data))
@@ -165,17 +164,10 @@ roi(contrib, north[c("date", channels)], index = "date",
 
 # Average and marginal return are different questions. marginal_roi()
 # re-runs the whole transform on a 1\% larger budget, so carryover and
-# flighting are both accounted for. Display's average pound returns about
-# 1.5, but its next pound returns less than it costs.
-avg <- roi(contrib, north[channels])
-for (ch in channels) {
-  m <- marginal_roi(north[[ch]], coefficient = stats::coef(fit)[[ch]],
-                    adstock = list(decay = truth$decay[[ch]]),
-                    saturation = list(half_max = truth$half_max[[ch]],
-                                      shape = truth$shape[[ch]]))
-  cat(sprintf("\%-8s average \%.2f  marginal \%.2f\n",
-              ch, avg$roi[avg$channel == ch], m$mroi))
-}
+# flighting are both accounted for; its `roi` column matches
+# roi(contrib, north[channels]). Display's average pound returns about 1.5,
+# but its next pound returns less than it costs.
+marginal_roi(north, stats::coef(fit), spec = spec)
 }
 \seealso{
 \code{\link[=marginal_roi]{marginal_roi()}} for marginal return on spend through the full

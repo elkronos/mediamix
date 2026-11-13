@@ -14,8 +14,8 @@ contributions(
 )
 }
 \arguments{
-\item{media}{A data frame of the \emph{transformed} media regressors -- adstocked
-and saturated -- exactly as they entered the model. Column names must match
+\item{media}{A data frame of the \emph{transformed} media regressors (adstocked
+and saturated), exactly as they entered the model. Column names must match
 the model's coefficient names. Backticks in a coefficient name are
 ignored, so a column named \verb{TV Spend} matches the coefficient
 \code{`TV Spend`}. Numeric columns that match no coefficient are left out,
@@ -33,7 +33,8 @@ explicitly when passing a bare coefficient vector without an
 \code{"(Intercept)"} element.}
 
 \item{index}{Optional vector, the same length as \code{nrow(media)}, labelling the
-periods. Used as the \code{period} column of the result.}
+periods. Used as the \code{period} column of the result; defaults to the row
+numbers.}
 
 \item{by}{Optional grouping vector, the same length as \code{nrow(media)}.}
 
@@ -46,7 +47,8 @@ must hold the same values.}
 \value{
 A data frame in long format with columns \code{period}, \code{group} (present
 only when \code{by} is supplied), \code{channel} and \code{contribution}. The baseline
-appears as a channel named \code{"(baseline)"}.
+appears as a channel named \code{"(baseline)"}. The result has class
+\code{mm_contributions}, with a \link[=plot.mm_contributions]{plot()} method.
 
 The baseline is the model's prediction minus the media effect, so the
 contributions in each period sum to that prediction. Which prediction is
@@ -74,12 +76,12 @@ channel produce, and what would have happened anyway".
 }
 \details{
 Contributions are computed as \eqn{\beta_j x_{jt}} for each channel, with
-everything else -- intercept, trend, price, seasonality, controls -- pooled
+everything else (intercept, trend, price, seasonality, controls) pooled
 into \code{"(baseline)"}. That pooling is a deliberate simplification: it is what
 makes contributions sum exactly to the fitted value, and it means the
 baseline is not "organic demand" but "everything this decomposition does not
-attribute to media". Reporting it as organic demand is the single most common
-way a marketing mix deliverable overstates its own precision.
+attribute to media". Reporting it as organic demand makes a marketing mix
+deliverable look more precise than it is.
 
 Contributions inherit whatever the model's identification is worth. If two
 channels are collinear the split between them is arbitrary even when the
@@ -91,9 +93,6 @@ presenting any of this.
 On panel data, pass one geography at a time or supply \code{by}. \code{index} is used
 as a label, not a key: with \code{by} supplied and one date per geography, a
 \code{tapply()} over \code{period} alone silently adds the geographies together.
-
-The result has class \code{mm_contributions}, with a \link[=plot.mm_contributions]{plot()}
-method.
 }
 \section{Models with a link function}{
 
@@ -117,13 +116,12 @@ channels <- c("tv", "video", "search", "social", "display")
 # Transform with the parameters the data was generated from, so the example
 # shows a correctly specified decomposition rather than a misspecified one.
 truth <- attr(mm_weekly, "truth")
-transformed <- as.data.frame(Map(
-  function(x, d, h, sh) media_transform(
-    x, adstock = list(decay = d),
-    saturation = list(half_max = h, shape = sh)),
-  north[channels], truth$decay[channels], truth$half_max[channels],
-  truth$shape[channels]
+spec <- lapply(stats::setNames(channels, channels), function(ch) list(
+  adstock = list(decay = truth$decay[[ch]]),
+  saturation = list(half_max = truth$half_max[[ch]],
+                    shape = truth$shape[[ch]])
 ))
+transformed <- transform_plan(north[channels], spec)
 
 # Include the controls the data was simulated with. Without them, the media
 # coefficients absorb price, trend and seasonality and two of them flip sign.
@@ -142,8 +140,8 @@ totals <- as.numeric(tapply(contrib$contribution, contrib$period, sum))
 all.equal(totals, unname(stats::fitted(fit)))
 
 # Channel totals over the three years. "(baseline)" is everything the model
-# predicts that is not attributed to these five columns -- trend, price,
-# seasonality and the intercept. It is not organic demand.
+# predicts that is not attributed to these five columns: trend, price,
+# seasonality, holidays and the intercept. It is not organic demand.
 round(tapply(contrib$contribution, contrib$channel, sum))
 
 # A period the model was not fitted on: fit on the first two years and
