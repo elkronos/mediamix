@@ -75,9 +75,9 @@ from the steady state of the new data's first periods.}
 \item{na_action}{What to do about missing media values. \code{"zero"} (the
 default) treats missing media as no media, which is usually right for
 spend and is what lets a recipe run over a real, patchy panel without
-stopping. It is still a substantive assumption -- an \code{NA} becomes a real
-number in the output -- so \code{"error"} is available when you would rather
-find out. Note this differs from \code{\link[=adstock_geometric]{adstock_geometric()}}, whose default is
+stopping. It is still a substantive assumption (an \code{NA} becomes a real
+number in the output), so \code{"error"} is available when you would rather
+find out. This differs from \code{\link[=adstock_geometric]{adstock_geometric()}}, whose default is
 \code{"error"}; a step has to survive resampling, and a bare function call
 does not. Infinite values are an error under either setting.}
 
@@ -153,9 +153,11 @@ Adstock is a filter with memory. Prepare a recipe on January to June and bake
 it on July to December, and the first rows of July have no history to draw
 on. A lag built with \code{recipes::step_lag()} leaves \code{NA}, or the filler given
 as its \code{default}, in the first rows of new data at every prep/bake
-boundary, and dropping those rows with \code{step_naomit()} removes the boundary
-weeks from training and evaluation. \code{step_adstock()} carries the filter's
-state across the boundary instead, so no row is dropped or filled in.
+boundary, and dropping those rows with \code{step_naomit(skip = FALSE)} removes
+the boundary weeks from training and evaluation (with its default,
+\code{skip = TRUE}, \code{step_naomit()} drops them from the training data only).
+\code{step_adstock()} carries the filter's state across the boundary instead, so
+no row is dropped or filled in.
 
 Geometric adstock is an infinite impulse response filter whose memory is
 one number per series,
@@ -314,20 +316,19 @@ columns are \code{NA}.
 
 \section{Resampling and leakage}{
 
-A reviewer will ask whether stored state leaks across a resampling boundary.
-It does not. Under any \pkg{rsample} scheme, \code{prep()} re-runs on each split's
-analysis set, so the state is re-learned from that split's training rows
-alone and describes only media that precedes the assessment set. The
-information that crosses the boundary is past \emph{media spend}, which is
-genuinely known at prediction time; no outcome information crosses at all.
+Stored state does not leak across a resampling boundary. Under any
+\pkg{rsample} scheme, \code{prep()} re-runs on each split's analysis set, so the
+state is re-learned from that split's training rows alone and describes
+only media that precedes the assessment set. The information that crosses
+the boundary is past \emph{media spend}, which is genuinely known at prediction
+time; no outcome information crosses at all.
 
-Note also that this step is strictly causal, unlike \code{recipes::step_window()}
-and \code{recipes::step_impute_roll()}, which are centred and fill the leading
-edge of a series using future values. Applied to a media filter, that would
-leak future spend into past adstock and inflate in-sample fit, which is the
-exact pathology marketing mix models are already accused of. The exception
-is \code{start = "steady"}, whose starting state averages the media of a
-series' first periods.
+This step is strictly causal, unlike \code{recipes::step_window()} and
+\code{recipes::step_impute_roll()}, which are centred and fill the leading edge
+of a series using future values. Applied to a media filter, that would leak
+future spend into past adstock and inflate in-sample fit. The exception is
+\code{start = "steady"}, whose starting state averages the media of a series'
+first periods.
 }
 
 \examples{
