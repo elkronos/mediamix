@@ -133,6 +133,7 @@ reference:
   - attribute
   - attribution_spread
   - plot.mm_attribution
+  - plot.mm_attribution_intervals
   - as_channel_paths
 - title: Example data
   desc: A simulated weekly media panel and event log, generated from known parameters so results can be checked.
