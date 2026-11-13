@@ -38,14 +38,16 @@ str(north[, c("date", channels, "price", "revenue")])
 ## Look before you transform
 
 Many marketing mix projects fail for reasons visible in the data before any
-model is fitted. `diagnose_media()` checks for four of them: channels that move
+model is fitted. `diagnose_media()` checks for five of them: channels that move
 together, channels that barely vary, channels that are dark (spend nothing) in
-most weeks, and, when impressions are supplied, an erratic cost per mille. With
+most weeks, an erratic cost per mille when impressions are supplied, and,
+given a `date` column, rows out of time order, repeated weeks and gaps, none
+of which adstock notices, since it takes adjacent rows as adjacent weeks. With
 `by = "geo"` it runs each check within each geography and reports the worst
 case.
 
 ```{r}
-diagnose_media(mm_weekly, media = channels, by = "geo")
+diagnose_media(mm_weekly, media = channels, by = "geo", date = "date")
 ```
 
 Nothing structural is wrong here, which is what you would expect from
@@ -226,20 +228,19 @@ curve. On real data you do not know these parameters: `vignette("carryover")`
 shows how to choose the decays, and `vignette("tidymodels")` how to tune them
 together with the saturation parameters.
 
+`spec` holds one entry per channel, in the form `media_transform()` takes, and
+`transform_plan()` runs each channel's column of the plan through its own
+entry:
+
 ```{r}
 truth <- attr(mm_weekly, "truth")
 
-transformed <- as.data.frame(Map(
-  function(x, decay, half_max, shape) {
-    media_transform(
-      x,
-      adstock = list(decay = decay),
-      saturation = list(half_max = half_max, shape = shape)
-    )
-  },
-  north[channels], truth$decay[channels],
-  truth$half_max[channels], truth$shape[channels]
+spec <- lapply(stats::setNames(channels, channels), function(ch) list(
+  adstock = list(decay = truth$decay[[ch]]),
+  saturation = list(half_max = truth$half_max[[ch]],
+                    shape = truth$shape[[ch]])
 ))
+transformed <- transform_plan(north, spec)[channels]
 round(head(transformed, 4), 4)
 ```
 
@@ -361,17 +362,11 @@ a slow channel is most of it.
 on a budget 1% larger in every week and divides the extra response by the
 extra spend, the definition used by Jin et al. (2017) and by Google's
 Meridian, so carryover and flighting are both handled by construction, and the
-result is a total over the same weeks as the average:
+result is a total over the same weeks as the average. Given the spend plan,
+the coefficients and `spec`, it does every channel at once:
 
 ```{r}
-marginal <- do.call(rbind, lapply(channels, function(ch) {
-  cbind(channel = ch, marginal_roi(
-    north[[ch]], coefficient = coef(fit)[[ch]],
-    adstock = list(decay = truth$decay[[ch]]),
-    saturation = list(half_max = truth$half_max[[ch]],
-                      shape = truth$shape[[ch]])
-  ))
-}))
+marginal <- marginal_roi(north, coef(fit), spec = spec)
 marginal[, c("channel", "roi", "mroi")]
 ```
 
@@ -416,13 +411,9 @@ The data were simulated, so the fitted marginal returns can be set against the
 ones the true coefficients give:
 
 ```{r}
-true_mroi <- vapply(channels, function(ch) marginal_roi(
-  north[[ch]], coefficient = truth$beta[[ch]],
-  adstock = list(decay = truth$decay[[ch]]),
-  saturation = list(half_max = truth$half_max[[ch]],
-                    shape = truth$shape[[ch]])
-)$mroi, numeric(1))
-round(rbind(fitted = stats::setNames(marginal$mroi, marginal$channel)[channels],
+true_marginal <- marginal_roi(north, truth$beta, spec = spec)
+true_mroi <- stats::setNames(true_marginal$mroi, true_marginal$channel)
+round(rbind(fitted = stats::setNames(marginal$mroi, marginal$channel),
             truth = true_mroi), 2)
 ```
 
