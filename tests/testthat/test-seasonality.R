@@ -196,8 +196,21 @@ test_that("daily dates are flagged on the holiday itself", {
   days <- seq(as.Date("2024-12-20"), as.Date("2024-12-31"), by = "day")
   h <- as.Date(c("2024-12-25", "2024-12-26"))
   start <- holiday_flags(days, h)$holiday
-  expect_identical(days[start == 1L], h)
+  # From R 4.5, seq() can return Dates stored as integers, so compare values.
+  expect_equal(days[start == 1L], h)
   expect_identical(holiday_flags(days, h, align = "end")$holiday, start)
+})
+
+test_that("Dates stored as integers give the same terms and flags", {
+  dbl <- as.Date("2024-12-20") + 0:11
+  int <- structure(as.integer(unclass(dbl)), class = "Date")
+  h <- as.Date(c("2024-12-25", "2024-12-26"))
+  expect_identical(typeof(unclass(int)), "integer")
+  expect_equal(fourier_terms(int), fourier_terms(dbl))
+  expect_identical(holiday_flags(int, h), holiday_flags(dbl, h))
+  expect_identical(holiday_flags(dbl, structure(as.integer(unclass(h)),
+                                                class = "Date")),
+                   holiday_flags(dbl, h))
 })
 
 test_that("29 February is flagged in daily and weekly leap-year data", {
