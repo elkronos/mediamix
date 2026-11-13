@@ -23,7 +23,9 @@
 #' @param index Optional vector, the same length as `nrow(media)`, labelling the
 #'   periods. Used as the `period` column of the result; defaults to the row
 #'   numbers.
-#' @param by Optional grouping vector, the same length as `nrow(media)`.
+#' @param by Optional grouping vector, the same length as `nrow(media)`, or
+#'   a data frame of grouping columns with one row per row of `media`. With a
+#'   data frame, `group` joins each row's values with `" / "`.
 #' @param newdata Optional data frame holding every variable `model` needs, one
 #'   row per row of `media`, for periods the model was not fitted on: a holdout,
 #'   or a reporting period. The baseline is then `predict(model, newdata)`
@@ -211,7 +213,9 @@ contributions <- function(media, model, intercept = NULL, index = NULL,
                       {.arg media} ({n}), not {len}.")
     }
   }
+  by_frame <- is.data.frame(by)
   by <- .mm_check_by(by, n)
+  if (by_frame) by <- .mm_label_key(by)
 
   link <- if (bare) NULL else .mm_link(model)
   link_scale <- !is.null(link) && !identical(link, "identity")
@@ -903,7 +907,8 @@ roi <- function(contributions, spend, by = NULL, index = NULL,
                       {.arg spend} ({n}), not {nrow(x)}.", call = call)
     }
     .mm_check_key_columns(x, arg, call = call)
-    return(list(keys = .mm_paste_key(x), col = col))
+    keys <- .mm_label_key(.mm_paste_key(x, call = call), arg, call = call)
+    return(list(keys = keys, col = col))
   }
   if (!is.atomic(x) || !is.null(dim(x)) || length(x) != n) {
     cli::cli_abort(c(

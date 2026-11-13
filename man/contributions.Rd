@@ -36,7 +36,9 @@ explicitly when passing a bare coefficient vector without an
 periods. Used as the \code{period} column of the result; defaults to the row
 numbers.}
 
-\item{by}{Optional grouping vector, the same length as \code{nrow(media)}.}
+\item{by}{Optional grouping vector, the same length as \code{nrow(media)}, or
+a data frame of grouping columns with one row per row of \code{media}. With a
+data frame, \code{group} joins each row's values with \code{" / "}.}
 
 \item{newdata}{Optional data frame holding every variable \code{model} needs, one
 row per row of \code{media}, for periods the model was not fitted on: a holdout,

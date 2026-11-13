@@ -241,6 +241,23 @@
   do.call(paste, c(parts, list(sep = .mm_key_sep())))
 }
 
+# Readable group labels for output: the parts of each key joined with " / ".
+# Two different keys must not end up with the same label, since the label is
+# what later matching sees.
+#' @keywords internal
+#' @noRd
+.mm_label_key <- function(key, arg = "by", call = parent.frame()) {
+  label <- .mm_show_key(key)
+  if (length(unique(label)) != length(unique(key))) {
+    cli::cli_abort(c(
+      "Two different groups in {.arg {arg}} give the same label when their \\
+       columns are joined with {.val {' / '}}.",
+      i = "Change a value that contains {.val {' / '}}."
+    ), call = call)
+  }
+  label
+}
+
 # Split a joined key back into its parts, for display.
 #' @keywords internal
 #' @noRd

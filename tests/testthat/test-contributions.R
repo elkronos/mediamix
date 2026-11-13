@@ -504,3 +504,19 @@ test_that("roi(index =) says when a period has different row counts", {
   expect_message(roi(cp, twice, index = "date", by = "geo"),
                  "aggregate to one row per period and group")
 })
+
+test_that("a data frame of grouping columns gives readable group labels", {
+  data(mm_weekly, package = "mediamix", envir = environment())
+  fit <- stats::lm(revenue ~ tv + search, data = mm_weekly)
+  byd <- data.frame(geo = mm_weekly$geo, year = format(mm_weekly$date, "%Y"))
+  cb <- contributions(mm_weekly[c("tv", "search")], fit, by = byd)
+  expect_true("north / 2023" %in% cb$group)
+  expect_false(any(grepl("\x1f", cb$group, fixed = TRUE)))
+  r <- roi(cb, mm_weekly[c("tv", "search")], by = byd)
+  expect_setequal(unique(r$group), unique(cb$group))
+  # Labels that would merge two groups are refused.
+  bad <- data.frame(a = c("x / y", "x"), b = c("z", "y / z"))
+  expect_error(contributions(data.frame(tv = 1:2), c(tv = 1), intercept = 0,
+                             by = bad),
+               "give the same label")
+})
