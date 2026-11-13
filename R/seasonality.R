@@ -131,10 +131,12 @@ holiday_flags <- function(index, holidays, period = NULL,
   .mm_check_date_index(index)
   sets <- .mm_holiday_sets(holidays, prefix)
   .mm_check_period(period)
-  day <- as.numeric(index)
+  # Whole days: a Date with a fractional part, such as a spreadsheet serial
+  # with a time, prints as its day and is flagged as that day.
+  day <- floor(as.numeric(index))
 
   if (is.null(period)) {
-    span <- .mm_infer_period(index)
+    span <- .mm_infer_period(day)
     if (!is.finite(span)) {
       cli::cli_abort(c(
         "{.arg period} cannot be inferred from fewer than two distinct dates.",
@@ -303,5 +305,5 @@ holiday_flags <- function(index, holidays, period = NULL,
       ), call = call)
     }
   }
-  lapply(sets, function(s) sort(unique(as.numeric(s))))
+  lapply(sets, function(s) sort(unique(floor(as.numeric(s)))))
 }

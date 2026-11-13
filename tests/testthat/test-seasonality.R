@@ -373,3 +373,12 @@ test_that("holiday_flags() checks period, align and prefix", {
   expect_error(holiday_flags(d, h, align = "middle"), "should be one of")
   expect_error(holiday_flags(d, h, prefix = ""), "prefix")
 })
+
+test_that("a Date with a fractional part is flagged on the day it prints as", {
+  d <- seq(as.Date("2023-12-04"), by = 7, length.out = 5)
+  h <- as.Date("2023-12-25")
+  expect_identical(holiday_flags(as.Date(as.numeric(d) + 0.5), h),
+                   holiday_flags(d, h))
+  expect_identical(holiday_flags(d, as.Date(as.numeric(h) + 0.75)),
+                   holiday_flags(d, h))
+})
