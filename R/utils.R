@@ -262,7 +262,11 @@
 #' @keywords internal
 #' @noRd
 .mm_split_key <- function(key) {
-  strsplit(key, .mm_key_sep(), fixed = TRUE)
+  # strsplit() drops a trailing empty field, so a key whose last part is ""
+  # would lose it. Split with a sentinel field appended, then remove it.
+  sep <- .mm_key_sep()
+  lapply(strsplit(paste0(key, sep, "."), sep, fixed = TRUE),
+         function(p) p[-length(p)])
 }
 
 # Render a group key legibly in a message.

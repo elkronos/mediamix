@@ -17,8 +17,9 @@
 #' @param by Optional names of columns of `paths` that divide the journeys
 #'   into segments, such as a device column carried by the `keep` argument of
 #'   [build_paths()]. Every rule then runs on each segment's journeys alone,
-#'   so shares sum to 1 within each segment and rule, and the Markov chain is
-#'   fitted per segment. Each column must take one value per journey and have
+#'   so shares sum to 1 within each segment and rule (or are all 0 in a
+#'   segment with no conversions), and the Markov chain is fitted per
+#'   segment. Each column must take one value per journey and have
 #'   no missing values. See *Segments*.
 #' @param times Number of bootstrap replicates behind intervals on the
 #'   shares: 0, the default, for no intervals, or from 2 to 1,000,000. See
@@ -167,7 +168,10 @@ attribute <- function(paths,
     ))
   }
 
-  if (nrow(paths) == 0L) return(.mm_empty_attribution(paths, by, times))
+  if (nrow(paths) == 0L) {
+    return(.mm_as_attribution(.mm_empty_attribution(paths, by, times), by,
+                              times, level))
+  }
 
   n_channels <- length(unique(paths$channel))
   if (as.numeric(times) * n_channels * length(rules) > 1e8) {
@@ -230,6 +234,13 @@ attribute <- function(paths,
              if (times > 0L) c("lower", "upper"))
   out <- out[, c(front, setdiff(names(out), front)), drop = FALSE]
   rownames(out) <- NULL
+  .mm_as_attribution(out, by, times, level)
+}
+
+# The classes and attributes of an attribute() result, empty or not.
+#' @keywords internal
+#' @noRd
+.mm_as_attribution <- function(out, by, times, level) {
   class(out) <- c(if (times > 0L) "mm_attribution_intervals",
                   if (!is.null(by)) "mm_attribution_segments",
                   "mm_attribution", "data.frame")
@@ -406,10 +417,7 @@ attribution_spread <- function(attribution) {
   out$touches <- integer(0)
   if (is.null(by)) return(out)
   segs <- lapply(stats::setNames(by, by), function(b) paths[[b]][0])
-  out <- cbind(as.data.frame(segs, stringsAsFactors = FALSE,
-                             optional = TRUE), out)
-  attr(out, "segments") <- by
-  out
+  cbind(as.data.frame(segs, stringsAsFactors = FALSE, optional = TRUE), out)
 }
 
 # Columns of `paths` that define segments. Each must be a complete vector
@@ -593,8 +601,8 @@ attribution_spread <- function(attribution) {
   if (is.null(by)) {
     cli::cli_inform(
       "{undefined[[1L]]} of {times} replicate{?s} drew no converting \\
-       journey, so {?it defines/they define} no share and the intervals \\
-       leave {?it/them} out."
+       journey, so {cli::qty(undefined[[1L]])}{?it defines/they define} no \\
+       share and the intervals leave {?it/them} out."
     )
     return(invisible(NULL))
   }

@@ -589,3 +589,24 @@ test_that("a segment column may not share a name with an output column", {
   expect_error(attribute(p, rules = c("first", "last"), by = "spread"),
                "cannot define segments")
 })
+
+test_that("an empty journey table gives an attribution result of the same kind", {
+  p0 <- build_paths(data.frame(id = character(), ch = character(),
+                               ts = numeric(), conv = numeric(),
+                               dev = character()),
+                    "id", "ch", "ts", conversion = "conv", keep = "dev")
+  r <- attribute(p0, by = "dev", times = 10, seed = 1)
+  expect_s3_class(r, c("mm_attribution_intervals", "mm_attribution_segments",
+                       "mm_attribution"))
+  expect_identical(attr(r, "level"), 0.9)
+  expect_identical(attr(r, "times"), 10L)
+  expect_identical(attr(r, "segments"), "dev")
+  expect_equal(nrow(r), 0L)
+})
+
+test_that("a segment whose last value is empty keeps it in its label", {
+  key <- paste("mobile", "", sep = "\x1f")
+  expect_identical(mediamix:::.mm_split_key(key)[[1]], c("mobile", ""))
+  expect_identical(mediamix:::.mm_show_key(key), "mobile / ")
+  expect_identical(mediamix:::.mm_split_key("")[[1]], "")
+})

@@ -33,8 +33,9 @@ rule named twice is run once.}
 \item{by}{Optional names of columns of \code{paths} that divide the journeys
 into segments, such as a device column carried by the \code{keep} argument of
 \code{\link[=build_paths]{build_paths()}}. Every rule then runs on each segment's journeys alone,
-so shares sum to 1 within each segment and rule, and the Markov chain is
-fitted per segment. Each column must take one value per journey and have
+so shares sum to 1 within each segment and rule (or are all 0 in a
+segment with no conversions), and the Markov chain is fitted per
+segment. Each column must take one value per journey and have
 no missing values. See \emph{Segments}.}
 
 \item{times}{Number of bootstrap replicates behind intervals on the
