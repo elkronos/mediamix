@@ -1,8 +1,9 @@
 #' Assign conversion credit across a journey
 #'
 #' Five rules for dividing one conversion among the touchpoints that preceded
-#' it, plus a hook for your own. Each returns the journey table with a `credit`
-#' column added, so they compose and can be compared side by side.
+#' it, plus a hook for your own. Each returns the journey table with its own
+#' `credit` column, replacing any already there, so the results of different
+#' rules can be compared side by side.
 #'
 #' @param paths An `mm_paths` object from [build_paths()].
 #' @param first_weight,last_weight Share of credit reserved for the first and
@@ -16,11 +17,13 @@
 #' @param fn For `credit_custom()`, a function of
 #'   `(touch_rank, touch_n, recency)` returning a numeric vector of weights the
 #'   same length as its inputs. `recency` is time from each touch to the
-#'   conversion, in the journey table's units -- see the `units` argument of
-#'   [build_paths()], which sets them. `fn` is called once per *converting*
+#'   conversion, in the journey table's units, which the `units` argument of
+#'   [build_paths()] sets. `fn` is called once per *converting*
 #'   journey and never for a non-converting one, so `recency` is always
-#'   present and the weights need no missing-value handling. Weights must be
-#'   finite and non-negative; returning all zeros declines the journey.
+#'   present and the weights need no missing-value handling. The three vectors
+#'   run in `touch_rank` order, whatever the order of the rows, and the weights
+#'   are matched back to the rows in that order. Weights must be finite and
+#'   non-negative; returning all zeros declines the journey.
 #' @param normalise For `credit_custom()`, should weights be rescaled to sum to
 #'   1 within each journey? Defaults to `TRUE`. Setting it to `FALSE` breaks the
 #'   guarantee that total credit equals total conversions, and is only sensible
@@ -33,13 +36,13 @@
 #'
 #'   The five built-in rules always assign positive weight somewhere, so for
 #'   them total credit always equals the number of converting journeys.
-#'   `credit_custom()` can decline a journey by returning all-zero weights --
-#'   see its entry under *Custom rules*.
+#'   `credit_custom()` can decline a journey by returning all-zero weights;
+#'   see *Custom rules*.
 #'
 #' @details
-#' `credit_first()` and `credit_last()` are the two defaults most reporting
-#' systems ship with, and they disagree with each other by design: comparing
-#' them is the cheapest read on whether a channel opens journeys or closes them.
+#' `credit_first()` and `credit_last()` are the simplest rules, and they
+#' disagree with each other by design: comparing them is the cheapest read on
+#' whether a channel opens journeys or closes them.
 #' [attribute()] runs several rules at once for exactly this reason.
 #'
 #' `credit_position()` gives the first and last touch a fixed share and splits
@@ -51,17 +54,19 @@
 #' `credit_time_decay()` is [adstock_geometric()] run backwards. Adstock takes
 #' one impulse of spend and spreads its effect forward in time with geometric
 #' decay; time-decay attribution takes one conversion and spreads its credit
-#' backward across prior touchpoints with the same geometric kernel. Same
-#' arithmetic, opposite arrow, and the same `decay` vocabulary in both
-#' directions.
+#' backward across prior touchpoints with the same geometric kernel. The
+#' arithmetic is the same with the arrow reversed, and `decay` means the same
+#' thing in both directions. With `decay = 0` there is no carryover, and all
+#' the credit goes to the most recent touch, shared equally when several
+#' touches tie.
 #'
 #' @section Custom rules:
 #' `credit_custom()` takes a function of `(touch_rank, touch_n, recency)` and is
 #' called once per converting journey, with vectors as long as that journey.
 #' Non-converting journeys are never passed to it; they always get zero.
 #'
-#' A rule that qualifies only some touches -- "credit only touches within a day
-#' of conversion", say -- will meet journeys where *nothing* qualifies. When
+#' A rule that qualifies only some touches, such as "credit only touches within
+#' a day of conversion", will meet journeys where *nothing* qualifies. When
 #' `fn` returns all zeros for a journey, that journey receives no credit at all
 #' and is counted in a message. Crediting its touches equally instead would
 #' invent an answer the rule never gave, and it is a surprisingly easy way to
@@ -108,28 +113,28 @@ NULL
 #' @rdname credit
 #' @export
 credit_linear <- function(paths) {
-  .mm_check_paths(paths)
+  paths <- .mm_check_paths(paths)
   .mm_assign_credit(paths, function(rank, n, recency) rep(1 / n[1L], length(rank)))
 }
 
 #' @rdname credit
 #' @export
 credit_first <- function(paths) {
-  .mm_check_paths(paths)
+  paths <- .mm_check_paths(paths)
   .mm_assign_credit(paths, function(rank, n, recency) as.numeric(rank == 1L))
 }
 
 #' @rdname credit
 #' @export
 credit_last <- function(paths) {
-  .mm_check_paths(paths)
+  paths <- .mm_check_paths(paths)
   .mm_assign_credit(paths, function(rank, n, recency) as.numeric(rank == n))
 }
 
 #' @rdname credit
 #' @export
 credit_position <- function(paths, first_weight = 0.4, last_weight = 0.4) {
-  .mm_check_paths(paths)
+  paths <- .mm_check_paths(paths)
   first_weight <- .mm_check_scalar(first_weight, "first_weight", lower = 0, upper = 1)
   last_weight <- .mm_check_scalar(last_weight, "last_weight", lower = 0, upper = 1)
   if (first_weight + last_weight > 1) {
@@ -159,7 +164,7 @@ credit_position <- function(paths, first_weight = 0.4, last_weight = 0.4) {
 #' @export
 credit_time_decay <- function(paths, decay = decay_from_half_life(7),
                               period = 1) {
-  .mm_check_paths(paths)
+  paths <- .mm_check_paths(paths)
   decay <- .mm_check_scalar(decay, "decay", lower = 0, upper = 1,
                             inclusive = c(TRUE, FALSE))
   period <- .mm_check_scalar(period, "period", lower = 0,
@@ -169,14 +174,16 @@ credit_time_decay <- function(paths, decay = decay_from_half_life(7),
     k <- length(rank)
     if (anyNA(recency)) return(rep(1 / k, k))
     if (decay == 0) {
-      # No carryover at all: everything goes to the touch at the moment of
-      # conversion. `0^0` is 1 and `0^positive` is 0, which is exactly this.
-      w <- as.numeric(recency <= 0)
-      return(if (sum(w) > 0) w / sum(w) else c(rep(0, k - 1L), 1))
+      # No carryover at all: everything goes to the most recent touch, which
+      # is the touch at the moment of conversion unless filtering removed it.
+      # Comparing with the minimum rather than with zero keeps the answer
+      # independent of row order when no touch has zero recency.
+      w <- as.numeric(recency == min(recency))
+      return(w / sum(w))
     }
     # Normalise in log space. Evaluating decay^(recency/period) directly
-    # underflows to all-zero once recency/period passes a few hundred -- which
-    # a journey table in seconds reaches easily -- and an all-zero kernel
+    # underflows to all-zero once recency/period passes a few hundred, which
+    # a journey table in seconds reaches easily, and an all-zero kernel
     # cannot be normalised into the geometric weights the rule specifies.
     lw <- (recency / period) * log(decay)
     lw <- lw - max(lw)
@@ -188,7 +195,7 @@ credit_time_decay <- function(paths, decay = decay_from_half_life(7),
 #' @rdname credit
 #' @export
 credit_custom <- function(paths, fn, normalise = TRUE) {
-  .mm_check_paths(paths)
+  paths <- .mm_check_paths(paths)
   if (!is.function(fn)) cli::cli_abort("{.arg fn} must be a function.")
   .mm_check_flag(normalise, "normalise")
   .mm_assign_credit(paths, fn, normalise = normalise, user_supplied = TRUE)
@@ -199,7 +206,7 @@ credit_custom <- function(paths, fn, normalise = TRUE) {
 #' @keywords internal
 #' @noRd
 .mm_assign_credit <- function(paths, fn, normalise = TRUE,
-                              user_supplied = FALSE, call = parent.frame(2)) {
+                              user_supplied = FALSE, call = parent.frame()) {
   if (nrow(paths) == 0L) {
     paths$credit <- numeric(0)
     paths$credit_value <- numeric(0)
@@ -208,7 +215,11 @@ credit_custom <- function(paths, fn, normalise = TRUE) {
 
   cred <- numeric(nrow(paths))
   declined <- 0L
-  idx <- split(seq_len(nrow(paths)), paths$path_id)
+  # Row indices of each journey in touch_rank order, so that every rule sees
+  # a journey's touches first to last whatever the order of the rows.
+  o <- order(paths$path_id, paths$touch_rank, method = "radix")
+  pid <- paths$path_id[o]
+  idx <- split(o, factor(pid, levels = unique(pid)))
   rank <- paths$touch_rank
   n <- paths$touch_n
   rec <- paths$time_to_conversion

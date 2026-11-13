@@ -178,3 +178,48 @@ test_that("credit_custom errors when fn returns the wrong length, or negative/NA
   ok <- credit_custom(p, function(rank, n, recency) as.numeric(recency <= 1))
   expect_equal(sum(ok$credit), 1)
 })
+
+# ---- row order does not change credit ---------------------------------------
+
+test_that("time decay with decay = 0 credits the most recent touch whatever the row order", {
+  # The conversion row is direct traffic and is dropped, so no remaining touch
+  # has zero recency.
+  ev <- data.frame(id = "a", ch = c("search", "email", "direct"),
+                   ts = c(1, 2, 3), conv = c(0, 0, 1))
+  p <- build_paths(ev, id = "id", channel = "ch", timestamp = "ts",
+                   conversion = "conv", direct = "drop")
+  expect_identical(p$time_to_conversion, c(2, 1))
+  td <- credit_time_decay(p, decay = 0)
+  td_rev <- credit_time_decay(p[2:1, ], decay = 0)
+  expect_equal(td$credit[td$channel == "email"], 1)
+  expect_equal(td_rev$credit[td_rev$channel == "email"], 1)
+  expect_equal(sum(td_rev$credit), 1)
+
+  # Ties at the minimum share the credit.
+  tie <- data.frame(id = "b", ch = c("x", "y", "z"), ts = c(1, 2, 2),
+                    conv = c(0, 0, 0))
+  tie$conv[3L] <- 1
+  pt <- build_paths(tie, id = "id", channel = "ch", timestamp = "ts",
+                    conversion = "conv")
+  expect_equal(credit_time_decay(pt, decay = 0)$credit, c(0, 0.5, 0.5))
+})
+
+test_that("credit_custom() sees each journey in touch_rank order", {
+  ev <- data.frame(id = c("a", "a", "a", "b", "b"),
+                   ch = c("x", "y", "z", "x", "y"),
+                   ts = c(1, 2, 3, 1, 2), conv = c(0, 0, 1, 0, 1))
+  p <- build_paths(ev, id = "id", channel = "ch", timestamp = "ts",
+                   conversion = "conv")
+  shuffled <- p[c(5, 3, 1, 4, 2), ]
+  seen <- list()
+  first_only <- credit_custom(shuffled, function(rank, n, recency) {
+    seen[[length(seen) + 1L]] <<- rank
+    as.numeric(rank == 1L)
+  })
+  expect_true(all(vapply(seen, function(r) !is.unsorted(r), logical(1))))
+  expect_equal(first_only$credit[first_only$touch_rank == 1L], c(1, 1))
+  expect_equal(sum(first_only$credit), 2)
+  # Errors from a custom rule name the function the user called.
+  err <- expect_error(credit_custom(p, function(rank, n, recency) 1))
+  expect_identical(as.character(err$call[[1L]]), "credit_custom")
+})

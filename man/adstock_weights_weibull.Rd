@@ -18,28 +18,31 @@ period. Unlike the geometric kernel, Weibull adstock has no infinite form:
 \code{max_lag} is required and must be finite.}
 
 \item{shape}{Weibull shape parameter, positive. In the \code{"pdf"} form,
-\code{shape > 1} produces a delayed peak and \code{shape <= 1} produces a
-monotonically decaying kernel. In the \code{"cdf"} form, larger values produce a
-flatter plateau followed by a sharper drop.}
+\code{shape <= 1} produces a monotonically decaying kernel, and \code{shape > 1}
+allows a delayed peak without guaranteeing one: see \emph{Details} for when the
+peak moves past the period of spend. In the \code{"cdf"} form, larger values
+produce a flatter plateau followed by a sharper drop.}
 
 \item{scale}{Weibull scale parameter, positive, measured in periods. Larger
 values stretch the kernel over more periods.}
 
 \item{type}{Either \code{"cdf"} (default) or \code{"pdf"}. See \emph{Details}.}
 
-\item{normalise}{Should the weights sum to 1? When \code{FALSE}, weights are
-scaled so the largest is 1, matching the unnormalised geometric convention.}
+\item{normalise}{Should the weights sum to 1? Defaults to \code{TRUE}. When
+\code{FALSE}, weights are scaled so the largest is 1, matching the unnormalised
+geometric convention.}
 }
 \value{
 A numeric vector of length \code{max_lag}, ordered from the current period
 to the most distant lag.
 }
 \description{
-A two-parameter kernel that, unlike the geometric kernel, can place its peak
-\emph{after} the period in which the money was spent. Television, cinema and
-out-of-home routinely behave this way: the response builds for a week or two
-before it turns over. A geometric kernel cannot represent that shape at any
-decay rate.
+A two-parameter kernel whose \code{"pdf"} form, unlike the geometric kernel, can
+place its peak \emph{after} the period in which the money was spent.
+Television, cinema and out-of-home often behave this way: the response
+builds for a week or two before it turns over. A geometric kernel cannot
+represent that shape at any decay rate. The default \code{"cdf"} form decays
+monotonically.
 }
 \details{
 The two forms answer different questions.
@@ -48,28 +51,36 @@ The \code{"cdf"} form builds the kernel as a cumulative product of Weibull
 survival values. Numbering lags from 1 so that \eqn{w_1} is the period of
 spend, \eqn{w_i = \prod_{j<i} (1 - F(j))}, where \eqn{F} is the Weibull
 distribution function, so \eqn{w_1 = 1} and each later weight is the
-previous one times \eqn{1 - F(j)}. Read \eqn{1 - F(j)} as a time-varying
-retention rate: it plays the role that the constant \eqn{\theta} plays in
-the geometric kernel, which is the sense in which this form \emph{generalises}
-geometric decay. It is always monotonically decreasing, but the rate of
-decay can itself change over time. Note that the kernel is the running
-product of these values, not the Weibull survival function itself, so it
-falls faster than \eqn{1 - F(i)}. The construction is the one Robyn calls
-\code{"weibull_cdf"}; Robyn, however, expresses \code{scale} as a quantile of the
-window length rather than in periods, so its fitted scale values are not
-directly comparable with this function's.
+previous one times \eqn{1 - F(i - 1)}. Read \eqn{1 - F(j)} as a
+time-varying retention rate: it plays the role that the constant
+\eqn{\theta} plays in the geometric kernel, which is the sense in which this
+form \emph{generalises} geometric decay. It is always monotonically decreasing,
+but the rate of decay can itself change over time. The kernel is the
+running product of these values rather than the Weibull survival function
+\eqn{1 - F(i)}, and its tail falls away much faster. The construction is
+the one Robyn calls \code{"weibull_cdf"}. Robyn expresses \code{scale} as a
+quantile of the series length rather than in periods; \code{\link[=from_robyn]{from_robyn()}}
+converts it.
 
 The \code{"pdf"} form uses the Weibull density directly, \eqn{w_i \propto f(i)}.
 This is the form that permits a delayed peak, and it is the reason to reach
 for Weibull adstock at all. With \code{shape <= 1} it collapses back to a
-monotone decay.
+monotone decay. Lags are numbered from 1 here too, so the period of spend
+carries \eqn{f(1)} and the next period \eqn{f(2)}, and the kernel peaks
+after the period of spend only when \eqn{f(2) > f(1)}. That needs
+\code{shape > 1} and a Weibull mode, \code{scale * ((shape - 1) / shape)^(1 / shape)},
+of roughly 1.5 or more (1.47 at \code{shape = 2}, rising towards 2 as \code{shape}
+grows). With \code{shape = 2}, \code{scale = 2} puts the mode at 1.41 and the kernel
+still peaks in the period of spend; \code{scale = 3} moves the peak one period
+later. A density that is numerically zero at every lag, with all its mass
+beyond \code{max_lag} or before the first lag, is an error.
 }
 \examples{
 # Monotone decay, a flexible generalisation of geometric
 round(adstock_weights_weibull(8, shape = 2, scale = 3, type = "cdf"), 4)
 
-# Delayed peak: most weight lands one period after the spend, not in the
-# period of spend itself. No geometric decay rate can do this.
+# Delayed peak: the largest single weight lands one period after the spend,
+# not in the period of spend itself. No geometric decay rate can do this.
 w <- adstock_weights_weibull(8, shape = 2, scale = 3, type = "pdf")
 round(w, 4)
 which.max(w)

@@ -14,9 +14,22 @@ what the null state is estimated from.}
 \value{
 A data frame with one row per channel, ordered by descending
 \code{conversions}: \code{channel}, \code{removal_effect}, \code{conversions} (credited),
-\code{share}, and \code{value} when the journey table carries conversion values.
-The baseline conversion probability is attached as the attribute
-\code{"p_conversion"}.
+\code{share}, \code{value} when the journey table carries conversion values, and
+\code{p_without}, the probability of conversion once the channel is removed.
+Three attributes let you check the removal effects by hand:
+\describe{
+\item{\code{p_conversion}}{The baseline conversion probability.
+\code{removal_effect} is \code{1 - p_without / p_conversion}, or 0 when no
+journey converts.}
+\item{\code{transitions}}{The fitted first-order transition matrix, with one
+row for each state a walk can leave (\code{"(start)"} and every channel)
+and one column for each state it can enter (every channel,
+\code{"(conversion)"} and \code{"(null)"}). Each row sums to 1.}
+\item{\code{transition_counts}}{The transitions observed, in the same
+layout, from which \code{transitions} is estimated.}
+}
+A zero-row journey table gives a zero-row result without these
+attributes.
 }
 \description{
 Data-driven attribution from a first-order Markov model of the journey
@@ -31,13 +44,24 @@ are then divided among channels in proportion to their removal effects.
 The probabilities come from the absorbing-chain fundamental matrix, so they
 are exact for the fitted transition matrix rather than simulated: with
 \eqn{Q} the transitions among transient states and \eqn{R} those into the
-absorbing states, absorption probabilities are \eqn{(I - Q)^{-1} R}.
+absorbing states, absorption probabilities are \eqn{(I - Q)^{-1} R}. One
+inverse serves every channel. Once channel \eqn{s} is removed, a walk
+converts only if it converts without reaching \eqn{s}, so with
+\eqn{N = (I - Q)^{-1}} and \eqn{x = N R} the conversion probability is
+\eqn{x_1 - (N_{1s} / N_{ss}) x_s}, where \eqn{N_{1s} / N_{ss}} is the
+probability of ever reaching \eqn{s} from the start and \eqn{x_s} that of
+converting from \eqn{s}. That probability is the \code{p_without} column.
+
+A channel named \code{"(start)"}, \code{"(conversion)"} or \code{"(null)"} shares its
+label with a special state in \code{transitions}; index the matrix by position
+in that case.
 
 This is the order-1 model, with no dependency beyond base R. For
 higher-order chains, or journey tables with millions of distinct paths,
 hand the output of \code{\link[=as_channel_paths]{as_channel_paths()}} to \pkg{ChannelAttribution}, whose
-\code{markov_model()} implements the same removal-effect definition in C++. The
-two should agree for \code{order = 1}.
+\code{markov_model()} implements the same removal-effect definition in C++. For
+\code{order = 1} the two agree up to the error of \pkg{ChannelAttribution}'s
+simulation.
 
 Removal effects are sensitive to journey construction: repeats collapsed or
 not, direct traffic kept or dropped, lookback length. That is the argument
@@ -66,7 +90,13 @@ ev <- data.frame(
 )
 p <- build_paths(ev, id = "id", channel = "ch", timestamp = "ts",
                  conversion = "conv")
-markov_removal(p)
+mk <- markov_removal(p)
+mk
+
+# The fitted chain behind those numbers
+attr(mk, "transitions")
+attr(mk, "p_conversion")
+1 - mk$p_without / attr(mk, "p_conversion")
 
 data(mm_events)
 paths <- build_paths(mm_events, id = "customer_id", channel = "channel",

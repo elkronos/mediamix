@@ -1,14 +1,6 @@
 # Tests for R/path-diagnostics.R: path_summary(), path_lengths(),
 # channel_positions(), assisted_conversions(), top_paths(), conversion_lag(),
 # path_diagnostics().
-#
-# NOTE: assisted_conversions() (and therefore path_diagnostics(), which calls
-# it) errors on a journey table whose channel column contains a literal ""
-# value -- see the bug reported in the test-suite summary. mm_events, built
-# with the default direct = "keep", contains such a channel. Scale tests below
-# that touch assisted_conversions()/path_diagnostics() therefore build paths
-# with direct = "label" to sidestep that bug; this is orthogonal to what is
-# being tested here.
 
 # ---- shapes and no-error-on-zero-rows, across every diagnostic -------------
 
@@ -147,16 +139,60 @@ test_that("assisted_conversions() counts ordered channel pairs within converting
   m_norm <- assisted_conversions(p, normalise = TRUE)
   expect_equal(m_norm["A", "B"], 1)  # A appears in 1 journey, assisted B once
 
-  # At scale (avoiding the "" channel that build_paths(..., direct = "keep")
-  # would otherwise carry through from mm_events)
+  # At scale, on the default direct = "keep" path, which names blank and
+  # missing labels "(blank)" and "(missing)"
   data(mm_events)
   paths <- build_paths(mm_events, id = "customer_id", channel = "channel",
-                        timestamp = "timestamp", conversion = "conversion",
-                        direct = "label")
+                        timestamp = "timestamp", conversion = "conversion")
   ac <- expect_no_error(assisted_conversions(paths))
-  chans <- sort(unique(paths$channel))
+  chans <- sort(unique(paths$channel), method = "radix")
   expect_identical(dim(ac), c(length(chans), length(chans)))
   expect_identical(rownames(ac), chans)
+})
+
+test_that("assisted_conversions() matches a pairwise count and scales with journey length", {
+  # Reference: every ordered pair of touches, counted once per journey.
+  brute <- function(p) {
+    p <- p[p$converted, ]
+    chans <- sort(unique(p$channel), method = "radix")
+    m <- matrix(0, length(chans), length(chans),
+                dimnames = list(assisting = chans, assisted = chans))
+    for (j in split(seq_len(nrow(p)), p$path_id)) {
+      ch <- p$channel[j][order(p$touch_rank[j])]
+      hit <- matrix(FALSE, length(chans), length(chans))
+      for (a in seq_along(ch)) for (b in seq_along(ch)) {
+        if (a < b) hit[match(ch[a], chans), match(ch[b], chans)] <- TRUE
+      }
+      m <- m + hit
+    }
+    m
+  }
+  set.seed(11)
+  ev <- data.frame(id = sample(letters[1:12], 150, replace = TRUE),
+                   ch = sample(c("p", "q", "r", "s"), 150, replace = TRUE),
+                   ts = runif(150, 0, 100))
+  ev$conv <- as.numeric(runif(150) < 0.15)
+  p <- build_paths(ev, id = "id", channel = "ch", timestamp = "ts",
+                   conversion = "conv", collapse_repeats = FALSE)
+  expect_equal(assisted_conversions(p), brute(p))
+
+  # One journey of 6,000 touches. Pairing every touch needed 36 million rows.
+  n <- 6000
+  long <- data.frame(id = "a", ch = rep(c("a", "b", "c", "d", "e"), length.out = n),
+                     ts = seq_len(n), conv = c(rep(0, n - 1), 1))
+  pl <- build_paths(long, id = "id", channel = "ch", timestamp = "ts",
+                    conversion = "conv", collapse_repeats = FALSE)
+  elapsed <- system.time(m <- assisted_conversions(pl))[["elapsed"]]
+  expect_lt(elapsed, 1)
+  expect_true(all(m == 1))
+})
+
+test_that("channel_positions() returns plain row names", {
+  data(mm_events)
+  paths <- build_paths(mm_events, id = "customer_id", channel = "channel",
+                       timestamp = "timestamp", conversion = "conversion")
+  pos <- channel_positions(paths)
+  expect_identical(rownames(pos), as.character(seq_len(nrow(pos))))
 })
 
 # ---- top_paths() --------------------------------------------------------------
@@ -180,6 +216,21 @@ test_that("top_paths() orders by descending frequency and reports conversion rat
   expect_true(all(tp_conv_only$conversion_rate == 1))
 })
 
+test_that("top_paths() validates sep and refuses one that occurs in a channel name", {
+  ev <- data.frame(cust = c("a", "a", "b"), ch = c("x", "y", "x > y"),
+                   ts = as.POSIXct("2024-01-01", tz = "UTC") + c(0, 1, 0),
+                   conv = c(0, 1, 1))
+  p <- build_paths(ev, id = "cust", channel = "ch", timestamp = "ts",
+                   conversion = "conv")
+  # Journey a is x then y; journey b is the one channel "x > y". With " > "
+  # both render as "x > y" and would be counted as one path.
+  expect_error(top_paths(p), "occurs inside")
+  tp <- top_paths(p, sep = " | ")
+  expect_setequal(tp$path, c("x | y", "x > y"))
+  expect_error(top_paths(p, sep = 1), "single string")
+  expect_error(top_paths(p, sep = ""), "single string")
+})
+
 # ---- conversion_lag() ---------------------------------------------------------
 
 test_that("conversion_lag() reports quantiles of time-to-conversion for converting journeys only", {
@@ -200,13 +251,33 @@ test_that("conversion_lag() reports quantiles of time-to-conversion for converti
   expect_identical(attr(cl, "units"), "days")
 })
 
+test_that("conversion_lag() validates probs and warns on a table built with a lookback", {
+  ev <- data.frame(cust = "a", ch = c("X", "Y"),
+                   ts = as.POSIXct("2024-01-01", tz = "UTC") + c(0, 4) * 86400,
+                   conv = c(0, 1))
+  p <- build_paths(ev, id = "cust", channel = "ch", timestamp = "ts",
+                   conversion = "conv")
+  expect_error(conversion_lag(p, probs = NA), "probabilities")
+  expect_error(conversion_lag(p, probs = c(0.5, 2)), "probabilities")
+  expect_error(conversion_lag(p, probs = "a"), "probabilities")
+  expect_error(conversion_lag(p, probs = numeric(0)), "probabilities")
+
+  windowed <- build_paths(ev, id = "cust", channel = "ch", timestamp = "ts",
+                          conversion = "conv", lookback = 2)
+  expect_warning(cl <- conversion_lag(windowed), "lookback")
+  expect_equal(cl$lag[cl$quantile == 1], 0)
+  expect_no_warning(conversion_lag(
+    build_paths(ev, id = "cust", channel = "ch", timestamp = "ts",
+                conversion = "conv", lookback = Inf)
+  ))
+})
+
 # ---- path_diagnostics() convenience wrapper --------------------------------
 
 test_that("path_diagnostics() bundles every diagnostic and matches calling them directly", {
   data(mm_events)
   paths <- build_paths(mm_events, id = "customer_id", channel = "channel",
-                        timestamp = "timestamp", conversion = "conversion",
-                        direct = "label")
+                        timestamp = "timestamp", conversion = "conversion")
   diag <- path_diagnostics(paths, n = 5)
 
   expect_equal(diag$summary, path_summary(paths))

@@ -4,6 +4,9 @@
 \alias{mediamix_params}
 \alias{carryover_decay}
 \alias{carryover_max_lag}
+\alias{carryover_shape}
+\alias{carryover_scale}
+\alias{carryover_peak}
 \alias{saturation_half_max}
 \alias{saturation_shape}
 \title{Tuning parameters for media transforms}
@@ -11,6 +14,12 @@
 carryover_decay(range = c(0, 0.95), trans = NULL)
 
 carryover_max_lag(range = c(1L, 26L), trans = NULL)
+
+carryover_shape(range = c(0.5, 5), trans = NULL)
+
+carryover_scale(range = c(0.5, 10), trans = NULL)
+
+carryover_peak(range = c(0, 4), trans = NULL)
 
 saturation_half_max(range = c(0.05, 1), trans = NULL)
 
@@ -26,11 +35,12 @@ A \code{dials} parameter object.
 }
 \description{
 \pkg{dials} parameter objects for the quantities \code{\link[=step_adstock]{step_adstock()}} and
-\code{\link[=step_saturation]{step_saturation()}} expose to tuning. Having these is the entire reason to be
-a recipe step rather than a function you call beforehand: they let carryover
-decay, saturation shape and a model's own penalty be tuned \emph{jointly}, in one
-\code{tune::tune_bayes()} call over proper rolling-origin resampling, rather than
-fixing the transform parameters by eye and tuning only the model.
+\code{\link[=step_saturation]{step_saturation()}} expose to tuning. They are one reason for the
+transforms to be recipe steps rather than functions you call beforehand:
+they let carryover decay, saturation shape and a model's own penalty be
+tuned \emph{jointly}, in one \code{tune::tune_bayes()} call over proper rolling-origin
+resampling, rather than fixing the transform parameters by eye and tuning
+only the model.
 }
 \details{
 \code{carryover_decay()} spans \verb{[0, 0.95]} rather than \verb{[0, 1)}. The upper bound
@@ -42,11 +52,22 @@ intercept.
 \code{carryover_max_lag()} spans 1 to 26 periods. It is finite by necessity:
 \code{Inf} is a legitimate value for \code{\link[=step_adstock]{step_adstock()}} but not a tunable one, since
 a search cannot propose an infinite integer. So tuning \code{max_lag} over a
-finite grid and leaving it fixed at \code{Inf} are genuinely different searches --
+finite grid and leaving it fixed at \code{Inf} are genuinely different searches:
 the first over truncated kernels, the second over the recursive one. Most of
 the time, tuning \code{decay} with \code{max_lag = Inf} is the better use of the
 budget: the truncation point is usually a modelling decision rather than
 something the data speaks to.
+
+\code{carryover_shape()} and \code{carryover_scale()} are the shape and scale of
+\code{\link[=step_adstock]{step_adstock()}}'s Weibull kernel. The shape spans \verb{[0.5, 5]} and the
+scale \verb{[0.5, 10]} periods. Over those ranges the kernel keeps some weight at
+its first lag in both forms and at every \code{max_lag}, so no candidate is
+rejected as a kernel that is zero everywhere. \code{carryover_peak()} is the
+delayed kernel's peak lag, from 0 to 4 periods. A peak must not pass
+\code{max_lag - 1}, so \code{\link[=step_adstock]{step_adstock()}} stops this range there when \code{max_lag} is
+fixed, and starts a tuned \code{max_lag} above the largest peak. For the delayed
+kernel it also narrows \code{carryover_decay()} to \verb{[0.05, 0.95]}, since that
+kernel needs a positive retention rate.
 
 \code{saturation_half_max()} is a fraction of each column's reference level, so
 its range is unitless and comparable across channels. See
@@ -54,10 +75,12 @@ its range is unitless and comparable across channels. See
 
 \code{saturation_shape()} spans \verb{[0.5, 3]}. Values above 1 give an S-shaped
 response with a threshold below which media barely registers; below 1 the
-curve bends harder than a plain hyperbola. Note that
-\code{\link[=step_saturation]{step_saturation()}} narrows this range to \verb{(0.1, 1]} when
-\code{type = "power"}, where \code{shape} is the exponent itself and a value above 1
-would not be saturating at all.
+curve bends harder than a plain hyperbola. \code{\link[=step_saturation]{step_saturation()}} narrows
+this range to \verb{[0.1, 1]} when \code{type = "power"}, where \code{shape} is the
+exponent itself and a value above 1 would not be saturating at all. It
+offers \code{saturation_shape()} only for the Hill and power curves and
+\code{saturation_half_max()} only for the three curves with a half-saturation
+point, since the others ignore them.
 }
 \examples{
 \dontshow{if (requireNamespace("dials", quietly = TRUE)) (if (getRversion() >= "3.4") withAutoprint else force)(\{ # examplesIf}
@@ -66,6 +89,9 @@ dials::value_seq(carryover_decay(), 5)
 
 saturation_shape()
 dials::grid_regular(carryover_decay(), saturation_shape(), levels = 3)
+
+# The Weibull kernel's two parameters
+dials::grid_regular(carryover_shape(), carryover_scale(), levels = 3)
 \dontshow{\}) # examplesIf}
 }
 \seealso{

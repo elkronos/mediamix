@@ -14,21 +14,45 @@
 #'
 #' @return A data frame with one row per channel, ordered by descending
 #'   `conversions`: `channel`, `removal_effect`, `conversions` (credited),
-#'   `share`, and `value` when the journey table carries conversion values.
-#'   The baseline conversion probability is attached as the attribute
-#'   `"p_conversion"`.
+#'   `share`, `value` when the journey table carries conversion values, and
+#'   `p_without`, the probability of conversion once the channel is removed.
+#'   Three attributes let you check the removal effects by hand:
+#'   \describe{
+#'     \item{`p_conversion`}{The baseline conversion probability.
+#'       `removal_effect` is `1 - p_without / p_conversion`, or 0 when no
+#'       journey converts.}
+#'     \item{`transitions`}{The fitted first-order transition matrix, with one
+#'       row for each state a walk can leave (`"(start)"` and every channel)
+#'       and one column for each state it can enter (every channel,
+#'       `"(conversion)"` and `"(null)"`). Each row sums to 1.}
+#'     \item{`transition_counts`}{The transitions observed, in the same
+#'       layout, from which `transitions` is estimated.}
+#'   }
+#'   A zero-row journey table gives a zero-row result without these
+#'   attributes.
 #'
 #' @details
 #' The probabilities come from the absorbing-chain fundamental matrix, so they
 #' are exact for the fitted transition matrix rather than simulated: with
 #' \eqn{Q} the transitions among transient states and \eqn{R} those into the
-#' absorbing states, absorption probabilities are \eqn{(I - Q)^{-1} R}.
+#' absorbing states, absorption probabilities are \eqn{(I - Q)^{-1} R}. One
+#' inverse serves every channel. Once channel \eqn{s} is removed, a walk
+#' converts only if it converts without reaching \eqn{s}, so with
+#' \eqn{N = (I - Q)^{-1}} and \eqn{x = N R} the conversion probability is
+#' \eqn{x_1 - (N_{1s} / N_{ss}) x_s}, where \eqn{N_{1s} / N_{ss}} is the
+#' probability of ever reaching \eqn{s} from the start and \eqn{x_s} that of
+#' converting from \eqn{s}. That probability is the `p_without` column.
+#'
+#' A channel named `"(start)"`, `"(conversion)"` or `"(null)"` shares its
+#' label with a special state in `transitions`; index the matrix by position
+#' in that case.
 #'
 #' This is the order-1 model, with no dependency beyond base R. For
 #' higher-order chains, or journey tables with millions of distinct paths,
 #' hand the output of [as_channel_paths()] to \pkg{ChannelAttribution}, whose
-#' `markov_model()` implements the same removal-effect definition in C++. The
-#' two should agree for `order = 1`.
+#' `markov_model()` implements the same removal-effect definition in C++. For
+#' `order = 1` the two agree up to the error of \pkg{ChannelAttribution}'s
+#' simulation.
 #'
 #' Removal effects are sensitive to journey construction: repeats collapsed or
 #' not, direct traffic kept or dropped, lookback length. That is the argument
@@ -64,7 +88,13 @@
 #' )
 #' p <- build_paths(ev, id = "id", channel = "ch", timestamp = "ts",
 #'                  conversion = "conv")
-#' markov_removal(p)
+#' mk <- markov_removal(p)
+#' mk
+#'
+#' # The fitted chain behind those numbers
+#' attr(mk, "transitions")
+#' attr(mk, "p_conversion")
+#' 1 - mk$p_without / attr(mk, "p_conversion")
 #'
 #' data(mm_events)
 #' paths <- build_paths(mm_events, id = "customer_id", channel = "channel",
@@ -73,81 +103,128 @@
 #' markov_removal(paths)
 #' @export
 markov_removal <- function(paths) {
-  .mm_check_paths(paths)
+  paths <- .mm_check_paths(paths)
+  .mm_markov_removal(paths)
+}
+
+# ---- internals ---------------------------------------------------------------
+
+# markov_removal() on a checked journey table. With `warn = FALSE` a table
+# without non-converting journeys is left for the caller to report.
+#' @keywords internal
+#' @noRd
+.mm_markov_removal <- function(paths, warn = TRUE) {
   empty <- data.frame(channel = character(0), removal_effect = numeric(0),
                       conversions = numeric(0), share = numeric(0),
-                      stringsAsFactors = FALSE)
+                      p_without = numeric(0), stringsAsFactors = FALSE)
   if (nrow(paths) == 0L) return(empty)
 
-  p <- paths[order(paths$path_id, paths$touch_rank), , drop = FALSE]
-  p <- as.data.frame(p)
-  chans <- sort(unique(p$channel))
+  p <- as.data.frame(paths)
+  p <- p[order(p$path_id, p$touch_rank, method = "radix"), , drop = FALSE]
+  chans <- sort(unique(p$channel), method = "radix")
   k <- length(chans)
-  # State indices: 1 = start, 2..k+1 = channels, k+2 = conversion, k+3 = null.
-  conv_s <- k + 2L
-  null_s <- k + 3L
-  code <- match(p$channel, chans) + 1L
+  walks <- .mm_markov_walks(p, chans)
+  counts <- .mm_markov_counts(walks$cell, k)
 
   first <- !duplicated(p$path_id)
-  last <- !duplicated(p$path_id, fromLast = TRUE)
-  from <- c(rep(1L, sum(first)), code[!last], code[last])
-  to <- c(code[first], code[-1L][!last[-length(last)]],
-          ifelse(p$converted[last], conv_s, null_s))
-  counts <- matrix(0, k + 3L, k + 3L)
-  agg <- stats::aggregate(list(n = rep(1, length(from))),
-                          by = list(from = from, to = to), FUN = sum)
-  counts[cbind(agg$from, agg$to)] <- agg$n
-
   n_conv <- sum(first & p$converted)
   n_null <- sum(first & !p$converted)
-  if (n_null == 0L) {
+  if (warn && n_null == 0L) {
     cli::cli_warn(c(
       "The journey table has no non-converting journeys.",
-      i = "Without them the null state is never observed, and every removal \\
-           effect is overstated.",
+      i = "Without them the null state is never observed, so the baseline \\
+           conversion probability is 1 and each removal effect moves up or \\
+           down, depending on how the missing journeys differ.",
       i = "Build the paths with {.code keep_null_paths = TRUE}."
     ))
   }
-  if (n_conv == 0L) {
-    out <- data.frame(channel = chans, removal_effect = 0, conversions = 0,
-                      share = 0, stringsAsFactors = FALSE)
-    attr(out, "p_conversion") <- 0
-    return(out)
-  }
 
-  p_conv <- function(removed = NULL) {
-    cm <- counts
-    if (!is.null(removed)) {
-      # Everything that would have entered the removed state is lost.
-      cm[, null_s] <- cm[, null_s] + cm[, removed]
-      cm[, removed] <- 0
-      cm[removed, ] <- 0
-    }
-    rs <- rowSums(cm)
-    live <- which(rs[seq_len(k + 1L)] > 0)
-    if (!1L %in% live) return(0)
-    P <- cm[live, , drop = FALSE] / rs[live]
-    Q <- P[, live, drop = FALSE]
-    R <- P[, conv_s]
-    b <- solve(diag(length(live)) - Q, R)
-    unname(b[match(1L, live)])
-  }
-
-  base <- p_conv()
-  re <- vapply(seq_len(k) + 1L, function(s) {
-    if (base <= 0) return(0)
-    max(0, 1 - p_conv(s) / base)
-  }, numeric(1))
+  fit <- .mm_markov_fit(counts)
+  base <- fit$base
+  re <- if (base > 0) pmax(0, 1 - fit$p_without / base) else rep(0, k)
   share <- if (sum(re) > 0) re / sum(re) else rep(0, k)
   out <- data.frame(channel = chans, removal_effect = re,
                     conversions = n_conv * share, share = share,
                     stringsAsFactors = FALSE)
-  if (!all(is.na(p$conversion_value))) {
+  if (n_conv > 0L && !all(is.na(p$conversion_value))) {
     v <- p$conversion_value[first & p$converted]
     out$value <- sum(v[!is.na(v)]) * share
   }
-  out <- out[order(-out$conversions, out$channel), , drop = FALSE]
+  out$p_without <- fit$p_without
+  out <- out[order(-out$conversions, out$channel, method = "radix"), ,
+             drop = FALSE]
   rownames(out) <- NULL
+
+  states <- list(from = c("(start)", chans),
+                 to = c(chans, "(conversion)", "(null)"))
+  leave <- seq_len(k + 1L)
+  # Nothing enters the start state, so its column is left out.
+  probs <- fit$P[, -1L, drop = FALSE]
+  observed <- counts[leave, -1L, drop = FALSE]
+  dimnames(probs) <- states
+  dimnames(observed) <- states
   attr(out, "p_conversion") <- base
+  attr(out, "transitions") <- probs
+  attr(out, "transition_counts") <- observed
   out
+}
+
+# Every transition the journeys make, in a chain whose states are 1 for the
+# start, 2 to k + 1 for the channels in `chans`, k + 2 for conversion and
+# k + 3 for null. `p` is sorted by journey and rank. `cell` is the
+# transition's position in a (k + 3) x (k + 3) count matrix and `row` the
+# row of `p` whose journey made it.
+#' @keywords internal
+#' @noRd
+.mm_markov_walks <- function(p, chans) {
+  k <- length(chans)
+  code <- match(p$channel, chans) + 1L
+  first <- !duplicated(p$path_id)
+  last <- !duplicated(p$path_id, fromLast = TRUE)
+  from <- c(rep(1L, sum(first)), code[!last], code[last])
+  to <- c(code[first], code[-1L][!last[-length(last)]],
+          ifelse(p$converted[last], k + 2L, k + 3L))
+  list(cell = from + (to - 1L) * (k + 3L),
+       row = c(which(first), which(!last), which(last)))
+}
+
+# The (k + 3) x (k + 3) matrix of transition counts. `times` repeats each
+# transition, as a resample that draws its journey several times does.
+#' @keywords internal
+#' @noRd
+.mm_markov_counts <- function(cell, k, times = NULL) {
+  m <- k + 3L
+  if (!is.null(times)) cell <- rep.int(cell, times)
+  matrix(tabulate(cell, m * m), m, m)
+}
+
+# The baseline conversion probability, the probability once each channel is
+# removed, and the transition matrix of the states a walk can leave, from a
+# matrix of counts. A channel with no transitions out, which a resample can
+# leave out, is not part of the chain: removing it changes nothing.
+#' @keywords internal
+#' @noRd
+.mm_markov_fit <- function(counts) {
+  k <- nrow(counts) - 3L
+  conv_s <- k + 2L
+  tr <- seq_len(k + 1L)
+  rs <- rowSums(counts)[tr]
+  P <- counts[tr, , drop = FALSE] / pmax(rs, 1)
+  if (sum(counts[, conv_s]) == 0) {
+    return(list(base = 0, p_without = rep(0, k), P = P))
+  }
+  # Every state a walk enters it also leaves, by a touch, a conversion or
+  # nothing, so the start and each channel present have a non-empty row.
+  live <- tr[rs > 0]
+  N <- solve(diag(length(live)) - P[live, live, drop = FALSE])
+  x <- drop(N %*% P[live, conv_s])
+  base <- x[1L]
+  # Removing channel s sends every transition into it to null, so the start
+  # loses exactly the conversions that pass through s: the probability of
+  # ever reaching s, N[1, s] / N[s, s], times the chance of converting from
+  # there, x[s].
+  s <- seq_along(live)[-1L]
+  p_without <- rep(base, k)
+  p_without[live[-1L] - 1L] <- base - N[1L, s] / N[cbind(s, s)] * x[s]
+  list(base = base, p_without = p_without, P = P)
 }

@@ -12,45 +12,72 @@ marginal_roi(
   by = NULL,
   lift = 0.01,
   rows = NULL,
-  extend = 0L
+  extend = 0L,
+  spec = NULL
 )
 }
 \arguments{
-\item{spend}{Numeric vector of raw spend for one channel, in time order.}
+\item{spend}{Numeric vector of raw spend for one channel, in time order.
+Or a data frame with one row per period and a column of spend per
+channel, to compute every channel in one call. Spend must be complete,
+finite and non-negative.}
 
 \item{coefficient}{The channel's fitted coefficient on the transformed
-regressor.}
+regressor. When \code{spend} is a data frame, a numeric vector of
+coefficients named by channel: \code{coef(fit)} will do with \code{spec}, but
+without \code{spec} every name is taken as a channel, so pass only the
+channels' coefficients.}
 
 \item{adstock, saturation}{Lists describing the transform, exactly as for
 \code{\link[=media_transform]{media_transform()}}. They must match the transform the model was fitted
-on.}
+on. When \code{spend} is a data frame and \code{spec} is \code{NULL}, every channel
+uses them.}
 
-\item{by}{Optional grouping vector, as for \code{\link[=media_transform]{media_transform()}}.}
+\item{by}{Optional grouping vector, as for \code{\link[=media_transform]{media_transform()}}, one element
+per element of \code{spend}. When \code{spend} is a data frame, one element or row
+per row, or column names of \code{spend}, as for \code{\link[=transform_plan]{transform_plan()}}.}
 
 \item{lift}{Proportional increase in spend used for the marginal return.
 The default \code{0.01} asks what a 1\% larger budget would have returned.}
 
 \item{rows}{Optional logical or integer index of the periods whose spend is
-increased -- the planning window. Defaults to every period. Response is
+increased (the planning window). Defaults to every period. Response is
 always summed over the whole series, so carryover from the window into
 later periods is counted.}
 
 \item{extend}{Number of zero-spend periods appended to the end of the series
 (to each group, when \code{by} is supplied) before summing response, so that
-carryover from late spend is allowed to play out. The default \code{0} matches
-\code{\link[=contributions]{contributions()}} and \code{\link[=roi]{roi()}}, which only count response inside the
-observed window; set it to \code{\link[=effective_window]{effective_window()}} of the decay to measure
-long-run return.}
+carryover from late spend is allowed to play out. At most 1,000,000. The
+default \code{0} counts response only inside the observed window, as
+\code{\link[=contributions]{contributions()}} and \code{\link[=roi]{roi()}} do, so the average return matches theirs.
+It also drops the carryover of late spend, which understates the marginal
+return of slow channels; see "Carryover after the window". Set it to
+\code{\link[=effective_window]{effective_window()}} of the decay to measure long-run return.}
+
+\item{spec}{Optional list with one transform per channel, named by column,
+as for \code{\link[=transform_plan]{transform_plan()}}: each entry holds \code{adstock} and \code{saturation},
+and optionally \code{order}. Only when \code{spend} is a data frame, and in place
+of \code{adstock} and \code{saturation}, which must then be left out. The channels
+are then the names of \code{spec}, and \code{coefficient} may hold other names,
+which are ignored. Without \code{spec}, the channels are the names of
+\code{coefficient}.}
 }
 \value{
 A one-row data frame with columns \code{spend} (total spend over the
 series), \code{contribution} (the channel's total response), \code{roi} (their
 ratio, the average return) and \code{mroi} (incremental response per unit of
-incremental spend, when the spend in \code{rows} is increased by \code{lift}).
+incremental spend, when the spend in \code{rows} is increased by \code{lift}). A
+window with no spend is an error.
+
+When \code{spend} is a data frame, one row per channel, in the order of
+\code{spec} or of \code{coefficient}, with a leading \code{channel} column and then the
+same columns. A channel with no spend in the window has an \code{mroi} of
+\code{NA}, and a message names it; with no spend at all, its \code{roi} is \code{NA}
+too.
 }
 \description{
 Computes a channel's average return and its marginal return by re-running
-the full media transform -- carryover \emph{and} saturation -- on a
+the full media transform (carryover \emph{and} saturation) on a
 counterfactually increased spend plan, rather than by differentiating the
 saturation curve at a single point. This is the definition of marginal ROI
 used in the Bayesian MMM literature (Jin et al., 2017) and in Google's
@@ -58,14 +85,14 @@ Meridian: the incremental response from a small proportional increase in
 spend, divided by the incremental spend.
 }
 \details{
-Why not just differentiate the saturation curve? \code{\link[=mroi]{mroi()}} does that, and it
-answers a narrower question: the slope of the curve at one level of
-\emph{transformed} media. Turning it into a return on \emph{spend} needs two further
-steps that are easy to get wrong.
+Differentiating the saturation curve, as \code{\link[=mroi]{mroi()}} does, answers a narrower
+question: the slope of the curve at one level of \emph{adstocked} media.
+Turning it into a return on \emph{spend} needs two further steps that are easy
+to get wrong.
 \itemize{
 \item \strong{Carryover.} A unit spent this week enters this week's adstock with the
-kernel's first weight only -- \code{1 - decay} for a normalised geometric
-kernel -- but it also enters every later week's adstock. Under a
+kernel's first weight only (\code{1 - decay} for a normalised geometric
+kernel), but it also enters every later week's adstock. Under a
 normalised kernel those weights sum to one, so the \emph{total} marginal return
 is close to the curve's slope, not to the slope times \code{1 - decay}.
 Multiplying by the first weight gives the return inside the week of spend
@@ -82,11 +109,27 @@ Simulation handles both by construction, for any kernel and any curve
 \code{\link[=media_transform]{media_transform()}} supports, and it is what makes average and marginal
 return directly comparable: both are totals over the same periods.
 }
+\section{Carryover after the window}{
+
+With the default \code{extend = 0}, response that spend would produce after the
+last observed period is not counted. The loss falls on spend near the end
+of the window and grows with the decay. For \code{mm_weekly}'s north television
+(decay 0.85) at its true parameters, the marginal return with \code{extend = 0}
+is 1.084, about 4\% below the 1.129 it reaches with
+\code{extend = effective_window(0.85, 0.99)}; for search (decay 0.15) the
+difference is under 0.5\%.
+
+The default makes the average return here equal the one \code{\link[=roi]{roi()}} reports
+from \code{\link[=contributions]{contributions()}}. For a budget decision, where each unit of spend
+should be credited with all the response it produces, pass
+\code{extend = effective_window(decay, 0.99)}.
+}
+
 \section{What this is not}{
 
 The answer is only as good as the fitted curve, and a curve is identified
 only over the spend levels the data contains. A marginal return is a local
-quantity -- a 1\% change is the kind of question the data can speak to; a
+quantity: a 1\% change is the kind of question the data can speak to; a
 50\% change is extrapolation, which is why \code{lift} defaults to 0.01.
 }
 
@@ -121,6 +164,15 @@ marginal_roi(
                     shape = truth$shape[["tv"]]),
   rows = last_q
 )
+
+# Every channel in one call, each with its own transform
+channels <- c("tv", "video", "search", "social", "display")
+spec <- lapply(stats::setNames(channels, channels), function(ch) list(
+  adstock = list(decay = truth$decay[[ch]]),
+  saturation = list(half_max = truth$half_max[[ch]],
+                    shape = truth$shape[[ch]])
+))
+marginal_roi(north, truth$beta, spec = spec)
 }
 \references{
 Jin, Y., Wang, Y., Sun, Y., Chan, D. and Koehler, J. (2017). Bayesian
@@ -128,5 +180,6 @@ methods for media mix modeling with carryover and shape effects. Google
 Inc. \url{https://research.google/pubs/pub46001/}
 }
 \seealso{
-\code{\link[=roi]{roi()}}, \code{\link[=mroi]{mroi()}}, \code{\link[=response_curve]{response_curve()}}, \code{\link[=media_transform]{media_transform()}}
+\code{\link[=roi]{roi()}}, \code{\link[=mroi]{mroi()}}, \code{\link[=response_curve]{response_curve()}}, \code{\link[=media_transform]{media_transform()}},
+\code{\link[=simulate_plan]{simulate_plan()}}, \code{\link[=allocate_budget]{allocate_budget()}}
 }

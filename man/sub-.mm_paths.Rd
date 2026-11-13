@@ -16,19 +16,28 @@ An \code{mm_paths} object when the structural columns survive, otherwise
 a plain data frame.
 }
 \description{
-Behaves exactly like subsetting a data frame, with one addition: if the
-result no longer carries the columns that make a journey table a journey
-table, the \code{mm_paths} class is dropped and a plain data frame is returned.
-This stops a column subset from producing an object that claims to be an
-\code{mm_paths} but cannot answer any question about journeys.
+Behaves like subsetting a data frame, with three additions. If the result
+no longer carries the columns that make a journey table a journey table,
+the \code{mm_paths} class is dropped and a plain data frame is returned, so a
+column subset cannot produce an object that claims to be an \code{mm_paths} but
+cannot answer any question about journeys. Rows selected by a missing
+(\code{NA}) row index are dropped with a message, as \code{\link[=subset]{subset()}} drops them. And
+\code{touch_rank} and \code{touch_n} are recomputed whenever they no longer match the
+rows present.
 }
 \details{
-When a row subset removes part of a journey -- dropping one channel, say --
-\code{touch_rank} and \code{touch_n} are recomputed from the touches that remain, so
-the result is a valid journey table in its own right and every credit rule
-sums to 1 per converting journey. The first remaining touch becomes rank 1.
-Convert with \code{as.data.frame()} first if you want to inspect the original
-ranks of a partial selection.
+When a row subset removes part of a journey, dropping one channel say,
+the first remaining touch becomes rank 1 and the result is a valid journey
+table in its own right, so every credit rule sums to 1 per converting
+journey. A row selected twice counts as two touches. Construction counts
+describe the table \code{\link[=build_paths]{build_paths()}} returned, so they are dropped once rows
+change. Convert with \code{as.data.frame()} first to inspect the original ranks
+of a partial selection.
+
+The \pkg{dplyr} verbs follow the same rules: \code{filter()}, \code{slice()},
+\code{arrange()} and \code{distinct()} subset rows as \code{[} does, and \code{mutate()} and
+the joins recompute ranks the same way. Journey tables built by separate
+\code{\link[=build_paths]{build_paths()}} calls share journey ids; combine them with \code{\link[=bind_paths]{bind_paths()}}.
 }
 \examples{
 data(mm_events)
@@ -42,5 +51,5 @@ class(paths[paths$converted, ])
 class(paths[, c("channel", "touch_rank")])
 }
 \seealso{
-\code{\link[=build_paths]{build_paths()}}, \code{\link[=path_summary]{path_summary()}}
+\code{\link[=build_paths]{build_paths()}}, \code{\link[=path_summary]{path_summary()}}, \code{\link[=bind_paths]{bind_paths()}}
 }

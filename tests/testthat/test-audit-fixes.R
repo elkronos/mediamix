@@ -109,10 +109,10 @@ test_that("the metric label is usable for anonymous functions", {
   anon <- suppressWarnings(
     tune_carryover(x, y, max_lags = Inf, decays = c(0.3, 0.5),
                    metric_fn = function(a, p) sqrt(mean((a - p)^2))))
-  expect_equal(anon$metric, "<anonymous>")
+  expect_equal(anon$metric_name, "<anonymous>")
   named <- suppressWarnings(
     tune_carryover(x, y, max_lags = Inf, decays = 0.5, metric_fn = mae))
-  expect_equal(named$metric, "mae")
+  expect_equal(named$metric_name, "mae")
 })
 
 test_that("media_transform validates by and no longer saturates by default", {
@@ -391,7 +391,7 @@ test_that("step_adstock enforces its preconditions at bake time too", {
                  "unevenly spaced")
 })
 
-test_that("all_predictors() selects media without tripping the type check", {
+test_that("step_adstock drops index and by columns from a selection before the type check", {
   skip_if_not_installed("recipes")
   data(mm_weekly, package = "mediamix")
   tr <- mm_weekly[mm_weekly$date < as.Date("2025-07-01"), ]

@@ -1,26 +1,34 @@
 #' Export journeys in ChannelAttribution's format
 #'
 #' Collapses an `mm_paths` object into the aggregated `"a > b > c"` table that
-#' \pkg{ChannelAttribution} consumes. This package builds the journeys;
-#' \pkg{ChannelAttribution} computes Markov removal effects on them in C++.
-#' Neither needs to do the other's job.
+#' \pkg{ChannelAttribution} consumes. This package builds the journeys and
+#' fits the order-1 chain of [markov_removal()];
+#' \pkg{ChannelAttribution} computes Markov removal effects on them in C++,
+#' for higher-order chains too.
 #'
 #' @param paths An `mm_paths` object from [build_paths()].
-#' @param sep Separator between channels. `" > "` is
-#'   \pkg{ChannelAttribution}'s default.
+#' @param sep Separator between channels, `" > "` by default. A channel name
+#'   that contains `sep` is an error, since its path strings could not be
+#'   split back into channels. \pkg{ChannelAttribution}'s `markov_model()` has
+#'   a `sep` argument of its own; give both the same value, as the example
+#'   does.
 #'
 #' @return A data frame with columns `path`, `total_conversions`,
 #'   `total_null` and, when the journey table carries values,
-#'   `total_conversion_value`. One row per distinct channel sequence.
+#'   `total_conversion_value`. One row per distinct channel sequence, ordered
+#'   by descending conversions, then descending null journeys, then path in
+#'   the C locale.
 #'
 #' @details
 #' The `total_null` column is why [build_paths()] keeps non-converting journeys
-#' by default. Markov removal effects are computed by comparing the probability
-#' of reaching conversion against the probability of reaching the null state, so
-#' a transition matrix built without null paths has no absorbing failure state
-#' and overstates every channel's effect.
+#' by default. Markov removal effects compare the probability of reaching
+#' conversion with the probability of reaching the null state. Without null
+#' paths the transition matrix has no absorbing failure state, the baseline
+#' conversion probability is 1, and each channel's removal effect moves up or
+#' down depending on how the missing non-converting journeys differ from the
+#' converting ones.
 #'
-#' @seealso [build_paths()], [attribute()]
+#' @seealso [build_paths()], [markov_removal()], [attribute()]
 #'
 #' @examples
 #' data(mm_events)
@@ -31,17 +39,19 @@
 #' ca <- as_channel_paths(paths)
 #' head(ca)
 #'
-#' # Hand off to ChannelAttribution, if it is installed
+#' # Hand off to ChannelAttribution, if it is installed, with the same
+#' # separator on both sides
 #' if (requireNamespace("ChannelAttribution", quietly = TRUE)) {
+#'   ca_in <- as_channel_paths(paths, sep = ">")
 #'   ChannelAttribution::markov_model(
-#'     ca, var_path = "path",
-#'     var_conv = "total_conversions", var_null = "total_null"
+#'     ca_in, var_path = "path",
+#'     var_conv = "total_conversions", var_null = "total_null", sep = ">"
 #'   )
 #' }
 #' @export
 as_channel_paths <- function(paths, sep = " > ") {
-  .mm_check_paths(paths)
-  if (!.mm_is_string(sep)) cli::cli_abort("{.arg sep} must be a single string.")
+  paths <- .mm_check_paths(paths)
+  .mm_check_sep(sep)
   if (nrow(paths) == 0L) {
     return(data.frame(path = character(0), total_conversions = numeric(0),
                       total_null = numeric(0), stringsAsFactors = FALSE))
@@ -59,7 +69,8 @@ as_channel_paths <- function(paths, sep = " > ") {
                            by = list(path = strs$path), FUN = sum)
     agg <- merge(agg, av, by = "path", sort = FALSE)
   }
-  agg <- agg[order(-agg$total_conversions, -agg$total_null), , drop = FALSE]
+  agg <- agg[order(-agg$total_conversions, -agg$total_null, agg$path,
+                   method = "radix"), , drop = FALSE]
   rownames(agg) <- NULL
   agg
 }

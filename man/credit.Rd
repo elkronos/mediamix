@@ -39,11 +39,13 @@ half-life. The default is a seven-period half-life.}
 \item{fn}{For \code{credit_custom()}, a function of
 \verb{(touch_rank, touch_n, recency)} returning a numeric vector of weights the
 same length as its inputs. \code{recency} is time from each touch to the
-conversion, in the journey table's units -- see the \code{units} argument of
-\code{\link[=build_paths]{build_paths()}}, which sets them. \code{fn} is called once per \emph{converting}
+conversion, in the journey table's units, which the \code{units} argument of
+\code{\link[=build_paths]{build_paths()}} sets. \code{fn} is called once per \emph{converting}
 journey and never for a non-converting one, so \code{recency} is always
-present and the weights need no missing-value handling. Weights must be
-finite and non-negative; returning all zeros declines the journey.}
+present and the weights need no missing-value handling. The three vectors
+run in \code{touch_rank} order, whatever the order of the rows, and the weights
+are matched back to the rows in that order. Weights must be finite and
+non-negative; returning all zeros declines the journey.}
 
 \item{normalise}{For \code{credit_custom()}, should weights be rescaled to sum to
 1 within each journey? Defaults to \code{TRUE}. Setting it to \code{FALSE} breaks the
@@ -58,18 +60,19 @@ converting journey.
 
 The five built-in rules always assign positive weight somewhere, so for
 them total credit always equals the number of converting journeys.
-\code{credit_custom()} can decline a journey by returning all-zero weights --
-see its entry under \emph{Custom rules}.
+\code{credit_custom()} can decline a journey by returning all-zero weights;
+see \emph{Custom rules}.
 }
 \description{
 Five rules for dividing one conversion among the touchpoints that preceded
-it, plus a hook for your own. Each returns the journey table with a \code{credit}
-column added, so they compose and can be compared side by side.
+it, plus a hook for your own. Each returns the journey table with its own
+\code{credit} column, replacing any already there, so the results of different
+rules can be compared side by side.
 }
 \details{
-\code{credit_first()} and \code{credit_last()} are the two defaults most reporting
-systems ship with, and they disagree with each other by design: comparing
-them is the cheapest read on whether a channel opens journeys or closes them.
+\code{credit_first()} and \code{credit_last()} are the simplest rules, and they
+disagree with each other by design: comparing them is the cheapest read on
+whether a channel opens journeys or closes them.
 \code{\link[=attribute]{attribute()}} runs several rules at once for exactly this reason.
 
 \code{credit_position()} gives the first and last touch a fixed share and splits
@@ -81,9 +84,11 @@ to 1 and short journeys are not quietly under-counted.
 \code{credit_time_decay()} is \code{\link[=adstock_geometric]{adstock_geometric()}} run backwards. Adstock takes
 one impulse of spend and spreads its effect forward in time with geometric
 decay; time-decay attribution takes one conversion and spreads its credit
-backward across prior touchpoints with the same geometric kernel. Same
-arithmetic, opposite arrow, and the same \code{decay} vocabulary in both
-directions.
+backward across prior touchpoints with the same geometric kernel. The
+arithmetic is the same with the arrow reversed, and \code{decay} means the same
+thing in both directions. With \code{decay = 0} there is no carryover, and all
+the credit goes to the most recent touch, shared equally when several
+touches tie.
 }
 \section{Custom rules}{
 
@@ -91,8 +96,8 @@ directions.
 called once per converting journey, with vectors as long as that journey.
 Non-converting journeys are never passed to it; they always get zero.
 
-A rule that qualifies only some touches -- "credit only touches within a day
-of conversion", say -- will meet journeys where \emph{nothing} qualifies. When
+A rule that qualifies only some touches, such as "credit only touches within
+a day of conversion", will meet journeys where \emph{nothing} qualifies. When
 \code{fn} returns all zeros for a journey, that journey receives no credit at all
 and is counted in a message. Crediting its touches equally instead would
 invent an answer the rule never gave, and it is a surprisingly easy way to

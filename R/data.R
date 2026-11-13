@@ -9,7 +9,7 @@
 #' \describe{
 #'   \item{date}{Week commencing, `Date`.}
 #'   \item{geo}{Geography: `"north"`, `"central"` or `"south"`.}
-#'   \item{tv, video, search, display, social}{Media spend for the week.}
+#'   \item{tv, video, search, social, display}{Media spend for the week.}
 #'   \item{price}{Average unit price.}
 #'   \item{seasonality}{Underlying seasonal index used to generate the data.}
 #'   \item{holiday}{1 in December weeks, 0 otherwise.}
@@ -32,12 +32,22 @@
 #' Channels are flighted, so several contain runs of zero-spend weeks: dark
 #' periods are the normal case in media data, not an edge case.
 #'
-#' Geographies differ by a single multiplicative scale factor applied to spend,
-#' half-saturation points, coefficients and baseline, so a correctly specified
-#' pooled model can fit them together and a per-geography model should recover
-#' the same decay parameters in each.
+#' The per-channel vectors `decay`, `half_max`, `shape` and `beta` in
+#' `"truth"`, and the single numbers `baseline`, `price_beta`, `trend` and
+#' `noise_sd`, describe north. Each geography has a scale factor, stored as
+#' `geo_scale` (north 1, central 0.72, south 1.35), that multiplies its spend,
+#' half-saturation points, coefficients, baseline, trend, December uplift
+#' (`holiday_uplift` at scale 1) and price effect; the noise standard
+#' deviation is multiplied by the square root of the scale. The seasonal term
+#' is `season_amplitude` times the scaled baseline times `seasonality - 1`,
+#' and price enters centred on its mean within the geography.
+#' `by_geo` lists every channel's decay, half-saturation point, shape and
+#' coefficient for each geography, which is the table to check a
+#' per-geography model against. Decays and shapes are the same everywhere, so
+#' a per-geography model should recover the same carryover in each.
 #'
-#' @source Simulated. See `data-raw/make_mm_weekly.R` in the package sources.
+#' @source Simulated. See `data-raw/make_mm_weekly.R` in the source repository,
+#'   <https://github.com/elkronos/mediamix>.
 #'
 #' @seealso [mm_events] for the attribution counterpart.
 #'
@@ -45,8 +55,11 @@
 #' data(mm_weekly)
 #' str(mm_weekly)
 #'
-#' # The parameters the data was generated from
+#' # The parameters the data was simulated from
 #' attr(mm_weekly, "truth")$decay
+#'
+#' # Per-geography parameters, for checking a model fitted to one geography
+#' subset(attr(mm_weekly, "truth")$by_geo, geo == "south")
 #'
 #' # Flighting: several channels go dark for weeks at a time
 #' north <- mm_weekly[mm_weekly$geo == "north", ]
@@ -56,7 +69,7 @@
 #' Synthetic touchpoint event log
 #'
 #' A raw marketing event log of the kind exported from a web analytics or
-#' customer data platform, containing on purpose every case that breaks a naive
+#' customer data platform, containing on purpose the cases that break a naive
 #' journey-building pipeline.
 #'
 #' @format A data frame with 20,799 rows and 5 columns:
@@ -73,26 +86,34 @@
 #' The awkward cases are deliberate, because they are what a journey builder has
 #' to handle:
 #'
-#' - **Repeat converters.** Some customers convert two or three times, separated
-#'   by dormant periods of 20 to 140 days. Treated as one journey per customer
-#'   they become a single implausibly long path; split on conversion they are
-#'   several short ones.
-#' - **Consecutive duplicates.** Half of all multi-touch bursts contain the same
-#'   channel twice in a row -- some placed deliberately, the rest arising by
-#'   chance from a six-channel sampler.
-#' - **Direct, none, blank and missing channels.** A quarter of bursts contain
-#'   one; 261 events have a genuinely missing channel.
-#' - **Non-converters.** 62% of customers never convert. They are the null paths
-#'   that Markov removal effects are computed against.
-#' - **Timestamp ties.** 624 events share a customer and a timestamp exactly, so
-#'   journey order depends on a deterministic tie-break.
-#' - **Channels with positional roles.** Display and social tend to open
-#'   journeys, paid search and email to close them, so first-touch and
-#'   last-touch attribution genuinely disagree about them -- which is what makes
-#'   [attribution_spread()] and [channel_positions()] worth looking at.
-#' - **Unsorted rows.** The table is shuffled, as a real export would be.
+#' \describe{
+#'   \item{Repeat converters}{Some customers convert two or three times,
+#'     separated by dormant periods of 20 to 140 days. Treated as one journey
+#'     per customer they become a single implausibly long path; split on
+#'     conversion they are several short ones.}
+#'   \item{Consecutive duplicates}{Half of all multi-touch bursts contain the
+#'     same channel twice in a row: some placed deliberately, the rest arising
+#'     by chance from a six-channel sampler.}
+#'   \item{Direct, none, blank and missing channels}{A quarter of bursts
+#'     contain one; 261 events have a genuinely missing channel.}
+#'   \item{Non-converters}{62% of customers never convert. They are the null
+#'     paths that Markov removal effects are computed against.}
+#'   \item{Timestamp ties}{624 pairs of events (1,248 events) share a customer
+#'     and a timestamp exactly, so journey order depends on a deterministic
+#'     tie-break.}
+#'   \item{Exact duplicates}{117 of those pairs also share a channel, which
+#'     makes the two rows identical. [build_paths()] drops one row of each
+#'     under its default `dedupe = TRUE`, and [path_summary()] reports the 117
+#'     as `duplicate_events`.}
+#'   \item{Channels with positional roles}{Display and social tend to open
+#'     journeys, paid search and email to close them, so first-touch and
+#'     last-touch attribution disagree about them, which is what makes
+#'     [attribution_spread()] and [channel_positions()] worth looking at.}
+#'   \item{Unsorted rows}{The table is shuffled, as a real export would be.}
+#' }
 #'
-#' @source Simulated. See `data-raw/make_mm_events.R` in the package sources.
+#' @source Simulated. See `data-raw/make_mm_events.R` in the source repository,
+#'   <https://github.com/elkronos/mediamix>.
 #'
 #' @seealso [build_paths()], [mm_weekly] for the media-transform counterpart.
 #'
@@ -106,6 +127,9 @@
 #'
 #' # Rows are shuffled, as a real export would be
 #' is.unsorted(mm_events$timestamp)
+#'
+#' # Exact duplicate rows, which build_paths() drops by default
+#' sum(duplicated(mm_events))
 #'
 #' # Customers converting more than once
 #' conv <- table(mm_events$customer_id[mm_events$conversion == 1])

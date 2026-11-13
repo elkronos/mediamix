@@ -9,21 +9,30 @@
 \arguments{
 \item{x}{A data frame from \code{\link[=response_curve]{response_curve()}}.}
 
-\item{observed}{Optional numeric vector of the spend levels actually seen
-(for example the adstocked series); its range is left unshaded.}
+\item{observed}{Optional numeric vector of the levels seen in the data,
+normally the channel's adstocked series; its range is left unshaded.}
 
-\item{...}{Ignored.}
+\item{...}{Graphical arguments: \code{main} and \code{ylab} replace the upper panel's
+title and axis label, \code{xlab} the spend axis label, and \code{col} the line
+colour. Others are ignored.}
 }
 \value{
 \code{x}, invisibly.
 }
 \description{
-Two stacked panels on a shared spend axis: the response and its marginal
-return. Spend beyond the observed range is shaded, because there the curve
-is extrapolation.
+Two stacked panels on a shared axis of adstocked spend, the saturation
+curve's input (see \code{\link[=response_curve]{response_curve()}}): the response and its marginal
+return. With \code{observed}, levels below or above its range are shaded,
+because there the curve is extrapolation. The point where the marginal
+return is largest in size is marked as the steepest, unless it is the first
+or last point.
 }
 \examples{
+data(mm_weekly)
+north <- mm_weekly[mm_weekly$geo == "north", ]
 rc <- response_curve(seq(0, 6000, by = 100), coefficient = 6000,
                      half_max = 2250, shape = 1.6)
-plot(rc, observed = c(0, 3450))
+
+# Shade the levels outside the range of television's adstocked series
+plot(rc, observed = adstock_geometric(north$tv, decay = 0.85))
 }

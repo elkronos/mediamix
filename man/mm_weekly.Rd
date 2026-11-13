@@ -9,7 +9,7 @@ A data frame with 468 rows and 11 columns:
 \describe{
 \item{date}{Week commencing, \code{Date}.}
 \item{geo}{Geography: \code{"north"}, \code{"central"} or \code{"south"}.}
-\item{tv, video, search, display, social}{Media spend for the week.}
+\item{tv, video, search, social, display}{Media spend for the week.}
 \item{price}{Average unit price.}
 \item{seasonality}{Underlying seasonal index used to generate the data.}
 \item{holiday}{1 in December weeks, 0 otherwise.}
@@ -17,7 +17,8 @@ A data frame with 468 rows and 11 columns:
 }
 }
 \source{
-Simulated. See \code{data-raw/make_mm_weekly.R} in the package sources.
+Simulated. See \code{data-raw/make_mm_weekly.R} in the source repository,
+\url{https://github.com/elkronos/mediamix}.
 }
 \usage{
 mm_weekly
@@ -43,17 +44,29 @@ and search is the short-carryover, immediately-responding one (decay 0.15).
 Channels are flighted, so several contain runs of zero-spend weeks: dark
 periods are the normal case in media data, not an edge case.
 
-Geographies differ by a single multiplicative scale factor applied to spend,
-half-saturation points, coefficients and baseline, so a correctly specified
-pooled model can fit them together and a per-geography model should recover
-the same decay parameters in each.
+The per-channel vectors \code{decay}, \code{half_max}, \code{shape} and \code{beta} in
+\code{"truth"}, and the single numbers \code{baseline}, \code{price_beta}, \code{trend} and
+\code{noise_sd}, describe north. Each geography has a scale factor, stored as
+\code{geo_scale} (north 1, central 0.72, south 1.35), that multiplies its spend,
+half-saturation points, coefficients, baseline, trend, December uplift
+(\code{holiday_uplift} at scale 1) and price effect; the noise standard
+deviation is multiplied by the square root of the scale. The seasonal term
+is \code{season_amplitude} times the scaled baseline times \code{seasonality - 1},
+and price enters centred on its mean within the geography.
+\code{by_geo} lists every channel's decay, half-saturation point, shape and
+coefficient for each geography, which is the table to check a
+per-geography model against. Decays and shapes are the same everywhere, so
+a per-geography model should recover the same carryover in each.
 }
 \examples{
 data(mm_weekly)
 str(mm_weekly)
 
-# The parameters the data was generated from
+# The parameters the data was simulated from
 attr(mm_weekly, "truth")$decay
+
+# Per-geography parameters, for checking a model fitted to one geography
+subset(attr(mm_weekly, "truth")$by_geo, geo == "south")
 
 # Flighting: several channels go dark for weeks at a time
 north <- mm_weekly[mm_weekly$geo == "north", ]

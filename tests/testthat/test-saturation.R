@@ -160,3 +160,42 @@ test_that("saturation curve parameters are validated to their documented domains
 test_that("saturate() rejects an unknown type", {
   expect_error(saturate(1:3, type = "bogus"), regexp = "should be one of")
 })
+
+# ---- precision, names, messages ----------------------------------------------------
+
+test_that("saturate_exponential() keeps its precision for small inputs", {
+  # 1 - exp(-y) cancels to 0 for y below about 1e-16; -expm1(-y) does not.
+  expect_equal(saturate_exponential(1e-20, rate = 1) / 1e-20, 1)
+  expect_equal(saturate_exponential(1e-10, rate = 1) / 1e-10, 1 - 5e-11,
+               tolerance = 1e-14)
+  expect_identical(saturate_exponential(c(0, Inf), rate = 0.5), c(0, 1))
+})
+
+test_that("the bounded curves reach exactly 1 in floating point, as documented", {
+  expect_identical(saturate_exponential(40, rate = 1), 1)
+  expect_identical(saturate_hill(1e200, half_max = 1), 1)
+  expect_true(all(saturate_hill(c(0, 1, 1e6), half_max = 1) <= 1))
+})
+
+test_that("saturation curves keep names and time-series attributes", {
+  x <- c(a = 0, b = 50, c = 200)
+  expect_named(saturate_hill(x, half_max = 50), names(x))
+  expect_named(saturate_exponential(x, rate = 0.01), names(x))
+  expect_named(saturate_michaelis_menten(x, km = 50), names(x))
+  expect_named(saturate_power(x, exponent = 0.5), names(x))
+  expect_named(saturate(x, type = "hill", half_max = 50), names(x))
+
+  tx <- stats::ts(c(0, 50, 200, 100), frequency = 4, start = c(2023, 2))
+  out <- saturate_hill(tx, half_max = 50)
+  expect_s3_class(out, "ts")
+  expect_equal(stats::tsp(out), stats::tsp(tx))
+  expect_equal(as.numeric(out), saturate_hill(as.numeric(tx), half_max = 50))
+})
+
+test_that("a positional value for Michaelis-Menten says that it set vmax", {
+  expect_error(saturate_michaelis_menten(c(1, 2, 3), 100),
+               class = "rlang_error", regexp = "km = 100")
+  expect_error(saturate(c(1, 2, 3), "michaelis_menten", 100),
+               class = "rlang_error", regexp = "vmax")
+  expect_equal(saturate_michaelis_menten(c(0, 100), km = 100), c(0, 0.5))
+})

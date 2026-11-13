@@ -16,38 +16,45 @@ A data frame with 20,799 rows and 5 columns:
 }
 }
 \source{
-Simulated. See \code{data-raw/make_mm_events.R} in the package sources.
+Simulated. See \code{data-raw/make_mm_events.R} in the source repository,
+\url{https://github.com/elkronos/mediamix}.
 }
 \usage{
 mm_events
 }
 \description{
 A raw marketing event log of the kind exported from a web analytics or
-customer data platform, containing on purpose every case that breaks a naive
+customer data platform, containing on purpose the cases that break a naive
 journey-building pipeline.
 }
 \details{
 The awkward cases are deliberate, because they are what a journey builder has
 to handle:
-\itemize{
-\item \strong{Repeat converters.} Some customers convert two or three times, separated
-by dormant periods of 20 to 140 days. Treated as one journey per customer
-they become a single implausibly long path; split on conversion they are
-several short ones.
-\item \strong{Consecutive duplicates.} Half of all multi-touch bursts contain the same
-channel twice in a row -- some placed deliberately, the rest arising by
-chance from a six-channel sampler.
-\item \strong{Direct, none, blank and missing channels.} A quarter of bursts contain
-one; 261 events have a genuinely missing channel.
-\item \strong{Non-converters.} 62\% of customers never convert. They are the null paths
-that Markov removal effects are computed against.
-\item \strong{Timestamp ties.} 624 events share a customer and a timestamp exactly, so
-journey order depends on a deterministic tie-break.
-\item \strong{Channels with positional roles.} Display and social tend to open
+
+\describe{
+\item{Repeat converters}{Some customers convert two or three times,
+separated by dormant periods of 20 to 140 days. Treated as one journey
+per customer they become a single implausibly long path; split on
+conversion they are several short ones.}
+\item{Consecutive duplicates}{Half of all multi-touch bursts contain the
+same channel twice in a row: some placed deliberately, the rest arising
+by chance from a six-channel sampler.}
+\item{Direct, none, blank and missing channels}{A quarter of bursts
+contain one; 261 events have a genuinely missing channel.}
+\item{Non-converters}{62\% of customers never convert. They are the null
+paths that Markov removal effects are computed against.}
+\item{Timestamp ties}{624 pairs of events (1,248 events) share a customer
+and a timestamp exactly, so journey order depends on a deterministic
+tie-break.}
+\item{Exact duplicates}{117 of those pairs also share a channel, which
+makes the two rows identical. \code{\link[=build_paths]{build_paths()}} drops one row of each
+under its default \code{dedupe = TRUE}, and \code{\link[=path_summary]{path_summary()}} reports the 117
+as \code{duplicate_events}.}
+\item{Channels with positional roles}{Display and social tend to open
 journeys, paid search and email to close them, so first-touch and
-last-touch attribution genuinely disagree about them -- which is what makes
-\code{\link[=attribution_spread]{attribution_spread()}} and \code{\link[=channel_positions]{channel_positions()}} worth looking at.
-\item \strong{Unsorted rows.} The table is shuffled, as a real export would be.
+last-touch attribution disagree about them, which is what makes
+\code{\link[=attribution_spread]{attribution_spread()}} and \code{\link[=channel_positions]{channel_positions()}} worth looking at.}
+\item{Unsorted rows}{The table is shuffled, as a real export would be.}
 }
 }
 \examples{
@@ -60,6 +67,9 @@ table(mm_events$channel, useNA = "ifany")
 
 # Rows are shuffled, as a real export would be
 is.unsorted(mm_events$timestamp)
+
+# Exact duplicate rows, which build_paths() drops by default
+sum(duplicated(mm_events))
 
 # Customers converting more than once
 conv <- table(mm_events$customer_id[mm_events$conversion == 1])

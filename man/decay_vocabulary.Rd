@@ -14,32 +14,35 @@ half_life(decay, period = 1)
 effective_window(decay, coverage = 0.9)
 }
 \arguments{
-\item{half_life}{Number of periods over which effect falls to half. Must be
-positive.}
+\item{half_life}{Numeric vector of half-lives: the number of periods over
+which the effect falls to half. Every element must be positive.}
 
 \item{period}{Spacing between observations, expressed in the same time unit
-as \code{half_life}. The default \code{1} means \code{half_life} is already measured in
-periods, so \code{decay_from_half_life(3)} reads as "a three-period half-life".
-Supply both in days (say) to mix units: \code{decay_from_half_life(21, period = 7)}
-is a 21-day half-life observed weekly, and gives the same answer.}
+as \code{half_life}, as a single number. The default \code{1} means \code{half_life} is
+already measured in periods, so \code{decay_from_half_life(3)} reads as "a
+three-period half-life". Supply both in days (say) to mix units:
+\code{decay_from_half_life(21, period = 7)} is a 21-day half-life observed
+weekly, and gives the same answer.}
 
-\item{decay}{Geometric decay coefficient. A value of \code{0} means no carryover;
-values approaching \code{1} mean effect persists almost indefinitely.
-\code{effective_window()} accepts \verb{[0, 1)}. \code{half_life()} requires \verb{(0, 1)},
-since a decay of exactly \code{0} has no half-life to report -- the effect is
-gone before the next period.}
+\item{decay}{Numeric vector of geometric decay coefficients. A value of \code{0}
+means no carryover; values approaching \code{1} mean effect persists almost
+indefinitely. \code{effective_window()} accepts \verb{[0, 1)}. \code{half_life()}
+requires \verb{(0, 1)}, since a decay of exactly \code{0} has no half-life to
+report: the effect is gone before the next period.}
 
 \item{coverage}{Proportion of the total carryover effect the window should
-contain, in \verb{(0, 1)}.}
+contain, a single number in \verb{(0, 1)}.}
 }
 \value{
-A single number. \code{decay_from_half_life()} returns a decay
-coefficient, \code{half_life()} returns a number of periods, and
-\code{effective_window()} returns an integer number of periods.
+A numeric vector the same length as the first argument, carrying
+its names. \code{decay_from_half_life()} returns decay coefficients,
+\code{half_life()} returns half-lives in the time unit of \code{period} (numbers of
+periods with the default \code{period = 1}; days for \code{half_life(decay, period = 7)} on weekly data), and \code{effective_window()} returns an integer vector of
+periods.
 }
 \description{
-Practitioners reason about media carryover in half-lives ("television keeps
-working for about three weeks"), while the arithmetic needs a decay
+Practitioners reason about media carryover in half-lives ("television's
+effect halves every three weeks"), while the arithmetic needs a decay
 coefficient. These three functions translate between the two and are shared
 by both halves of the package: \code{decay} means the same thing in
 \code{\link[=adstock_geometric]{adstock_geometric()}}, which spreads one impulse of spend \emph{forward} through
@@ -53,10 +56,20 @@ effect halves after \eqn{h} periods when \eqn{\theta^h = 0.5}. Hence
 
 \code{effective_window()} returns the smallest \eqn{n} for which the first
 \eqn{n} lags carry at least \code{coverage} of the infinite kernel's total mass,
-that is the smallest \eqn{n} with \eqn{1 - \theta^n \ge} \code{coverage}. It is
+that is the smallest \eqn{n} with \eqn{1 - \theta^n \ge} \code{coverage}. At an
+exact boundary, such as a coverage of 0.5 for a decay built from a whole
+half-life, the comparison allows for rounding error, so
+\code{effective_window(decay_from_half_life(3), 0.5)} is 3. It is
 the honest way to choose \code{max_lag} for a truncated kernel, and a useful
 sanity check on a fitted decay: a decay implying a 40-week effective window
 on 104 weeks of data is not identified by the data.
+
+The first argument of each function is vectorised, so
+\code{decay_from_half_life(c(1, 2, 4))} builds a grid of decays from half-lives,
+ready for the \code{decays} argument of \code{\link[=tune_carryover]{tune_carryover()}}. \code{period} and
+\code{coverage} take a single value, which applies to every element. A missing
+or out-of-range element is an error; in a vector of several, the message
+gives the position of the first out-of-range element.
 }
 \examples{
 # A three-week half-life on weekly data
@@ -71,6 +84,14 @@ decay_from_half_life(21, period = 7)
 
 # How many periods to keep before truncating loses 10\% of the effect?
 effective_window(theta, coverage = 0.90)
+
+# A decay grid built from half-lives
+decay_from_half_life(c(1, 2, 4, 8))
+
+# Names are kept, so one call covers every channel
+decays <- c(tv = 0.85, video = 0.7, search = 0.15)
+half_life(decays)
+effective_window(decays, coverage = 0.90)
 
 # The vocabulary is shared by both halves of the package
 adstock_geometric(c(100, 0, 0, 0, 0), decay = theta)

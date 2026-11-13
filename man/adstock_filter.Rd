@@ -9,41 +9,53 @@ adstock_filter(
   weights,
   state = 0,
   by = NULL,
-  na_action = c("error", "zero", "keep")
+  na_action = c("error", "zero", "keep"),
+  missing_state = c("error", "cold")
 )
 }
 \arguments{
 \item{x}{Numeric vector of media spend (or impressions, or GRPs) in time
 order. \code{x} must already be sorted by time and evenly spaced; the function
 has no index argument and cannot check this for you. Use \code{\link[=step_adstock]{step_adstock()}}
-if you want the time index validated.}
+if you want the time index validated. Infinite values are an error, since
+the filter would carry them into later periods; missing values are
+handled by \code{na_action}.}
 
 \item{weights}{Numeric vector of kernel weights, ordered from the current
 period to the most distant lag. Not rescaled: whatever you supply is what
-is applied.}
+is applied. Missing or infinite weights are an error.}
 
-\item{state}{The preceding \code{length(weights) - 1} values of \code{x}, oldest first,
-or \code{0} for a cold start -- that is, \code{utils::tail(x_previous, length(weights) - 1)}.}
+\item{state}{The \code{length(weights) - 1} values that came before \code{x}, oldest
+first, as \code{utils::tail(x_previous, length(weights) - 1)} gives them, or
+\code{0} for a cold start. When \code{by} is supplied, a named list with one entry
+per group.}
 
 \item{by}{Optional grouping vector, or data frame of grouping vectors, the
 same length as \code{x}. Adstock is applied independently within each group,
 which is what geo-level and panel models need. Never rely on
 \code{dplyr::group_by()} for this: grouping metadata does not reliably survive
-into every context where this function is called.}
+into every context where this function is called. Missing values are an
+error, in a vector or in any column of a data frame.}
 
 \item{na_action}{What to do about missing values in \code{x}. \code{"error"} (the
 default) refuses to guess. \code{"zero"} treats missing media as no media, which
 is usually right for spend but is a substantive assumption. \code{"keep"} lets
 \code{NA} propagate through the filter, which for the recursive form poisons
 every subsequent value.}
+
+\item{missing_state}{What to do when \code{state} is a per-group list with no
+entry for a group in \code{by}. \code{"error"} (the default) refuses; \code{"cold"}
+cold-starts those groups, as \code{\link[=step_adstock]{step_adstock()}} does by default for groups
+it did not see at \code{prep()} time.}
 }
 \value{
-A numeric vector the same length as \code{x}, in the same order.
+A numeric vector the same length as \code{x}, in the same order, with the
+names and time-series attributes of \code{x}.
 }
 \description{
 Applies a user-supplied weight vector as a causal filter. Use this when you
-have a kernel from somewhere else -- an econometric study, a vendor's
-published curve, a shape you fitted yourself -- and want the same state
+have a kernel from somewhere else (an econometric study, a vendor's
+published curve, a shape you fitted yourself) and want the same state
 handling, grouping and length guarantees as the built-in transforms.
 }
 \examples{
@@ -55,7 +67,8 @@ adstock_filter(c(100, 0, 0, 0, 0), weights = c(0.2, 0.5, 0.3))
 adstock_filter(c(100, 100, 100, 100), weights = c(1, 1))
 
 # Chaining across chunks, and grouping, work as they do for the built-in
-# kernels. Use `adstock_state()` with a matching `max_lag` to get the state.
+# kernels. The state is the tail of the earlier chunk, as here, or
+# `adstock_state()` with a matching `max_lag`.
 w <- c(0.5, 0.3, 0.2)
 whole <- adstock_filter(c(100, 80, 60, 40, 20), weights = w)
 s <- utils::tail(c(100, 80, 60), length(w) - 1L)
@@ -64,7 +77,8 @@ chunked <- c(adstock_filter(c(100, 80, 60), weights = w),
 all.equal(chunked, whole)
 }
 \seealso{
-\code{\link[=adstock_geometric]{adstock_geometric()}} and \code{\link[=adstock_weibull]{adstock_weibull()}} for the built-in
-kernels, \code{\link[=adstock_weights]{adstock_weights()}} to build a geometric kernel to pass here,
+\code{\link[=adstock_geometric]{adstock_geometric()}}, \code{\link[=adstock_weibull]{adstock_weibull()}} and \code{\link[=adstock_delayed]{adstock_delayed()}}
+for the built-in kernels; \code{\link[=adstock_weights]{adstock_weights()}}, \code{\link[=adstock_weights_weibull]{adstock_weights_weibull()}}
+and \code{\link[=adstock_weights_delayed]{adstock_weights_delayed()}} to build a kernel to pass here;
 \code{\link[=adstock_state]{adstock_state()}} for chaining.
 }

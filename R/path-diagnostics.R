@@ -19,8 +19,15 @@
 #'       journey, which happens under `split_on = "none"` or `"gap"`.}
 #'     \item{`conversions_observed`}{Journeys that contained a conversion.}
 #'     \item{`conversions_unattributable`}{Converting journeys that lost every
-#'       touchpoint to a direct-traffic rule, and so cannot be credited to any
+#'       touchpoint to a direct-traffic rule or to
+#'       `conversion_touch = "drop"`, and so cannot be credited to any
 #'       channel. That number should be reported, not absorbed.}
+#'     \item{`journeys_before_filtering`}{Journeys found before post-conversion
+#'       touches, direct traffic, conversion events under
+#'       `conversion_touch = "drop"`, the lookback and null paths were removed.}
+#'     \item{`duplicate_events`}{Exact duplicate events dropped before
+#'       journeys were built (see the `dedupe` argument of [build_paths()]).
+#'       `direct_events` and `conversion_events` count what remained.}
 #'   }
 #'
 #'   On a subset of a journey table the construction counts no longer apply, and
@@ -35,31 +42,32 @@
 #' path_summary(paths)
 #' @export
 path_summary <- function(paths) {
-  .mm_check_paths(paths)
+  paths <- .mm_check_paths(paths)
   cnt <- attr(paths, "mm_counts")
   if (is.null(cnt)) {
-    cnt <- list(events_in = NA_integer_, events_out = nrow(paths),
-                direct_events = NA_integer_,
+    cnt <- list(events_out = nrow(paths),
                 journeys = length(unique(paths$path_id)),
-                converting_journeys = length(unique(paths$path_id[paths$converted])),
-                conversion_events = NA_integer_,
-                conversions_observed = NA_integer_,
-                conversions_unattributable = NA_integer_)
+                converting_journeys = length(unique(paths$path_id[paths$converted])))
   }
+  # A count the object does not carry, from a subset or from an older version
+  # of the package, is NA rather than a missing column.
+  get <- function(nm) if (is.null(cnt[[nm]])) NA_integer_ else cnt[[nm]]
   lens <- if (nrow(paths) == 0L) numeric(0) else
     vapply(split(paths$touch_n, paths$path_id), function(z) z[1L], numeric(1))
   data.frame(
-    events_in = cnt$events_in,
-    events_out = cnt$events_out,
-    journeys = cnt$journeys,
-    converting_journeys = cnt$converting_journeys,
+    events_in = get("events_in"),
+    events_out = get("events_out"),
+    journeys = get("journeys"),
+    converting_journeys = get("converting_journeys"),
     mean_length = if (length(lens)) mean(lens) else NA_real_,
     median_length = if (length(lens)) stats::median(lens) else NA_real_,
     max_length = if (length(lens)) max(lens) else NA_real_,
-    direct_events = cnt$direct_events,
-    conversion_events = cnt$conversion_events,
-    conversions_observed = cnt$conversions_observed,
-    conversions_unattributable = cnt$conversions_unattributable,
+    direct_events = get("direct_events"),
+    conversion_events = get("conversion_events"),
+    conversions_observed = get("conversions_observed"),
+    conversions_unattributable = get("conversions_unattributable"),
+    journeys_before_filtering = get("journeys_before_filtering"),
+    duplicate_events = get("duplicate_events"),
     stringsAsFactors = FALSE
   )
 }
@@ -82,7 +90,7 @@ path_summary <- function(paths) {
 #' path_lengths(paths)
 #' @export
 path_lengths <- function(paths) {
-  .mm_check_paths(paths)
+  paths <- .mm_check_paths(paths)
   if (nrow(paths) == 0L) {
     return(data.frame(length = integer(0), journeys = integer(0),
                       converting = integer(0), conversion_rate = numeric(0)))
@@ -127,7 +135,7 @@ path_lengths <- function(paths) {
 #' channel_positions(paths)
 #' @export
 channel_positions <- function(paths, converting_only = TRUE) {
-  .mm_check_paths(paths)
+  paths <- .mm_check_paths(paths)
   .mm_check_flag(converting_only, "converting_only")
   p <- if (converting_only) paths[paths$converted, , drop = FALSE] else paths
   if (nrow(p) == 0L) {
@@ -139,13 +147,18 @@ channel_positions <- function(paths, converting_only = TRUE) {
   pos <- ifelse(p$touch_n == 1L, "only",
                 ifelse(p$touch_rank == 1L, "first",
                        ifelse(p$touch_rank == p$touch_n, "last", "middle")))
-  tab <- as.data.frame.matrix(table(p$channel, factor(
-    pos, levels = c("only", "first", "middle", "last"))))
-  out <- data.frame(channel = rownames(tab), tab, stringsAsFactors = FALSE)
-  rownames(out) <- NULL
+  chans <- sort(unique(p$channel), method = "radix")
+  tab <- as.data.frame.matrix(table(
+    factor(p$channel, levels = chans),
+    factor(pos, levels = c("only", "first", "middle", "last"))
+  ))
+  out <- data.frame(channel = chans, tab, stringsAsFactors = FALSE)
   out$touches <- out$only + out$first + out$middle + out$last
   out$first_last_ratio <- ifelse(out$last > 0, out$first / out$last, NA_real_)
-  out[order(-out$touches), , drop = FALSE]
+  out <- out[order(-out$touches, out$channel, method = "radix"), ,
+             drop = FALSE]
+  rownames(out) <- NULL
+  out
 }
 
 #' Assisted conversion matrix
@@ -154,8 +167,8 @@ channel_positions <- function(paths, converting_only = TRUE) {
 #' first channel somewhere before the second. Read a row as "this channel
 #' assisted these channels".
 #'
-#' The diagonal counts journeys where a channel appears before *itself* --
-#' repeat exposure. Note that under `build_paths()`'s default
+#' The diagonal counts journeys where a channel appears before *itself*, which
+#' is repeat exposure. Under `build_paths()`'s default
 #' `collapse_repeats = TRUE`, consecutive repeats have already been merged, so
 #' the diagonal only picks up channels that recur after an intervening
 #' different channel. Build the paths with `collapse_repeats = FALSE` if you
@@ -178,31 +191,33 @@ channel_positions <- function(paths, converting_only = TRUE) {
 #' round(assisted_conversions(paths, normalise = TRUE), 3)
 #' @export
 assisted_conversions <- function(paths, normalise = FALSE) {
-  .mm_check_paths(paths)
+  paths <- .mm_check_paths(paths)
   .mm_check_flag(normalise, "normalise")
   p <- paths[paths$converted, , drop = FALSE]
-  chans <- sort(unique(paths$channel))
+  chans <- sort(unique(paths$channel), method = "radix")
   m <- matrix(0, nrow = length(chans), ncol = length(chans),
               dimnames = list(assisting = chans, assisted = chans))
   if (nrow(p) == 0L) return(m)
 
-  # Index by position, not by name. A channel label may legitimately be the
-  # empty string -- `build_paths(direct = "keep")` preserves whatever the log
-  # contained -- and matrix name-indexing throws on "" even when it is a real
+  # Index by position, not by name. A channel label can still be the empty
+  # string, as when `build_paths(direct = "label")` is given `direct_labels`
+  # without "", and matrix name-indexing throws on "" even when it is a real
   # dimname.
   code <- match(p$channel, chans)
   dt <- data.table::data.table(pid = p$path_id, rank = p$touch_rank,
                                code = code)
-  present_tab <- unique(dt[, c("pid", "code"), with = FALSE])[, .N, by = "code"]
+  # Channel a precedes channel b somewhere in a journey exactly when a's first
+  # touch comes before b's last, so each journey needs only the first and last
+  # rank of each channel in it. Pairing those keeps the work per journey at
+  # the square of its distinct channels however long it is; pairing every
+  # touch grew with the square of its length.
+  span <- dt[, list(first = min(rank), last = max(rank)), by = c("pid", "code")]
+  present_tab <- span[, .N, by = "code"]
   present <- numeric(length(chans))
   present[present_tab$code] <- present_tab$N
-  # Every ordered (earlier, later) pair within a journey, counted once per
-  # journey. A self-join on journey id is O(sum of squared journey lengths),
-  # which is small because journeys are short.
-  pairs <- dt[dt, on = "pid", allow.cartesian = TRUE, nomatch = NULL]
-  pairs <- pairs[pairs$rank < pairs$i.rank, ]
+  pairs <- span[span, on = "pid", allow.cartesian = TRUE, nomatch = NULL]
+  pairs <- pairs[pairs$first < pairs[["i.last"]], ]
   if (nrow(pairs) > 0L) {
-    pairs <- unique(pairs[, c("pid", "code", "i.code"), with = FALSE])
     tab <- pairs[, .N, by = c("code", "i.code")]
     m[cbind(tab$code, tab[["i.code"]])] <- tab$N
   }
@@ -223,11 +238,14 @@ assisted_conversions <- function(paths, normalise = FALSE) {
 #' @param converting_only Restrict to converting journeys? Defaults to `FALSE`,
 #'   because the commonest non-converting journeys are usually the more
 #'   interesting half.
-#' @param sep Separator between channels in the rendered path string.
+#' @param sep Separator between channels in the rendered path string. A
+#'   channel name that contains `sep` is an error, since two different channel
+#'   sequences could then render as the same string.
 #'
 #' @return A data frame with one row per distinct channel sequence: `path`,
 #'   `journeys` (how many journeys followed it), `conversions` and
-#'   `conversion_rate`. Ordered by descending frequency, then alphabetically.
+#'   `conversion_rate`. Ordered by descending frequency, then alphabetically
+#'   in the C locale, so ties fall the same way on every platform.
 #'
 #' @seealso [as_channel_paths()], [path_diagnostics()]
 #'
@@ -238,9 +256,10 @@ assisted_conversions <- function(paths, normalise = FALSE) {
 #' top_paths(paths, n = 8)
 #' @export
 top_paths <- function(paths, n = 10, sep = " > ", converting_only = FALSE) {
-  .mm_check_paths(paths)
+  paths <- .mm_check_paths(paths)
   n <- .mm_check_count(n, "n", min = 1L)
   .mm_check_flag(converting_only, "converting_only")
+  .mm_check_sep(sep)
   p <- if (converting_only) paths[paths$converted, , drop = FALSE] else paths
   if (nrow(p) == 0L) {
     return(data.frame(path = character(0), journeys = integer(0),
@@ -252,7 +271,7 @@ top_paths <- function(paths, n = 10, sep = " > ", converting_only = FALSE) {
     by = list(path = strs$path), FUN = sum
   )
   tab$conversion_rate <- tab$conversions / tab$journeys
-  tab <- tab[order(-tab$journeys, tab$path), , drop = FALSE]
+  tab <- tab[order(-tab$journeys, tab$path, method = "radix"), , drop = FALSE]
   rownames(tab) <- NULL
   utils::head(tab, n)
 }
@@ -265,11 +284,15 @@ top_paths <- function(paths, n = 10, sep = " > ", converting_only = FALSE) {
 #' the window off the table.
 #'
 #' @param paths An `mm_paths` object from [build_paths()].
-#' @param probs Quantiles to report.
+#' @param probs Quantiles to report: probabilities in `[0, 1]`.
 #'
 #' @return A data frame with columns `quantile` and `lag`, in the journey
 #'   table's time units, plus an attribute `units` naming them. Only converting
 #'   journeys contribute.
+#'
+#'   Run it on journeys built without `lookback`. A lookback removes every
+#'   touch older than the window, so no lag can exceed it, and a warning says
+#'   so.
 #'
 #' @seealso [build_paths()], [path_diagnostics()]
 #'
@@ -283,7 +306,23 @@ top_paths <- function(paths, n = 10, sep = " > ", converting_only = FALSE) {
 #' conversion_lag(paths)
 #' @export
 conversion_lag <- function(paths, probs = c(0.5, 0.75, 0.9, 0.95, 0.99, 1)) {
-  .mm_check_paths(paths)
+  paths <- .mm_check_paths(paths)
+  if (!is.numeric(probs) || length(probs) == 0L || anyNA(probs) ||
+      any(probs < 0 | probs > 1)) {
+    cli::cli_abort(
+      "{.arg probs} must be a numeric vector of probabilities between 0 and \\
+       1, with no missing values."
+    )
+  }
+  lb <- attr(paths, "mm_settings")$lookback
+  if (!is.null(lb) && is.finite(as.numeric(lb))) {
+    cli::cli_warn(c(
+      "{.arg paths} was built with a lookback window, so no lag can be longer \\
+       than the window.",
+      i = "Build the journeys without {.arg lookback} to choose a window from \\
+           {.fn conversion_lag}."
+    ))
+  }
   units <- attr(paths, "mm_units")
   p <- paths[paths$converted, , drop = FALSE]
   if (nrow(p) == 0L) {
@@ -306,7 +345,9 @@ conversion_lag <- function(paths, probs = c(0.5, 0.75, 0.9, 0.95, 0.99, 1)) {
 #' Run every journey diagnostic at once
 #'
 #' A convenience wrapper returning the diagnostics an analyst normally presents
-#' together. Each element is exactly what the corresponding function returns.
+#' together. Each element is what the corresponding function returns with its
+#' defaults, except `assists`, which is
+#' `assisted_conversions(paths, normalise = TRUE)`.
 #'
 #' @param paths An `mm_paths` object from [build_paths()].
 #' @param n Number of top paths to include.
@@ -326,7 +367,7 @@ conversion_lag <- function(paths, probs = c(0.5, 0.75, 0.9, 0.95, 0.99, 1)) {
 #' diag$summary
 #' @export
 path_diagnostics <- function(paths, n = 10) {
-  .mm_check_paths(paths)
+  paths <- .mm_check_paths(paths)
   list(
     summary = path_summary(paths),
     lengths = path_lengths(paths),
@@ -339,7 +380,32 @@ path_diagnostics <- function(paths, n = 10) {
 
 #' @keywords internal
 #' @noRd
-.mm_path_strings <- function(p, sep) {
+.mm_check_sep <- function(sep, call = parent.frame()) {
+  if (!.mm_is_string(sep) || !nzchar(sep)) {
+    cli::cli_abort(
+      "{.arg sep} must be a single string of at least one character.",
+      call = call
+    )
+  }
+  invisible(sep)
+}
+
+# One path string per journey. A channel name containing the separator would
+# let two different channel sequences render as the same string, and the
+# aggregation by string would then merge them.
+#' @keywords internal
+#' @noRd
+.mm_path_strings <- function(p, sep, call = parent.frame()) {
+  chans <- unique(p$channel)
+  clash <- chans[grepl(sep, chans, fixed = TRUE)]
+  if (length(clash) > 0L) {
+    cli::cli_abort(c(
+      "{.arg sep} {.val {sep}} occurs inside {length(clash)} channel \\
+       name{?s}, for example {.val {utils::head(clash, 3)}}.",
+      i = "Choose a separator that no channel name contains, so that every \\
+           path string splits back into its channels."
+    ), call = call)
+  }
   dt <- data.table::data.table(path_id = p$path_id, rank = p$touch_rank,
                                channel = p$channel, converted = p$converted,
                                value = p$conversion_value)

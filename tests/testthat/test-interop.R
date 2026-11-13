@@ -55,6 +55,21 @@ test_that("as_channel_paths() uses the sep argument and validates it", {
   expect_identical(ca$path, "X -> Y")
 
   expect_error(as_channel_paths(p, sep = 1), "single string")
+  expect_error(as_channel_paths(p, sep = ""), "single string")
+})
+
+test_that("as_channel_paths() refuses a separator that occurs in a channel name", {
+  ev <- data.frame(cust = c("a", "a", "b"), ch = c("paid", "search", "paid>search"),
+                   ts = as.POSIXct("2024-01-01", tz = "UTC") + c(0, 1, 0),
+                   conv = c(0, 1, 0))
+  p <- build_paths(ev, id = "cust", channel = "ch", timestamp = "ts",
+                   conversion = "conv")
+  # With ">" journey a renders as "paid>search", the same string as journey
+  # b's single channel, and the two would be aggregated into one path.
+  expect_error(as_channel_paths(p, sep = ">"), "paid>search")
+  ca <- as_channel_paths(p)
+  expect_identical(nrow(ca), 2L)
+  expect_identical(ca$path, c("paid > search", "paid>search"))
 })
 
 test_that("as_channel_paths() returns a zero-row table without error on empty paths", {

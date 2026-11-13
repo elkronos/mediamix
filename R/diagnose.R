@@ -4,8 +4,9 @@
 #' None of them are about the model; all of them are about whether the data
 #' contains the information the model will be asked to find. Run this first.
 #'
-#' @param data A data frame containing the media columns.
-#' @param media Character vector naming the media columns.
+#' @param data A data frame containing the media columns. A tibble or
+#'   data.table is read as a plain data frame.
+#' @param media Character vector naming the media columns, each once.
 #' @param spend,impressions Optional character vectors of matching spend and
 #'   impression columns, in the same order, for the cost-per-mille consistency
 #'   check.
@@ -15,18 +16,27 @@
 #'   coefficient of variation, the highest share of dark periods. Pooling
 #'   geographies that differ mainly in scale would manufacture correlation that
 #'   exists in no single series, so `by` is worth supplying whenever the rows
-#'   are a panel.
+#'   are a panel. Groups set with `dplyr::group_by()` are not used in its place;
+#'   a message says so and names the `by` to pass.
 #' @param vif_threshold Variance inflation factor above which a channel is
 #'   flagged.
 #' @param cv_threshold Coefficient of variation below which a channel is flagged
 #'   as insufficiently varying.
-#' @param decay Optional geometric decay for computing collinearity on
-#'   *adstocked* media: a single number for every channel, or a named vector
+#' @param decay Optional geometric decay in `[0, 1)` for computing collinearity
+#'   on *adstocked* media: a single number for every channel, or a named vector
 #'   with one per channel (unnamed channels are left raw). Adstock smooths each
 #'   series, and smoothed series are usually more correlated than the raw
-#'   spend, so this is the collinearity the model will actually face. Rows
-#'   must be in time order within each group. Variation and flighting are
-#'   always reported on the raw spend.
+#'   spend, so this is the collinearity the model will face. Rows must be in
+#'   time order within each group; pass `date` to check that they are. Missing
+#'   spend is treated as zero for the adstock, and a message counts the values
+#'   affected. Variation and flighting are always reported on the raw spend.
+#' @param date Optional name of the time column, as a string. The column must
+#'   be numeric, `Date` or `POSIXct`, with no missing values. Each series (each
+#'   group of `by`) is checked for rows that come earlier than the row above
+#'   them, for periods that appear more than once, and for missing periods,
+#'   judged against the series' usual spacing. Adstock treats adjacent rows as
+#'   adjacent periods, so each of these changes what a decay means. See
+#'   *Time order* below.
 #'
 #' @return An object of class `mm_diagnosis`: a named list with elements
 #'   \describe{
@@ -35,17 +45,27 @@
 #'       `zero_share`, and the flags `low_variation`, `heavily_flighted` and
 #'       `usable`.}
 #'     \item{`collinearity`}{Per channel: the worst group `vif`, the
-#'       `most_correlated_with` partner and its `correlation`, and `identified`
-#'       -- `TRUE`, `FALSE`, or `NA` where the factor could not be computed at
-#'       all. `NA` is not `TRUE`.}
+#'       `most_correlated_with` partner and its `correlation`, and `identified`:
+#'       `TRUE` when `vif` is at most `vif_threshold`, `FALSE` above it, and
+#'       `NA` where the factor could not be computed at all. `NA` is not
+#'       `TRUE`.}
 #'     \item{`correlations`}{Pairwise correlation matrix. With `by` supplied,
 #'       each cell is the group value with the largest magnitude, sign
 #'       preserved.}
-#'     \item{`cpm`}{Implied cost per mille for each row of `data` (`row` is
-#'       the row number), with the series median and an outlier flag, when
-#'       `spend` and `impressions` are supplied; with `by`, the median and
-#'       outlier rule are computed within each series and a `group` column is
-#'       added. `NULL` otherwise.}
+#'     \item{`cpm`}{One row per row of `data` and spend column when `spend`
+#'       and `impressions` are supplied, `NULL` otherwise: `channel` (the spend
+#'       column), `row` (the row number), the implied `cpm`, the series'
+#'       `median_cpm` and the `outlier` flag. With `by`, the median and outlier
+#'       rule are computed within each series and a `group` column is added.}
+#'     \item{`dates`}{One row per series when `date` is supplied, `NULL`
+#'       otherwise: `group` (with `by`), `rows`, the `start` and `end` of the
+#'       series, its `period`, and the counts `out_of_order` (rows that come
+#'       earlier than the row above them), `duplicated` (rows that repeat a
+#'       period already in the series), `missing` (whole periods absent
+#'       between `start` and `end`) and `irregular` (steps between consecutive
+#'       time points that differ from `period` by more than a quarter of it).
+#'       `period` is the median step between the series' distinct time points,
+#'       in the units of `date`: days for a `Date`, seconds for a `POSIXct`.}
 #'     \item{`flags`}{Character vector of the problems found, in the order they
 #'       should be dealt with. Empty when nothing was found.}
 #'     \item{`n_obs`, `n_groups`, `grouped`, `adstocked`}{Rows examined,
@@ -53,17 +73,20 @@
 #'       was measured on adstocked media.}
 #'   }
 #'
+#'   `as.data.frame()` and `tidy()` return the per-channel table: one row per
+#'   channel, with the `variation` and `collinearity` columns side by side.
+#'
 #' @details
 #' Four things sink marketing mix projects, and all four are visible before a
 #' model is fitted.
 #'
-#' **Channel collinearity** is the biggest practical problem in the field. When
-#' two channels move together -- because they were planned together, which is
-#' usually the case -- the model cannot tell their effects apart. It will still
-#' produce coefficients, and those coefficients will flip sign on small changes
-#' to the specification or the sample. A variance inflation factor above 5
-#' deserves attention and above 10 means the split between those channels is not
-#' identified, however tight the overall fit looks.
+#' **Channel collinearity** is common, because channels are usually planned
+#' together. When two channels move together the model cannot tell their
+#' effects apart. It will still produce coefficients, and those coefficients
+#' can flip sign on small changes to the specification or the sample. A
+#' variance inflation factor above 5 deserves attention and above 10 means the
+#' split between those channels is not identified, however tight the overall
+#' fit looks.
 #'
 #' **Insufficient variation** is the quieter version of the same problem. A
 #' channel spending nearly the same amount every week carries almost no
@@ -74,12 +97,33 @@
 #' of the time has far less effective sample than its row count suggests, and
 #' because carryover across dark periods is where transform bugs hide.
 #'
-#' **Spend and impression inconsistency** -- a wildly varying implied cost per
-#' mille -- almost always means a data-join error upstream rather than a real
-#' change in media pricing. It is worth catching before it becomes a modelling
-#' puzzle.
+#' **Spend and impression inconsistency**, a wildly varying implied cost per
+#' mille, usually means a data-join error upstream rather than a real change
+#' in media pricing. It is worth catching before it becomes a modelling
+#' puzzle. A period is flagged when its CPM is more than five median absolute
+#' deviations from its series' median. When more than half of a series' CPMs
+#' are identical the median absolute deviation is zero, and a period is
+#' flagged instead when its CPM is at least twice or at most half the median.
 #'
-#' @seealso [adstock_geometric()], [contributions()]
+#' @section Time order:
+#' Adstock treats adjacent rows as adjacent periods. [adstock_geometric()] and
+#' [media_transform()] have no time index, so they take each series' rows in
+#' the order given: a row out of order mixes later spend into earlier weeks, a
+#' period that appears twice is carried over twice, and a missing week lets
+#' the decay act once across what were two weeks. None of these raises an
+#' error. With `date`, each series is checked for all three, and the result is
+#' in `dates`.
+#'
+#' The usual spacing of a series is the median step between its distinct time
+#' points, as in [step_adstock()]; a series with a single time point takes the
+#' median of the other series' spacings. A step counts as irregular when it
+#' differs from that spacing by more than a quarter of it, so calendar months
+#' of 28 to 31 days are regular. A gap of about two periods counts one
+#' missing period, of about three periods two, and so on. Rows out of order
+#' are counted in the order of `data`, one for each row whose time point is
+#' earlier than that of the row above it in the same series.
+#'
+#' @seealso [plot.mm_diagnosis()], [adstock_geometric()], [contributions()]
 #'
 #' @examples
 #' data(mm_weekly)
@@ -93,7 +137,7 @@
 #' d$variation
 #' d$collinearity
 #'
-#' # Collinearity after adstocking is what the model actually sees
+#' # Collinearity after adstocking is what the model sees
 #' diagnose_media(mm_weekly, media = channels, by = "geo",
 #'                decay = attr(mm_weekly, "truth")$decay)$collinearity
 #'
@@ -101,10 +145,19 @@
 #' fake <- mm_weekly[mm_weekly$geo == "north", ]
 #' fake$twin <- fake$tv * 1.02 + 5
 #' diagnose_media(fake, media = c("tv", "twin", "search"))$collinearity
+#'
+#' # Adstock treats adjacent rows as adjacent periods, so check the dates too.
+#' # Here one week of north is dropped and two others swap places.
+#' messy <- mm_weekly[-10, ]
+#' messy[2:3, ] <- messy[3:2, ]
+#' checked <- diagnose_media(messy, media = channels, by = "geo",
+#'                           date = "date")
+#' checked$dates
+#' checked$flags
 #' @export
 diagnose_media <- function(data, media, spend = NULL, impressions = NULL,
                            by = NULL, vif_threshold = 5, cv_threshold = 0.15,
-                           decay = NULL) {
+                           decay = NULL, date = NULL) {
   if (!is.data.frame(data)) {
     cli::cli_abort("{.arg data} must be a data frame.")
   }
@@ -112,18 +165,37 @@ diagnose_media <- function(data, media, spend = NULL, impressions = NULL,
     cli::cli_abort("{.arg media} must be a non-empty character vector of \\
                     column names.")
   }
-  .mm_assert_cols(data, c(media, spend, impressions, by))
+  if (anyDuplicated(media)) {
+    cli::cli_abort(c(
+      "{.arg media} must name each column once.",
+      x = "Repeated: {.val {unique(media[duplicated(media)])}}."
+    ))
+  }
+  if (!is.null(date) && !.mm_is_string(date)) {
+    cli::cli_abort("{.arg date} must be a single column name given as a \\
+                    string.")
+  }
+  .mm_assert_cols(data, c(media, spend, impressions, by, date))
   vif_threshold <- .mm_check_scalar(vif_threshold, "vif_threshold", lower = 1)
   cv_threshold <- .mm_check_scalar(cv_threshold, "cv_threshold", lower = 0)
+  .mm_note_dplyr_groups(data, by, "diagnose_media")
+  # A data.table reads a character index as a join, and a grouped tibble
+  # carries groups this function does not use; a plain data frame has neither.
+  data <- as.data.frame(data)
 
   grp <- .mm_step_groups(data, by)
-  m <- as.data.frame(lapply(data[media], function(z) .mm_as_number(z, "media")),
-                     check.names = FALSE)
-  names(m) <- media
+  grouped <- .mm_has_by(by)
+  dates <- if (is.null(date)) NULL else {
+    .mm_date_table(data[[date]], grp, grouped, date)
+  }
+  here <- environment()
+  m <- as.data.frame(lapply(stats::setNames(media, media), function(cn) {
+    .mm_as_number(data[[cn]], cn, call = here)
+  }), check.names = FALSE)
 
   # A column with no usable values cannot take part in any regression, and
   # leaving it in would make `complete.cases()` empty out every other column's
-  # design matrix -- turning one dead channel into an all-clear report.
+  # design matrix, which would turn one dead channel into an all-clear report.
   usable <- vapply(m, function(z) sum(is.finite(z)) > 0L, logical(1))
   dead <- media[!usable]
 
@@ -165,7 +237,18 @@ diagnose_media <- function(data, media, spend = NULL, impressions = NULL,
   live <- m[, usable, drop = FALSE]
   decays <- .mm_diag_decays(decay, media)
   if (!is.null(decays)) {
-    for (cn in intersect(names(decays), names(live))) {
+    adstocked <- intersect(names(decays), names(live))
+    gaps <- vapply(live[adstocked], function(z) sum(is.na(z)), integer(1))
+    if (any(gaps > 0L)) {
+      gaps <- gaps[gaps > 0L]
+      by_channel <- paste0(names(gaps), " (", gaps, ")", collapse = ", ")
+      cli::cli_inform(c(
+        "Missing spend was treated as zero when adstocking for the \\
+         collinearity check.",
+        i = "Missing values by channel: {by_channel}."
+      ))
+    }
+    for (cn in adstocked) {
       for (rows in grp) {
         v <- live[[cn]][rows]
         live[[cn]][rows] <- adstock_geometric(v, decay = decays[[cn]],
@@ -189,10 +272,12 @@ diagnose_media <- function(data, media, spend = NULL, impressions = NULL,
   cors <- .mm_worst_cor(per_group_stats, media)
   collinearity <- .mm_collinearity_table(per_group_stats, media, cors,
                                          vif_threshold)
-  cpm <- .mm_cpm_table(data, spend, impressions, grp,
-                       grouped = !is.null(by) && length(by) > 0L)
+  cpm <- .mm_cpm_table(data, spend, impressions, grp, grouped = grouped,
+                       call = environment())
 
-  flags <- character(0)
+  # Problems with the time index come first: sorting, aggregating or filling
+  # the rows changes every other diagnostic.
+  flags <- .mm_date_flags(dates)
   if (length(dead) > 0L) {
     flags <- c(flags, sprintf(
       "No usable values: %s contain no finite observations and were excluded from every diagnostic.",
@@ -232,9 +317,8 @@ diagnose_media <- function(data, media, spend = NULL, impressions = NULL,
   structure(
     list(variation = variation, collinearity = collinearity,
          correlations = cors, cpm = cpm, flags = flags,
-         n_obs = nrow(data), n_groups = length(grp),
-         grouped = !is.null(by) && length(by) > 0L,
-         adstocked = !is.null(decays)),
+         n_obs = nrow(data), n_groups = length(grp), grouped = grouped,
+         adstocked = !is.null(decays), dates = dates),
     class = "mm_diagnosis"
   )
 }
@@ -251,15 +335,70 @@ print.mm_diagnosis <- function(x, ...) {
     cli::cli_text("{.emph Ungrouped. On panel data, pass {.arg by} so that \\
                    collinearity is measured within series.}")
   }
+  dt <- x$dates
+  if (is.data.frame(dt) && nrow(dt) > 0L) {
+    bad <- sum(dt$out_of_order > 0 | dt$duplicated > 0 | dt$irregular > 0,
+               na.rm = TRUE)
+    if (bad == 0L) {
+      cli::cli_text("{.emph Time index: every series is in order, with one \\
+                     row per period and no gaps.}")
+    } else {
+      cli::cli_text("{.emph Time index: {bad} of {nrow(dt)} series \\
+                     {cli::qty(bad)}{?has/have} rows out of order, repeated \\
+                     periods, gaps or uneven steps.}")
+    }
+  }
   if (length(x$flags) == 0L) {
     cli::cli_alert_success("No structural problems found.")
   } else {
     cli::cli_alert_warning("{length(x$flags)} issue{?s} found:")
-    for (f in x$flags) cli::cli_bullets(c("*" = f))
+    # Passed as a value, so braces in a series name are printed, not
+    # interpreted.
+    for (f in x$flags) cli::cli_bullets(c("*" = "{f}"))
   }
+  tables <- c("$variation", "$collinearity", "$correlations",
+              if (is.data.frame(dt)) "$dates")
   cli::cli_text("")
-  cli::cli_text("{.emph Inspect $variation, $collinearity, $correlations.}")
+  cli::cli_text("{.emph Inspect {paste(tables, collapse = ', ')}.}")
   invisible(x)
+}
+
+#' @export
+as.data.frame.mm_diagnosis <- function(x, row.names = NULL, optional = FALSE,
+                                       ...) {
+  v <- x$variation
+  co <- x$collinearity
+  out <- cbind(v, co[match(v$channel, co$channel),
+                     setdiff(names(co), "channel"), drop = FALSE])
+  rownames(out) <- NULL
+  out
+}
+
+#' @exportS3Method generics::tidy
+tidy.mm_diagnosis <- function(x, ...) {
+  as.data.frame(x)
+}
+
+# dplyr groups are not used as `by`: grouping does not survive every route a
+# data frame takes, so a panel is named explicitly. A grouped frame passed
+# without `by` gets a message naming the `by` to pass.
+#' @keywords internal
+#' @noRd
+.mm_note_dplyr_groups <- function(data, by, fn, arg = "data") {
+  if (!is.null(by) || !inherits(data, "grouped_df")) return(invisible(NULL))
+  vars <- setdiff(names(attr(data, "groups", exact = TRUE)), ".rows")
+  if (length(vars) == 0L) return(invisible(NULL))
+  code <- if (length(vars) == 1L) {
+    sprintf('by = "%s"', vars)
+  } else {
+    sprintf("by = c(%s)", paste0('"', vars, '"', collapse = ", "))
+  }
+  cli::cli_inform(c(
+    "{.arg {arg}} is grouped by {.val {vars}}, but {.fn {fn}} does not use \\
+     dplyr groups: the rows are treated as one series.",
+    i = "Pass {.code {code}} to treat each group as its own series."
+  ))
+  invisible(NULL)
 }
 
 #' @keywords internal
@@ -365,28 +504,36 @@ print.mm_diagnosis <- function(x, ...) {
 #' @keywords internal
 #' @noRd
 .mm_cpm_table <- function(data, spend, impressions, grp = NULL,
-                          grouped = FALSE) {
+                          grouped = FALSE, call = parent.frame()) {
   if (is.null(spend) || is.null(impressions)) return(NULL)
   if (length(spend) != length(impressions)) {
     cli::cli_abort("{.arg spend} and {.arg impressions} must name the same \\
                     number of columns, in matching order.",
-                   call = parent.frame(2))
+                   call = call)
   }
   if (is.null(grp)) grp <- list(".all" = seq_len(nrow(data)))
   # The median and MAD are computed within each series. Pooled across
-  # geographies, a region that simply buys media at a different price would
-  # be flagged as a stream of join errors.
+  # geographies, a region that buys media at a different price would be
+  # flagged as a stream of join errors.
   rows <- lapply(seq_along(spend), function(i) {
-    s <- as.numeric(data[[spend[i]]])
-    imp <- as.numeric(data[[impressions[i]]])
+    s <- .mm_as_number(data[[spend[i]]], spend[i], call = call)
+    imp <- .mm_as_number(data[[impressions[i]]], impressions[i], call = call)
     cpm_all <- ifelse(imp > 0, s / imp * 1000, NA_real_)
     do.call(rbind, lapply(names(grp), function(g) {
       r <- grp[[g]]
       cpm <- cpm_all[r]
       med <- stats::median(cpm, na.rm = TRUE)
       madv <- stats::mad(cpm, na.rm = TRUE)
-      outlier <- !is.na(cpm) & is.finite(madv) & madv > 0 &
-        abs(cpm - med) > 5 * madv
+      # When more than half the CPMs are identical the MAD is zero, and a rule
+      # in MADs flags nothing however far a period strays. A factor of two
+      # either side of the median is the fallback.
+      outlier <- if (is.finite(madv) && madv > 0) {
+        !is.na(cpm) & abs(cpm - med) > 5 * madv
+      } else if (is.finite(med) && med > 0) {
+        !is.na(cpm) & (cpm >= 2 * med | cpm <= med / 2)
+      } else {
+        rep(FALSE, length(cpm))
+      }
       out <- data.frame(channel = spend[i], row = r, cpm = cpm,
                         median_cpm = med, outlier = outlier,
                         stringsAsFactors = FALSE)
@@ -398,4 +545,81 @@ print.mm_diagnosis <- function(x, ...) {
   out <- out[order(out$channel, out$row), , drop = FALSE]
   rownames(out) <- NULL
   out
+}
+
+# One row per series describing how its rows sit on the time index. The usual
+# spacing and the count of irregular steps come from the helpers that
+# step_adstock() uses, so the two judge a series the same way.
+#' @keywords internal
+#' @noRd
+.mm_date_table <- function(dates, grp, grouped, col, call = parent.frame()) {
+  t <- .mm_index_numeric(dates, "date", call = call)
+  .mm_check_index_finite(t, grp, grouped, col, call = call)
+  periods <- .mm_group_periods(t, grp)
+  out <- do.call(rbind, lapply(seq_along(grp), function(i) {
+    rows <- grp[[i]]
+    v <- t[rows]
+    u <- sort(unique(v))
+    p <- periods[[i]]
+    steps <- if (length(u) > 1L) diff(u) / p else numeric(0)
+    data.frame(
+      rows = length(rows),
+      start = dates[rows[which.min(v)]],
+      end = dates[rows[which.max(v)]],
+      period = p,
+      out_of_order = sum(diff(v) < 0),
+      duplicated = sum(duplicated(v)),
+      missing = sum(pmax(round(steps) - 1, 0)),
+      irregular = .mm_irregular_steps(u, p),
+      stringsAsFactors = FALSE
+    )
+  }))
+  if (grouped) {
+    out <- cbind(group = .mm_show_key(names(grp)), out,
+                 stringsAsFactors = FALSE)
+  }
+  rownames(out) <- NULL
+  out
+}
+
+# Flags for the time index, one per kind of problem, naming up to three of the
+# series affected.
+#' @keywords internal
+#' @noRd
+.mm_date_flags <- function(tab) {
+  if (is.null(tab)) return(character(0))
+  where <- function(hit) {
+    if (is.null(tab$group)) return("")
+    n <- sum(hit)
+    more <- if (n > 3L) sprintf(" and %d more", n - 3L) else ""
+    sprintf(" in %d series (%s%s)", n,
+            paste(utils::head(tab$group[hit], 3L), collapse = ", "), more)
+  }
+  count <- function(v) format(sum(v), big.mark = ",", scientific = FALSE)
+  flags <- character(0)
+  hit <- tab$out_of_order > 0
+  if (any(hit)) {
+    flags <- c(flags, sprintf(
+      "Out of time order: %s row(s)%s come earlier than the row above them. Adstock treats adjacent rows as adjacent periods, so sort each series by date before transforming it.",
+      count(tab$out_of_order), where(hit)))
+  }
+  hit <- tab$duplicated > 0
+  if (any(hit)) {
+    flags <- c(flags, sprintf(
+      "Repeated periods: %s row(s)%s repeat a period already in the series. Adstock needs one row per period in each series: aggregate the repeats, or name the column that separates the series in `by`.",
+      count(tab$duplicated), where(hit)))
+  }
+  hit <- tab$missing > 0
+  if (any(hit)) {
+    flags <- c(flags, sprintf(
+      "Missing periods: %s period(s)%s are absent, judged against each series' usual spacing. Carryover crosses each gap as if it were one period; fill the missing periods with zero spend.",
+      count(tab$missing), where(hit)))
+  }
+  hit <- tab$irregular > 0 & tab$missing == 0
+  if (any(hit)) {
+    flags <- c(flags, sprintf(
+      "Uneven spacing: %s step(s)%s differ from the series' usual spacing by more than a quarter of a period, which changes what the decay means at those steps.",
+      count(tab$irregular[hit]), where(hit)))
+  }
+  flags
 }

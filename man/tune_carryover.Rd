@@ -21,22 +21,31 @@ tune_carryover(
   cores = 1L,
   aggregate = c("pooled", "mean"),
   controls = NULL,
-  warm_start = FALSE
+  warm_start = FALSE,
+  by = NULL,
+  index = NULL,
+  se_block = 1L,
+  save_pred = FALSE
 )
 }
 \arguments{
-\item{x}{Numeric vector of media spend in time order.}
+\item{x}{Numeric vector of media spend, in time order unless \code{index} is
+given. It must be finite and must vary: a constant series carries no
+information about carryover.}
 
-\item{y}{Numeric vector of the KPI, the same length as \code{x}.}
+\item{y}{Numeric vector of the KPI, the same length as \code{x}. It may have
+missing values: the default model leaves those rows out of its fits, and
+a split with no KPI to assess is left out.}
 
 \item{fit_fn}{A function of \verb{(x_adstocked, y)} returning a fitted model.
 Defaults to \code{\link[=fit_ols]{fit_ols()}}. When \code{controls} are supplied it receives a data
-frame instead -- the adstocked media as column \code{media}, then the
-controls -- and the default becomes least squares on all of them. For
+frame instead, with the adstocked media as column \code{media} followed by the
+controls, and the default becomes least squares on all of them. For
 several channels at once, see \code{\link[=tune_carryover_joint]{tune_carryover_joint()}}.}
 
 \item{predict_fn}{A function of \verb{(model, newdata)} returning predictions,
-where \code{newdata} is the adstocked media for the assessment rows. Defaults to
+where \code{newdata} is the adstocked media for the assessment rows, or with
+\code{controls} a data frame of the same shape \code{fit_fn} receives. Defaults to
 \code{\link[stats:predict]{stats::predict()}}.}
 
 \item{max_lags}{Integer vector of candidate kernel lengths. \code{Inf} is allowed
@@ -49,16 +58,18 @@ and denotes the infinite recursive kernel.}
 
 \item{scheme}{Resampling scheme. \code{"rolling_origin"} (the default) grows the
 training window one step at a time and assesses on the periods immediately
-following. \code{"k_fold_forward"} splits the series into \code{k} contiguous forward
-blocks. Both are forward-only; neither ever trains on data that follows
-what it assesses.}
+following. \code{"k_fold_forward"} splits the periods after the first training
+window into \code{k} contiguous blocks and assesses each with a model trained
+on every period before it. Both are forward-only; neither ever trains on
+data that follows what it assesses.}
 
 \item{metric_fn}{A function of \verb{(actual, predicted)} returning a single
 number to be minimised. Defaults to \code{\link[=rmse]{rmse()}}.}
 
-\item{initial}{Size of the first training window. Defaults to half the
-series for \code{scheme = "rolling_origin"}, and to \code{floor(n / (k + 1))} for
-\code{scheme = "k_fold_forward"}, in both cases rounded down.}
+\item{initial}{Size of the first training window, in periods. Defaults to
+half the series for \code{scheme = "rolling_origin"}, and to
+\code{floor(n / (k + 1))} for \code{scheme = "k_fold_forward"}, in both cases
+rounded down.}
 
 \item{assess}{Number of periods assessed per split. Used by
 \code{scheme = "rolling_origin"} only; the forward-block scheme's assessment
@@ -72,23 +83,53 @@ series cheaper. \code{0} evaluates every split. Used by
 Ignored otherwise.}
 
 \item{cores}{Number of cores. Values above 1 use \code{\link[parallel:mclapply]{parallel::mclapply()}} on
-Unix-alikes and a socket cluster elsewhere.}
+Unix-alikes and a socket cluster elsewhere. The workers of a socket
+cluster are new R sessions that load \pkg{mediamix} and nothing else, so
+there \code{fit_fn} and \code{predict_fn} must call other packages with
+\code{pkg::fun()} and must not rely on functions or data defined in your
+session. \code{metric_fn} runs in your session.}
 
 \item{aggregate}{How to turn the assessment sets into one score.
 \code{"pooled"} (the default) collects every out-of-sample prediction across
 splits and evaluates \code{metric_fn} once on the lot, so \code{rmse} really is the
 root mean squared forecast error. \code{"mean"} evaluates \code{metric_fn} on each
-split and averages, which is the \pkg{tune} convention; note that with
+split and averages, which is the \pkg{tune} convention. With
 \code{assess = 1} a per-split RMSE is an absolute error, so the mean of them is
 a mean absolute error whatever \code{metric_fn} is called.}
 
 \item{controls}{Optional data frame of control variables (trend, price,
 seasonality, ...) entered into the model untransformed, so carryover is
 judged with them accounted for. The rows are kept aligned with every split
-automatically.}
+automatically. Factor, character and logical columns are expanded to
+treatment dummies by \code{\link[stats:model.matrix]{stats::model.matrix()}} and every name is made
+syntactic, so \code{fit_fn} sees columns such as \code{seasonQ2} rather than
+\code{season}. A column with a single value adds nothing beside an intercept
+and is dropped with a message. Missing or non-finite values are an error
+that names the column and rows: impute them, or drop those periods from
+every input.}
 
 \item{warm_start}{Seed the adstock with \code{\link[=adstock_steady_state]{adstock_steady_state()}} rather
-than zero, removing the start-up bias of a long carryover.}
+than zero, removing the start-up bias of a long carryover. The seed
+averages spend over no more than the first training window, so it uses
+only media that every split trains on.}
+
+\item{by, index}{Panel data. \code{by} assigns each row to a series, as a vector
+or a data frame of key columns, and \code{index} gives each row's period, as a
+number, \link{Date} or \link{POSIXct}. With \code{index} the rows may come in any order.
+\code{by} needs \code{index}. See \emph{Panel data}.}
+
+\item{se_block}{Number of consecutive splits the jackknife leaves out
+together when it computes \code{std_err} and the one-standard-error rule. \code{1},
+the default, treats the splits as independent. Successive forecasts share
+most of their training data, so their errors are usually correlated and
+independence understates the standard error; a block of a few splits
+allows for that. \code{best} does not depend on it.}
+
+\item{save_pred}{Keep the out-of-sample predictions? \code{FALSE} by default, as
+in \pkg{tune}'s \code{control_resamples()}. With \code{TRUE} the result gains
+\code{predictions}: every candidate's forecasts for the assessed rows of the
+splits it was scored on. The fits produce them in any case, so keeping
+them costs only the table, one row per candidate per assessed row.}
 }
 \value{
 An object of class \code{mm_carryover}: a list with elements
@@ -99,38 +140,60 @@ plus the corresponding \code{half_life}, \code{metric}, \code{std_err} and
 \item{\code{best_1se}}{The same, for the candidate chosen by the
 one-standard-error rule. See \emph{Choosing among near-ties}.}
 \item{\code{results}}{Data frame of the full grid: \code{max_lag}, \code{decay},
-\code{half_life}, \code{metric}, \code{std_err} and \code{n_splits}. \code{std_err} is the
-standard error of the per-split metric, \code{sd / sqrt(n_splits)}.}
-\item{\code{metric}}{Name of the metric function used.}
+\code{half_life}, \code{metric}, \code{std_err} and \code{n_splits}. \code{half_life} is \code{NA}
+where the kernel carries nothing over (\code{decay = 0} or \code{max_lag = 1})
+or never decays (\code{decay = 1}). \code{std_err} is the jackknife standard
+error of \code{metric} over splits; for \code{aggregate = "mean"} with
+\code{se_block = 1} it is \code{sd / sqrt(n_splits)} of the per-split values.
+\code{n_splits} is the number of splits every candidate was scored on.}
+\item{\code{metric}}{The cross-validated metric of \code{best}.}
+\item{\code{metric_name}}{Name of the metric function used.}
 \item{\code{aggregate}}{How the splits were combined.}
 \item{\code{scheme}}{The resampling scheme used.}
-\item{\code{n_splits}}{Number of resampling splits evaluated.}
+\item{\code{n_splits}}{Number of resampling splits formed.}
+\item{\code{n_ok}}{Number of splits every candidate was scored on. See
+\emph{Failed fits}.}
+\item{\code{n_series}}{Number of series, more than 1 only with \code{by}.}
 \item{\code{normalise}}{Whether the adstock kernel was normalised, carried
 through so the selected decay can be reapplied on the same footing.}
+\item{\code{predictions}}{Only with \code{save_pred = TRUE}: one row per
+candidate per assessed row of the \code{n_ok} splits \code{metric} was computed
+on, with columns \code{split} (the split's position among the
+\code{n_splits} formed), \code{row} (the row of \code{x} and \code{y}), \code{index} and
+\code{group} (with \code{index} and \code{by}), \code{max_lag}, \code{decay}, \code{observed} and
+\code{predicted}. Candidates come in the order of \code{results}, and a
+candidate that completed no split has no rows. With
+\code{aggregate = "pooled"}, \code{metric_fn(observed, predicted)} over one
+candidate's rows gives its \code{metric}.}
 }
+\code{as.data.frame()} and \code{tidy()} return \code{results} with two logical columns,
+\code{best} and \code{best_1se}, marking the two selections.
 }
 \description{
 Searches a grid of geometric adstock parameters and returns the pair that
 best predicts a held-out key performance indicator, using forward-only
-resampling and a model you supply.
+resampling and least squares or a model you supply.
 }
 \section{What this fixes}{
 
 It is tempting to choose carryover parameters by asking which transformed
-series is best-behaved -- smoothest, most trend-like, easiest to extrapolate.
-That criterion has no dependent variable in it, and it has a defect that is
-easy to miss: the objective is monotone in how hard the filter smooths, so it
-drifts toward the longest lag and highest decay in whatever grid it is given.
-The chosen parameters then say more about the grid's upper corner than about
-the media.
+series is best-behaved: smoothest, most trend-like, easiest to extrapolate.
+That criterion has no dependent variable in it, so it gives the same answer
+whatever the media did to the KPI. It ranks the candidates by how hard the
+filter smooths the media, and its choice usually lands at one end of the
+decay grid, the lowest decay for some spend series and the highest for
+others. On the series simulated in \code{vignette("carryover")}, whose true decay
+is 0.7, its error rises with decay and it picks the lowest. The chosen
+parameters then say more about the grid's edges than about the media.
 
 The fix is to put the KPI in the loop. Here every candidate \verb{(max_lag, decay)}
 is scored by how well a model fitted on adstocked media predicts \emph{held-out
 KPI}, so the winner is the carryover structure that actually improves
 forecasts of the thing being modelled. It also means the answer depends on
 the model you intend to fit, which is a feature: carryover and the rest of
-the specification are not separable, and pretending otherwise is how a
-three-week half-life turns into a nine-week one once seasonality is added.
+the specification are not separable. In the last example below, leaving the
+trend and seasonality out of the model selects a longer carryover than the
+one the data were simulated with.
 }
 
 \section{Why full-series adstock is safe here}{
@@ -138,9 +201,9 @@ three-week half-life turns into a nine-week one once seasonality is added.
 The media series is adstocked once per grid point and then sliced into folds,
 rather than being re-adstocked inside each fold. That is valid because the
 filter is causal: the adstock value at time \eqn{t} depends only on media at
-times \eqn{\le t}. Assessment-period regressors therefore draw on training
--period \emph{media}, which is information genuinely available at prediction time,
-and never on future media. No KPI information crosses the boundary at any
+times \eqn{\le t}. Assessment-period regressors therefore draw on
+training-period \emph{media}, which is information genuinely available at
+prediction time, and never on future media. No KPI information crosses the boundary at any
 point. The \code{adstock(x)[1:m] == adstock(x[1:m])} invariant is enforced by the
 test suite precisely because this shortcut depends on it.
 }
@@ -152,20 +215,35 @@ curve is often nearly flat across a wide band of decay, and the minimum
 moves around from sample to sample. \code{best} reports the minimum; \code{best_1se}
 applies the one-standard-error rule (Breiman et al., 1984; Hastie,
 Tibshirani and Friedman, 2009, section 7.10), choosing the \emph{shortest}
-carryover -- lowest half-life, then shortest kernel -- that the
-resampling cannot distinguish from the best candidate. When the two
+carryover (lowest half-life, then shortest kernel) that the resampling
+cannot distinguish from the best candidate. When the two
 disagree, the shorter carryover is the more conservative claim.
 
-The comparison is \emph{paired}: every candidate is scored on the same splits,
-so a candidate qualifies when its mean per-split error exceeds the best
-candidate's by no more than one standard error of the per-split
-\emph{difference}. The textbook unpaired version compares against the standard
-error of the best candidate's own mean error, which on time-series splits
-is dominated by how hard each period is to forecast -- common to every
-candidate -- and so admits nearly the whole grid. The \code{std_err} column
-reports that unpaired standard error, as a measure of forecast noise. The
-rule is computed on per-split errors whatever \code{aggregate} is, because that
-is where a standard error comes from.
+The comparison is \emph{paired} and is made on the quantity \code{best} minimises.
+Every candidate is scored on the same splits, and a candidate qualifies when
+its \code{metric} exceeds that of \code{best} by no more than one standard error of
+the \emph{difference}. The standard error comes from a jackknife over splits:
+both metrics are recomputed with each block of \code{se_block} consecutive
+splits left out. For \code{aggregate = "mean"} with \code{se_block = 1} it is the
+standard error of the mean per-split difference; for the pooled RMSE with
+one-period assessment sets it agrees, to first order, with a paired
+comparison of the per-forecast squared errors. The textbook unpaired
+version compares against the standard error of the best candidate's own
+metric, which on time-series splits is dominated by how hard each period is
+to forecast, a cost common to every candidate, and so admits nearly the
+whole grid. The \code{std_err} column reports that unpaired standard error, as a
+measure of forecast noise.
+}
+
+\section{Failed fits}{
+
+When \code{fit_fn}, \code{predict_fn} or \code{metric_fn} fails on a split for some
+candidates, or returns missing predictions, that split is left out for
+every candidate, so all of them are compared on the same forecasts. A
+warning quotes the first failure and \code{n_ok} counts the splits that remain.
+Splits whose assessment periods have no KPI are left out without a warning.
+When every candidate fails, the error quotes the first failure and names
+the function that raised it.
 }
 
 \section{Start-up bias}{
@@ -176,12 +254,35 @@ reaches only 15\% of its steady-state level in week one and 90\% after
 \code{effective_window(0.85)} = 15 weeks. With \code{initial} at half the series this
 rarely decides the answer, but it biases the fit towards short carryover on
 short series. \code{warm_start = TRUE} seeds every candidate with
-\code{\link[=adstock_steady_state]{adstock_steady_state()}}; better still, pass real pre-period spend through
-\code{\link[=adstock_state]{adstock_state()}} and your own \code{fit_fn} when you have it.
+\code{\link[=adstock_steady_state]{adstock_steady_state()}}, averaging spend over \code{effective_window(decay)}
+periods or the first training window, whichever is shorter, so the seed
+uses only media that every split trains on. The tuner takes no starting
+state: it has no \code{state} argument, and \code{fit_fn} receives media that is
+already adstocked. To use real pre-period spend, put it at the front of \code{x}
+with \code{NA} for those periods in \code{y}; the default model leaves rows without
+a KPI out of every fit. Or tune with \code{warm_start = TRUE}, and when you apply
+the selected decay, start \code{\link[=adstock_geometric]{adstock_geometric()}} from the state
+\code{\link[=adstock_state]{adstock_state()}} computes from the pre-period spend.
+}
+
+\section{Panel data}{
+
+With \code{by} and \code{index}, \code{x}, \code{y} and \code{controls} hold several series stacked,
+such as the geographies of \link{mm_weekly}. Each series is adstocked on its own
+in \code{index} order, so carryover never runs from one series into the next.
+Splits are formed on the distinct values of \code{index}: \code{initial}, \code{assess},
+\code{skip} and \code{k} count periods rather than rows, every split trains on the
+same periods of every series, and it assesses the periods that follow. One
+model is fitted to all the series at once and the metric pools their
+forecasts; pass the series as a control to give each its own intercept.
+A series has at most one row per period, and its consecutive rows are
+taken to be consecutive periods. Series may start and end in different
+periods; with \code{warm_start}, a series that starts after the first training
+window is cold-started.
 }
 
 \examples{
-# Recover a known decay from data generated with it
+# Recover a known decay from data simulated with it
 set.seed(42)
 n <- 120
 spend <- pmax(0, rnorm(n, 500, 250))
@@ -199,10 +300,16 @@ tuned$best$decay
 # The shortest carryover the data cannot distinguish from the best
 tuned$best_1se$decay
 
-# Tune against a model with controls rather than the bare default. The
-# cleanest way is to residualise the KPI first, which needs no row
-# bookkeeping: `tune_carryover()` then sees a response the controls have
-# already explained away.
+# Keep the out-of-sample forecasts, for example to look at the best one
+kept <- tune_carryover(spend, kpi, max_lags = Inf,
+                       decays = seq(0.1, 0.9, by = 0.1), save_pred = TRUE)
+best <- kept$predictions[kept$predictions$decay == kept$best$decay, ]
+head(best)
+c(rmse(best$observed, best$predicted), kept$best$metric)
+
+# Tune against a model with controls rather than the bare default. Passed
+# as `controls`, the trend and seasonality are fitted inside every training
+# window, so no split learns from KPI values that come after it.
 season <- sin(2 * pi * seq_len(n) / 52)
 trend <- seq_len(n)
 kpi2 <- kpi + 40 * trend + 300 * season
@@ -210,27 +317,29 @@ kpi2 <- kpi + 40 * trend + 300 * season
 bare <- suppressWarnings(tune_carryover(
   spend, kpi2, max_lags = Inf, decays = seq(0.1, 0.9, by = 0.1)
 ))
-
-controls <- stats::lm(kpi2 ~ trend + season)
-residualised <- suppressWarnings(tune_carryover(
-  spend, stats::residuals(controls),
-  max_lags = Inf, decays = seq(0.1, 0.9, by = 0.1)
-))
+with_controls <- tune_carryover(
+  spend, kpi2, max_lags = Inf, decays = seq(0.1, 0.9, by = 0.1),
+  controls = data.frame(trend, season)
+)
 
 # The truth is 0.7. Ignoring the trend and seasonality moves the answer.
-c(truth = 0.7, bare = bare$best$decay, residualised = residualised$best$decay)
+c(truth = 0.7, bare = bare$best$decay, controls = with_controls$best$decay)
 }
 \references{
 Breiman, L., Friedman, J., Olshen, R. and Stone, C. (1984).
 \emph{Classification and Regression Trees}. Wadsworth.
+\doi{10.1201/9781315139470}
 
 Hastie, T., Tibshirani, R. and Friedman, J. (2009). \emph{The Elements of
 Statistical Learning} (2nd ed.). Springer.
+\doi{10.1007/978-0-387-84858-7}
 
-Bergmeir, C. and Benitez, J. M. (2012). On the use of cross-validation for
-time series predictor evaluation. \emph{Information Sciences}, 191, 192--213.
+Bergmeir, C. and \enc{Benítez}{Benitez}, J. M. (2012). On the use of
+cross-validation for time series predictor evaluation. \emph{Information
+Sciences}, 191, 192--213. \doi{10.1016/j.ins.2011.12.028}
 }
 \seealso{
+\code{\link[=plot_carryover]{plot_carryover()}} for the error across the grid,
 \code{\link[=tune_carryover_joint]{tune_carryover_joint()}} for several channels at once,
 \code{\link[=adstock_geometric]{adstock_geometric()}}, \code{\link[=fit_ols]{fit_ols()}}, \code{\link[=effective_window]{effective_window()}}
 }

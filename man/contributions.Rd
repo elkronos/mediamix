@@ -4,52 +4,88 @@
 \alias{contributions}
 \title{Decompose predicted KPI into channel contributions}
 \usage{
-contributions(media, model, intercept = NULL, index = NULL, by = NULL)
+contributions(
+  media,
+  model,
+  intercept = NULL,
+  index = NULL,
+  by = NULL,
+  newdata = NULL
+)
 }
 \arguments{
-\item{media}{A data frame of the \emph{transformed} media regressors -- adstocked
-and saturated -- exactly as they entered the model. Column names must match
-the model's coefficient names.}
+\item{media}{A data frame of the \emph{transformed} media regressors (adstocked
+and saturated), exactly as they entered the model. Column names must match
+the model's coefficient names. Backticks in a coefficient name are
+ignored, so a column named \verb{TV Spend} matches the coefficient
+\code{`TV Spend`}. Numeric columns that match no coefficient are left out,
+with a message.}
 
 \item{model}{A fitted model, or a named numeric vector of coefficients.
-Anything \code{\link[stats:coef]{stats::coef()}} works on will do.}
+Any model for which \code{\link[stats:coef]{stats::coef()}} returns a named numeric vector will
+do, such as an \code{lm()} or \code{glm()} fit. For \pkg{glmnet}, \pkg{brms} or
+Stan, pass the point estimates as a named vector. For a mixed model from
+\pkg{nlme} or \pkg{lme4}, the fixed effects are used, and group-level
+deviations from them are part of the baseline.}
 
-\item{intercept}{Model intercept. Taken from \code{model} when it has one; supply
-it explicitly when passing a bare coefficient vector without an
+\item{intercept}{Model intercept, used when the baseline is the intercept:
+for a bare coefficient vector, or for a fitted model that cannot predict
+the periods in \code{media}. Taken from \code{model} when it has one; supply it
+explicitly when passing a bare coefficient vector without an
 \code{"(Intercept)"} element.}
 
 \item{index}{Optional vector, the same length as \code{nrow(media)}, labelling the
-periods. Used as the \code{period} column of the result.}
+periods. Used as the \code{period} column of the result; defaults to the row
+numbers.}
 
-\item{by}{Optional grouping vector, the same length as \code{nrow(media)}.}
+\item{by}{Optional grouping vector, the same length as \code{nrow(media)}, or
+a data frame of grouping columns with one row per row of \code{media}. With a
+data frame, \code{group} joins each row's values with \code{" / "}.}
+
+\item{newdata}{Optional data frame holding every variable \code{model} needs, one
+row per row of \code{media}, for periods the model was not fitted on: a holdout,
+or a reporting period. The baseline is then \code{predict(model, newdata)}
+minus the media effect. Columns that appear in both \code{media} and \code{newdata}
+must hold the same values.}
 }
 \value{
 A data frame in long format with columns \code{period}, \code{group} (present
 only when \code{by} is supplied), \code{channel} and \code{contribution}. The baseline
-appears as a channel named \code{"(baseline)"}.
+appears as a channel named \code{"(baseline)"}. The result has class
+\code{mm_contributions}, with a \link[=plot.mm_contributions]{plot()} method.
 
-When \code{model} is a fitted object that \code{\link[stats:fitted.values]{stats::fitted()}} understands,
-contributions sum exactly to the model's fitted value in every period,
-because the baseline is computed as the fitted value minus the media
-effect. When \code{model} is a bare coefficient vector there are no fitted
-values to work from, so the baseline is just the intercept and
-contributions sum to the media effect plus that intercept -- the function
-says so when it happens.
+The baseline is the model's prediction minus the media effect, so the
+contributions in each period sum to that prediction. Which prediction is
+used depends on the rows of \code{media}:
+\itemize{
+\item When \code{media} holds the rows the model was fitted on, it is the model's
+fitted value. The rows are recognised by comparing the media columns
+with the model frame. A row the model dropped for a missing value has a
+\code{NA} baseline, and a message says how many there are.
+\item For any other rows, it is \code{predict(model, newdata)}. Without \code{newdata},
+\code{media} itself is used when it holds every variable the model needs;
+otherwise the baseline is the intercept alone, and a message says so.
+The fitted values of the training rows are never used for other rows.
+\item For a bare coefficient vector there is nothing to predict with, so the
+baseline is the intercept, and contributions sum to the media effect
+plus that intercept. The function says so when the model has terms
+that are not among the media columns.
+}
 }
 \description{
 Splits a fitted model's prediction into a per-channel contribution plus a
-baseline. This is what a marketing mix model deliverable actually is: not the
-coefficients, but the answer to "how much of last year's revenue did each
-channel produce, and what would have happened anyway".
+baseline. A marketing mix model is usually delivered as this decomposition,
+the answer to "how much of last year's revenue did each channel produce,
+and what would have happened anyway", rather than as its coefficients.
 }
 \details{
 Contributions are computed as \eqn{\beta_j x_{jt}} for each channel, with
-everything else -- intercept, trend, price, seasonality, controls -- pooled
+everything else (intercept, trend, price, seasonality, controls) pooled
 into \code{"(baseline)"}. That pooling is a deliberate simplification: it is what
 makes contributions sum exactly to the fitted value, and it means the
 baseline is not "organic demand" but "everything this decomposition does not
-attribute to media". Reporting it as organic demand is the single most common
-way a marketing mix deliverable overstates its own precision.
+attribute to media". Reporting it as organic demand makes a marketing mix
+deliverable look more precise than it is.
 
 Contributions inherit whatever the model's identification is worth. If two
 channels are collinear the split between them is arbitrary even when the
@@ -61,10 +97,21 @@ presenting any of this.
 On panel data, pass one geography at a time or supply \code{by}. \code{index} is used
 as a label, not a key: with \code{by} supplied and one date per geography, a
 \code{tapply()} over \code{period} alone silently adds the geographies together.
-
-The result has class \code{mm_contributions}, with a \link[=plot.mm_contributions]{plot()}
-method.
 }
+\section{Models with a link function}{
+
+For a generalised linear model whose link is not the identity, such as a
+Poisson or log-link model, \eqn{\beta_j x_{jt}} is on the scale of the
+linear predictor, not of the KPI. Contributions are then computed on that
+scale throughout: the baseline is the linear predictor minus the media
+effect, each period sums to the linear predictor rather than to the fitted
+KPI, and a warning says so. Under a log link, \code{exp()} of a channel's
+contribution is the factor by which the channel multiplies the predicted
+KPI. To express a channel's effect in KPI units, compare the model's
+predictions with predictions from data in which that channel is set to
+zero.
+}
+
 \examples{
 data(mm_weekly)
 north <- mm_weekly[mm_weekly$geo == "north", ]
@@ -73,15 +120,14 @@ channels <- c("tv", "video", "search", "social", "display")
 # Transform with the parameters the data was generated from, so the example
 # shows a correctly specified decomposition rather than a misspecified one.
 truth <- attr(mm_weekly, "truth")
-transformed <- as.data.frame(Map(
-  function(x, d, h, sh) media_transform(
-    x, adstock = list(decay = d),
-    saturation = list(half_max = h, shape = sh)),
-  north[channels], truth$decay[channels], truth$half_max[channels],
-  truth$shape[channels]
+spec <- lapply(stats::setNames(channels, channels), function(ch) list(
+  adstock = list(decay = truth$decay[[ch]]),
+  saturation = list(half_max = truth$half_max[[ch]],
+                    shape = truth$shape[[ch]])
 ))
+transformed <- transform_plan(north[channels], spec)
 
-# Include the controls the data was generated with. Without them, the media
+# Include the controls the data was simulated with. Without them, the media
 # coefficients absorb price, trend and seasonality and two of them flip sign.
 model_data <- transformed
 model_data$week <- seq_len(nrow(model_data))
@@ -98,9 +144,20 @@ totals <- as.numeric(tapply(contrib$contribution, contrib$period, sum))
 all.equal(totals, unname(stats::fitted(fit)))
 
 # Channel totals over the three years. "(baseline)" is everything the model
-# predicts that is not attributed to these five columns -- trend, price,
-# seasonality and the intercept. It is not organic demand.
+# predicts that is not attributed to these five columns: trend, price,
+# seasonality, holidays and the intercept. It is not organic demand.
 round(tapply(contrib$contribution, contrib$channel, sum))
+
+# A period the model was not fitted on: fit on the first two years and
+# decompose the third, with `newdata` holding the controls for those weeks.
+early <- seq_len(104)
+fit_early <- stats::lm(revenue ~ ., data = cbind(revenue = north$revenue,
+                                                 model_data)[early, ])
+holdout <- contributions(transformed[-early, ], fit_early,
+                         index = north$date[-early],
+                         newdata = model_data[-early, ])
+all.equal(as.numeric(tapply(holdout$contribution, holdout$period, sum)),
+          unname(stats::predict(fit_early, model_data[-early, ])))
 }
 \seealso{
 \code{\link[=roi]{roi()}}, \code{\link[=response_curve]{response_curve()}}, \code{\link[=diagnose_media]{diagnose_media()}},

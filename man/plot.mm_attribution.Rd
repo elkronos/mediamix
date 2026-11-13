@@ -11,7 +11,9 @@
 
 \item{n}{Show the \code{n} channels with the largest mean share.}
 
-\item{...}{Ignored.}
+\item{...}{Graphical arguments: \code{main}, \code{xlab} and \code{ylab} replace the
+defaults, and \code{col} gives the colours of the first-touch, last-touch and
+Markov markers. Others are ignored.}
 }
 \value{
 \code{x}, invisibly.
@@ -21,6 +23,11 @@ One row per channel. The grey bar spans the lowest to the highest share any
 rule gives it; first-touch, last-touch and Markov shares are marked, and
 the other rules appear as grey ticks. A long bar is a channel whose value
 depends on the convention, not the data.
+}
+\details{
+A missing share is left out of the plot with a warning. The mean share
+that ranks the channels is taken over the shares that are present, and a
+channel with no share at all ranks last.
 }
 \examples{
 data(mm_events)

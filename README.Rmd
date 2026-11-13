@@ -1,0 +1,378 @@
+---
+output: github_document
+---
+
+<!-- README.md is knitted from README.Rmd. Edit README.Rmd, then run
+devtools::build_readme() to rebuild README.md and its figures. -->
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  fig.path = "man/figures/README-",
+  fig.width = 1400 / 170,
+  fig.height = 860 / 170,
+  dpi = 170,
+  out.width = "100%"
+)
+options(digits = 4)
+```
+
+# mediamix
+
+<!-- badges: start -->
+[![R-CMD-check](https://github.com/elkronos/mediamix/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/elkronos/mediamix/actions/workflows/R-CMD-check.yaml)
+[![Lifecycle: experimental](https://img.shields.io/badge/lifecycle-experimental-orange.svg)](https://lifecycle.r-lib.org/articles/stages.html#experimental)
+<!-- badges: end -->
+
+Composable media transforms and attribution path construction for R.
+
+mediamix turns raw marketing data into model-ready features: media spend into
+carryover- and saturation-adjusted regressors, and raw event logs into
+attributed customer journeys.
+
+Use it if you fit your own marketing mix model, whether in `lm()`, `glmnet`,
+`brms`, Stan or a tidymodels workflow, or if you need customer journeys and
+attribution built from a raw event log.
+
+It is a preprocessing, feature-engineering and reporting package, not a
+modelling engine. `lm()`, `glmnet` and `brms` fit models better than a
+marketing package would, and `tune` does hyperparameter search properly.
+mediamix does the steps in front of the model and the decomposition after it,
+with the methodological details that usually get skipped written into the API.
+
+Documentation, walkthroughs and worked examples are on the package website,
+<https://elkronos.github.io/mediamix/>.
+
+## What it offers
+
+The full MMM frameworks (Robyn in R; Meridian and PyMC-Marketing in Python)
+bundle transforms, a model, an optimiser and reporting into one pipeline.
+mediamix provides those pieces separately, for use around a model you choose:
+
+- `step_adstock()` carries filter state across the train/test boundary, so
+  carryover, saturation and a model penalty can be tuned jointly in one
+  `tune_bayes()` call with no rows lost.
+- `marginal_roi()` re-runs the whole transform on a 1% larger budget, the
+  definition used by Jin et al. (2017) and by Meridian. The common shortcut,
+  a curve's slope times the kernel's first weight, understates slow channels
+  several-fold.
+- `allocate_budget()` splits a budget across channels to maximise the media
+  response a fitted model predicts, rescaling each channel's series so its
+  flighting is kept. It compares every spend level of every channel on a
+  grid, so an S-shaped channel that returns little on its first increments is
+  not left unfunded. `simulate_plan()` and `reallocate()` test a single move
+  through the same curves.
+- `tune_carryover()` and, for every channel at once inside one model with
+  controls, `tune_carryover_joint()` score candidates on held-out KPI with
+  forward-only resampling and report the one-standard-error choice alongside
+  the minimum.
+- `block_bootstrap()` resamples runs of weeks to put intervals on ROI,
+  marginal ROI or anything else you compute.
+- `build_paths()` turns a raw event log into journeys with every construction
+  choice an argument, and accounts for the conversions that filtering leaves
+  unattributable.
+- `attribute()` runs five rule-based credit schemes and an order-1 Markov
+  removal-effect model side by side, and `attribution_spread()` reports how
+  much the answer depends on the choice.
+- `decay_from_half_life()` and `half_life()` translate between a decay
+  coefficient and the half-life practitioners talk in, and
+  `effective_window()` gives the number of periods that hold 90% of the
+  effect; both halves of the package use this one vocabulary.
+
+## Scope
+
+| In | Out | Because |
+|---|---|---|
+| Adstock and saturation transforms | Model fitting | `lm`, `glmnet`, `brms` already exist |
+| Carryover selection by cross-validation | Bespoke hyperparameter optimisers | `tune` does this properly |
+| Journey construction from event logs | Higher-order Markov chains | `ChannelAttribution` does them in C++ |
+| Rule-based credit and order-1 Markov removal effects | Causal incrementality | Requires experiments, not logs |
+| Contribution, ROI, counterfactual marginal ROI and budget allocation | Allocation under parameter uncertainty | `allocate_budget()` takes point estimates; `block_bootstrap()` measures how far they move |
+| Media data diagnostics | Generic regression diagnostics | `broom`, `performance` |
+
+`as_channel_paths()` exports journeys straight into `ChannelAttribution`'s
+format, for higher-order models and very large path tables.
+
+## Installation
+
+mediamix is not yet on CRAN. Install the development version from GitHub:
+
+```r
+# install.packages("pak")
+pak::pak("elkronos/mediamix")
+```
+
+`pak` does not build vignettes for packages installed from GitHub, so
+`vignette("carryover")` and the others are not available after this install.
+Read them on the [package website](https://elkronos.github.io/mediamix/), or
+install with `remotes::install_github("elkronos/mediamix", build_vignettes = TRUE)`.
+
+mediamix imports `cli` and `rlang` for its messages and `data.table` for the
+attribution half, where event logs get large. It has no compiled code.
+`recipes`, `dials` and the rest of tidymodels are in `Suggests` and registered
+conditionally, so the transforms work equally well from a Stan or `brms`
+workflow that will never touch them.
+
+## Example
+
+### Media mix modelling
+
+`mm_weekly` holds three years of weekly spend on five channels, with price
+and revenue, for three geographies. It was simulated from known carryover and
+saturation parameters, kept in its `"truth"` attribute, so every estimate
+below can be checked. The example uses the north geography:
+
+```{r}
+library(mediamix)
+data(mm_weekly)
+truth <- attr(mm_weekly, "truth")
+
+north <- mm_weekly[mm_weekly$geo == "north", ]
+channels <- c("tv", "video", "search", "social", "display")
+controls <- data.frame(week = seq_len(nrow(north)), price = north$price,
+                       seasonality = north$seasonality,
+                       holiday = north$holiday)
+```
+
+It is tempting to choose decay by asking which transformed series is
+best-behaved. That criterion has no dependent variable in it, so it ranks
+filters by how hard they smooth rather than by anything about the outcome.
+`tune_carryover_joint()` scores each candidate by how well a model with every
+channel and the controls predicts *held-out* revenue, so no channel is
+credited with another's effect. The default model is ordinary least squares;
+`fit_fn` and `predict_fn` take any other.
+
+```{r}
+joint <- tune_carryover_joint(north[channels], north$revenue,
+                              controls = controls)
+rbind(estimate = joint$best$decay, truth = truth$decay[channels])
+```
+
+```{r joint-facts, include = FALSE}
+off <- channels[round(abs(joint$best$decay - truth$decay[channels]), 8) > 0.1]
+```
+
+Of the five, `r knitr::combine_words(off)` miss by more than 0.1. Search's
+cross-validation profile is almost flat: the data does not identify its
+carryover, which `plot(joint)` makes visible and a bare point estimate would
+hide. Carryover is weakly identified in most real data, which is why the
+one-standard-error rule (Hastie, Tibshirani and Friedman, 2009) is reported
+alongside, as `joint$best_1se`.
+
+The joint search does not tune saturation, so to keep the example short the
+model below uses the parameters `mm_weekly` was simulated from: geometric
+adstock (Broadbent, 1979) followed by a Hill curve (Hill, 1910), which
+`media_transform()` applies in that order. `transform_plan()` does the same
+for every channel of a plan, each with its own entry in `spec`. Any model can
+go on top; here it is `lm()` with the controls. `contributions()` splits the
+fitted revenue into one part per channel and a baseline, and `roi()` divides
+each channel's contribution by its spend:
+
+```{r}
+spec <- lapply(stats::setNames(channels, channels), function(ch) list(
+  adstock = list(decay = truth$decay[[ch]]),
+  saturation = list(half_max = truth$half_max[[ch]],
+                    shape = truth$shape[[ch]])
+))
+media <- transform_plan(north, spec)[channels]
+fit <- lm(north$revenue ~ ., data = cbind(media, controls))
+contrib <- contributions(media, fit, index = north$date)
+roi(contrib, north[channels])
+```
+
+Every channel returns more than it costs on average. The main results have
+`plot()` methods in one consistent, colour-vision-checked style; here is the
+decomposition week by week:
+
+```{r contributions}
+plot(contrib)
+```
+
+Average ROI is a scorecard; marginal ROI is the decision variable.
+`marginal_roi()` computes it the way Jin et al. (2017) and Meridian define
+it, as the extra response from a 1% larger budget divided by the extra spend,
+by re-running carryover and saturation rather than differentiating a curve:
+
+```{r}
+tv <- marginal_roi(north$tv, coefficient = coef(fit)[["tv"]],
+                   adstock = list(decay = truth$decay[["tv"]]),
+                   saturation = list(half_max = truth$half_max[["tv"]],
+                                     shape = truth$shape[["tv"]]))
+tv
+```
+
+```{r shortcut, include = FALSE}
+z <- adstock_geometric(north$tv, decay = truth$decay[["tv"]])
+shortcut <- mroi(mean(z), coefficient = coef(fit)[["tv"]],
+                 half_max = truth$half_max[["tv"]],
+                 shape = truth$shape[["tv"]]) * (1 - truth$decay[["tv"]])
+```
+
+Television's next pound returns `r round(tv$mroi, 2)`, close to its average
+of `r round(tv$roi, 2)`. The tempting shortcut, the curve's slope times the
+kernel's first weight, gives `r round(shortcut, 2)` for this channel: it
+counts only the week of spend and discards the
+`r round(100 * truth$decay[["tv"]])`% of the effect that arrives later.
+
+`block_bootstrap()` puts intervals on any of these numbers. On `mm_weekly`
+they are wide, which is the point: see the
+[budget walkthrough](https://elkronos.github.io/mediamix/articles/budget-walkthrough.html)
+for how that changes a recommendation, and how its answer compares with the
+truth the data was simulated from.
+
+### Attribution
+
+Attribution tools such as `ChannelAttribution` consume `"a > b > c"` strings
+with conversion counts attached; producing those strings is left to the
+analyst. That step usually ends up as a `group_by()` and a
+`paste(collapse = " > ")`, and that loses a great deal.
+
+```{r journey-table, echo = FALSE}
+data(mm_events)
+ordered <- mm_events[order(mm_events$customer_id, mm_events$timestamp), ]
+naive <- split(ordered$channel, ordered$customer_id)
+step <- function(...) {
+  s <- path_summary(suppressMessages(build_paths(
+    mm_events, id = "customer_id", channel = "channel",
+    timestamp = "timestamp", conversion = "conversion", ...)))
+  c(s$journeys, s$mean_length)
+}
+steps <- rbind(
+  "naive one-path-per-customer" = c(length(naive), mean(lengths(naive))),
+  "split on conversion" = step(split_on = "conversion",
+                               collapse_repeats = FALSE),
+  # build_paths()'s defaults: split on conversion, collapse repeats
+  "+ collapse consecutive duplicates" = step()
+)
+last <- nrow(steps)
+more <- round(100 * (steps[last, 1] / steps[1, 1] - 1))
+shorter <- round(100 * (1 - steps[last, 2] / steps[1, 2]))
+```
+
+On `mm_events`, the package's
+`r format(nrow(mm_events), big.mark = ",")`-event synthetic log:
+
+```{r journey-table-print, echo = FALSE}
+knitr::kable(data.frame(
+  ` ` = rownames(steps),
+  journeys = format(steps[, 1], big.mark = ","),
+  `mean length` = sprintf("%.2f", steps[, 2]),
+  check.names = FALSE
+), align = c("l", "r", "r"), row.names = FALSE)
+```
+
+The last row is `build_paths()` with its defaults: `r more`% more journeys
+than the first row, and `r shorter`% shorter. Journey counts and lengths feed
+a Markov transition matrix directly, so those are not rounding differences.
+Each of these choices is an argument to `build_paths()`:
+
+```{r}
+paths <- build_paths(
+  mm_events,
+  id = "customer_id", channel = "channel", timestamp = "timestamp",
+  conversion = "conversion", value = "value",
+  lookback = 30,                       # or read it off conversion_lag()
+  split_on = c("conversion", "gap"), gap = 30,
+  collapse_repeats = TRUE,
+  keep_null_paths = TRUE,              # Markov removal effects need these
+  direct = "label"
+)
+```
+
+`build_paths()` handles the things that go wrong between an event log and a
+set of journeys: journey splitting, lookback windows, non-converting paths,
+direct, none and missing channels, consecutive duplicates, duplicate events,
+timestamps that do not parse, deterministic tie-breaking, and accounting for
+conversions that filtering leaves unattributable. Each is an argument, not an
+assumption.
+
+Dropping direct traffic can strip a converting journey of every touchpoint it
+had. mediamix fixes the conversion facts before any filtering, so those
+conversions are counted and reported as `conversions_unattributable` rather
+than quietly shrinking the denominator.
+
+Any single credit rule gives you a number. Several give you the range that
+number could have been. `attribute()` runs five heuristic rules and an order-1
+Markov removal-effect model (Anderl et al., 2016). The four channels whose
+share varies most:
+
+```{r}
+shares <- attribute(paths)
+spread <- attribution_spread(shares)
+head(spread, 4)
+```
+
+```{r attribution}
+plot(shares)
+```
+
+```{r spread-facts, include = FALSE}
+display <- spread[spread$channel == "display", ]
+heuristic <- shares[shares$rule != "markov", ]
+markov <- shares[shares$rule == "markov", ]
+inside <- vapply(markov$channel, function(ch) {
+  h <- heuristic$share[heuristic$channel == ch]
+  m <- markov$share[markov$channel == ch]
+  m >= min(h) && m <= max(h)
+}, logical(1))
+```
+
+Display's share runs from `r round(100 * display$min_share)`% to
+`r round(100 * display$max_share)`% depending only on the convention chosen.
+That channel has not been measured; it has been assigned a number. The Markov
+share falls inside the heuristic range for `r sum(inside)` of
+`r length(inside)` channels here: a data-driven convention narrows the
+argument without ending it.
+
+Rule-based attribution is a bookkeeping convention, not a causal estimate. It
+divides observed conversions among observed touchpoints by a rule you chose; it
+cannot tell you what would have happened if a channel had not run, because that
+outcome is not in the log. Only an experiment answers that.
+
+## Where to go next
+
+From first steps to deeper material:
+
+- `vignette("mediamix")`: getting started, from raw data to contributions and
+  ROI.
+- The [budget walkthrough](https://elkronos.github.io/mediamix/articles/budget-walkthrough.html):
+  one budget question from weekly spend to a recommendation, checked against
+  the parameters the data was simulated from.
+- `vignette("carryover")`: choosing decay and lag by cross-validation, and
+  why five correlated channels make it harder.
+- `vignette("tidymodels")`: joint tuning of transform and model parameters,
+  with recipe steps that carry adstock across the train/test boundary.
+- `vignette("journeys")`: building journeys from event logs.
+- `vignette("spine")`: carryover and credit are the same idea, the geometric
+  kernel run forward from spend for adstock and backward from a conversion
+  for time-decay credit.
+- [Methods and references](https://elkronos.github.io/mediamix/articles/methodology.html):
+  the method behind each function and where it comes from.
+- [How mediamix relates to other tools](https://elkronos.github.io/mediamix/articles/comparison.html):
+  Robyn, Meridian, PyMC-Marketing and ChannelAttribution.
+
+The walkthrough, the methods page and the comparison are on the website only;
+the vignettes also ship with the package.
+
+## References
+
+Anderl, E., Becker, I., von Wangenheim, F. and Schumann, J. H. (2016). Mapping
+the customer journey: Lessons learned from graph-based online attribution
+modeling. *International Journal of Research in Marketing*, 33(3), 457–474.
+<https://doi.org/10.1016/j.ijresmar.2016.03.001>
+
+Broadbent, S. (1979). One way TV advertisements work. *Journal of the Market
+Research Society*, 21(3), 139–166.
+
+Hastie, T., Tibshirani, R. and Friedman, J. (2009). *The Elements of
+Statistical Learning* (2nd ed.). Springer.
+<https://doi.org/10.1007/978-0-387-84858-7>
+
+Hill, A. V. (1910). The possible effects of the aggregation of the molecules of
+haemoglobin on its dissociation curves. *The Journal of Physiology*, 40,
+iv–vii.
+<https://doi.org/10.1113/jphysiol.1910.sp001386>
+
+Jin, Y., Wang, Y., Sun, Y., Chan, D. and Koehler, J. (2017). *Bayesian methods
+for media mix modeling with carryover and shape effects.* Google Inc.

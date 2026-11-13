@@ -12,13 +12,15 @@ carryover- and saturation-adjusted regressors, and raw event logs into
 attributed customer journeys.
 }
 \details{
-It is a preprocessing and reporting package. It does not fit models --
+It is a preprocessing and reporting package and does not fit models;
 \code{lm()}, \code{glmnet} and \code{brms} do that better than a marketing package would.
 It computes order-1 Markov removal effects natively; for higher-order chains
 \code{\link[=as_channel_paths]{as_channel_paths()}} hands your journeys to \pkg{ChannelAttribution}.
 
-Full documentation, an end-to-end walkthrough and the methods behind each
-function are at \url{https://elkronos.github.io/mediamix/}.
+Full documentation is at \url{https://elkronos.github.io/mediamix/}, including
+an end-to-end budget walkthrough, an index from tasks to functions, answers
+to common questions, a guide to moving a Robyn model across, and the
+methods behind each function.
 }
 \section{Where to start}{
 
@@ -42,20 +44,25 @@ penalty jointly in one search.}
 \describe{
 \item{Carryover}{\code{\link[=adstock_geometric]{adstock_geometric()}} for the standard geometric kernel,
 \code{\link[=adstock_weibull]{adstock_weibull()}} and \code{\link[=adstock_delayed]{adstock_delayed()}} when the response peaks
-after the spend,
-\code{\link[=adstock_filter]{adstock_filter()}} for a kernel of your own. \code{\link[=adstock_weights]{adstock_weights()}} and
-\code{\link[=adstock_weights_weibull]{adstock_weights_weibull()}} expose the kernels themselves, and
+after the spend, \code{\link[=adstock_filter]{adstock_filter()}} for a kernel of your own.
+\code{\link[=adstock_weights]{adstock_weights()}}, \code{\link[=adstock_weights_weibull]{adstock_weights_weibull()}} and
+\code{\link[=adstock_weights_delayed]{adstock_weights_delayed()}} expose the kernels themselves, and
 \code{\link[=adstock_state]{adstock_state()}} carries a filter across a boundary.}
 \item{Saturation}{\code{\link[=saturate_hill]{saturate_hill()}}, \code{\link[=saturate_exponential]{saturate_exponential()}},
 \code{\link[=saturate_michaelis_menten]{saturate_michaelis_menten()}}, \code{\link[=saturate_power]{saturate_power()}}, and the
 \code{\link[=saturate]{saturate()}} dispatcher.}
 \item{Composing them}{\code{\link[=media_transform]{media_transform()}} applies carryover then
-saturation, in that order, and will not do it backwards quietly.}
+saturation, in that order, and will not do it backwards quietly.
+\code{\link[=transform_plan]{transform_plan()}} does the same for every channel of a plan, each with
+its own parameters, and \code{\link[=from_robyn]{from_robyn()}} converts Robyn's
+hyperparameters to these arguments.}
 \item{Choosing parameters}{\code{\link[=decay_from_half_life]{decay_from_half_life()}}, \code{\link[=half_life]{half_life()}} and
 \code{\link[=effective_window]{effective_window()}} translate between half-lives and decay
 coefficients. \code{\link[=tune_carryover]{tune_carryover()}} and \code{\link[=tune_carryover_joint]{tune_carryover_joint()}} select
 them by cross-validation against an actual KPI;
 \code{\link[=adstock_steady_state]{adstock_steady_state()}} removes start-up bias.}
+\item{Controls}{\code{\link[=fourier_terms]{fourier_terms()}} and \code{\link[=holiday_flags]{holiday_flags()}} build seasonality
+terms for the model and for the tuners' \code{controls}.}
 }
 }
 
@@ -63,11 +70,15 @@ them by cross-validation against an actual KPI;
 
 \describe{
 \item{Journeys}{\code{\link[=build_paths]{build_paths()}} turns an event log into journeys,
-handling the seven things that go wrong on the way.}
+handling the seven things that go wrong on the way, and can carry other
+event columns such as device or campaign. \code{\link[=bind_paths]{bind_paths()}} combines
+journey tables.}
 \item{Credit}{\code{\link[=credit_linear]{credit_linear()}}, \code{\link[=credit_first]{credit_first()}}, \code{\link[=credit_last]{credit_last()}},
 \code{\link[=credit_position]{credit_position()}}, \code{\link[=credit_time_decay]{credit_time_decay()}} and \code{\link[=credit_custom]{credit_custom()}}, and
-the data-driven \code{\link[=markov_removal]{markov_removal()}}. \code{\link[=attribute]{attribute()}} runs several at once and \code{\link[=attribution_spread]{attribution_spread()}} reports
-how much the answer depends on which you picked.}
+the data-driven \code{\link[=markov_removal]{markov_removal()}}. \code{\link[=attribute]{attribute()}} runs several at once,
+by segment and with resampled intervals if asked, and
+\code{\link[=attribution_spread]{attribution_spread()}} reports how much the answer depends on which
+rule you picked.}
 \item{Diagnostics}{\code{\link[=path_summary]{path_summary()}}, \code{\link[=path_lengths]{path_lengths()}},
 \code{\link[=channel_positions]{channel_positions()}}, \code{\link[=assisted_conversions]{assisted_conversions()}}, \code{\link[=top_paths]{top_paths()}} and
 \code{\link[=conversion_lag]{conversion_lag()}}, or \code{\link[=path_diagnostics]{path_diagnostics()}} for all of them.}
@@ -76,13 +87,17 @@ how much the answer depends on which you picked.}
 }
 }
 
-\section{Reporting, diagnostics and tidymodels}{
+\section{Reporting, planning and tidymodels}{
 
-\code{\link[=diagnose_media]{diagnose_media()}} checks whether the data can support a model at all --
+\code{\link[=diagnose_media]{diagnose_media()}} checks whether the data can support a model at all, so
 run it first. \code{\link[=contributions]{contributions()}}, \code{\link[=roi]{roi()}}, \code{\link[=marginal_roi]{marginal_roi()}}, \code{\link[=mroi]{mroi()}},
 \code{\link[=response_curve]{response_curve()}} and \code{\link[=spend_for]{spend_for()}} turn a fitted model into a
-deliverable, and \code{\link[=block_bootstrap]{block_bootstrap()}} puts intervals on it. Each result has
-a \code{plot()} method; \code{\link[=mm_palette]{mm_palette()}} exposes their colours. \code{\link[=step_adstock]{step_adstock()}} and
+deliverable, and \code{\link[=block_bootstrap]{block_bootstrap()}} puts intervals on it.
+\code{\link[=simulate_plan]{simulate_plan()}}, \code{\link[=reallocate]{reallocate()}} and \code{\link[=allocate_budget]{allocate_budget()}} compare and split
+budgets through the same transforms. Contributions, response curves,
+bootstrap intervals, tuning results, attribution shares, budget allocations
+and diagnostics each have a \code{plot()} method; \code{\link[=mm_palette]{mm_palette()}} exposes their
+colours. \code{\link[=step_adstock]{step_adstock()}}, \code{\link[=step_adstock_channels]{step_adstock_channels()}} and
 \code{\link[=step_saturation]{step_saturation()}} are \pkg{recipes} steps that carry filter state across
 the train/test boundary, with \code{\link[=carryover_decay]{carryover_decay()}} and friends as their
 \pkg{dials} parameters.
@@ -98,11 +113,11 @@ that breaks a naive journey pipeline.
 
 \section{Dependencies}{
 
-The core transforms need only base R, \code{stats}, and \code{cli} for error messages.
-\code{data.table} is used by the attribution half, where event logs are large.
-\pkg{recipes}, \pkg{dials} and the rest of tidymodels are optional and
-registered conditionally, so the transforms work equally well from a Stan or
-\pkg{brms} workflow that will never touch them.
+The core transforms need only base R and \code{stats}, plus \code{cli} and \code{rlang} for
+error messages. \code{data.table} is used by the attribution half, where event
+logs are large. \pkg{recipes}, \pkg{dials} and the rest of tidymodels are
+optional and registered conditionally, so the transforms work equally well
+from a Stan or \pkg{brms} workflow that will never touch them.
 }
 
 \examples{

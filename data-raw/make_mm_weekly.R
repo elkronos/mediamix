@@ -80,6 +80,24 @@ rows <- lapply(geos, function(g) {
 
 mm_weekly <- do.call(rbind, rows)
 rownames(mm_weekly) <- NULL
+
+# The scalar parameters above describe north, whose scale is 1. Every other
+# geography multiplies beta, half_max, baseline, trend, the holiday uplift and
+# the price effect by its scale, and the noise standard deviation by the
+# square root of it. These additions use no random numbers, so the data are
+# unchanged by them.
+truth$geo_scale <- geo_scale
+truth$holiday_uplift <- 2500
+truth$season_amplitude <- 0.35
+truth$by_geo <- do.call(rbind, lapply(geos, function(g) {
+  s <- geo_scale[[g]]
+  data.frame(geo = g, channel = channels,
+             decay = unname(truth$decay[channels]),
+             half_max = unname(truth$half_max[channels]) * s,
+             shape = unname(truth$shape[channels]),
+             beta = unname(truth$beta[channels]) * s,
+             stringsAsFactors = FALSE)
+}))
 attr(mm_weekly, "truth") <- truth
 
 stopifnot(nrow(mm_weekly) == n_weeks * length(geos), all(mm_weekly$revenue > 0))

@@ -20,29 +20,41 @@ navbar:
 
 articles:
 - title: Start here
+  desc: The package in one pass, one budget question worked end to end, an index from tasks to functions, and answers to common questions.
   navbar: ~
   contents:
   - mediamix
   - articles/budget-walkthrough
+  - articles/which-function
+  - articles/faq
 - title: Media mix modelling
+  desc: Choosing carryover by cross-validation, and tuning the transforms with tidymodels.
   navbar: Media mix modelling
   contents:
   - carryover
   - tidymodels
 - title: Attribution
+  desc: Building journeys from an event log, and how credit mirrors carryover.
   navbar: Attribution
   contents:
   - journeys
   - spine
 - title: Background
+  desc: How mediamix relates to other tools, how to move a Robyn model across, and the method and source behind each function.
   navbar: Background
   contents:
-  - articles/methodology
   - articles/comparison
+  - articles/migrating-from-robyn
+  - articles/methodology
 
 reference:
+- title: Check the data
+  desc: Find collinear, flat or dark channels and inconsistent costs before fitting anything.
+  contents:
+  - diagnose_media
+  - plot.mm_diagnosis
 - title: Carryover (adstock)
-  desc: Spread each period's media forward in time.
+  desc: Spread each period's media forward in time, and translate decay into a half-life.
   contents:
   - adstock_geometric
   - adstock_weibull
@@ -54,51 +66,60 @@ reference:
   - adstock_steady_state
   - decay_vocabulary
 - title: Saturation
-  desc: Diminishing returns, and composing it with carryover.
+  desc: Diminishing returns as media pressure grows.
   contents:
   - saturation
+- title: Composing transforms
+  desc: Apply carryover then saturation to one channel or to every channel of a plan, and convert Robyn's hyperparameters to these arguments.
+  contents:
   - media_transform
+  - transform_plan
+  - from_robyn
 - title: Choosing carryover parameters
+  desc: Score candidate decays and lags by how well a model predicts held-out KPI, with seasonality terms as controls.
   contents:
   - tune_carryover
   - tune_carryover_joint
+  - plot_carryover
   - fit_ols
   - metrics
-- title: Diagnostics and reporting
-  desc: Check the data first; turn a fitted model into a deliverable after.
+  - seasonality
+- title: Tuning with tidymodels
+  desc: Recipe steps and tuning parameters for tuning carryover, saturation and a model penalty together.
   contents:
-  - diagnose_media
+  - step_adstock
+  - step_adstock_channels
+  - step_saturation
+  - mediamix_params
+- title: Contributions and return on investment
+  desc: Turn a fitted model into channel contributions, average and marginal return, and response curves.
+  contents:
   - contributions
+  - plot.mm_contributions
   - roi
   - marginal_roi
   - response_curve
-  - block_bootstrap
-- title: Plots
-  desc: A `plot()` method for each result, in one consistent style.
-  contents:
-  - plot_carryover
-  - plot.mm_bootstrap
-  - plot.mm_contributions
   - plot.mm_response_curve
-  - plot.mm_attribution
-  - mm_palette
-- title: tidymodels integration
+- title: Uncertainty
+  desc: Put intervals on any statistic by resampling blocks of consecutive periods.
   contents:
-  - step_adstock
-  - step_saturation
-  - mediamix_params
+  - block_bootstrap
+  - plot.mm_bootstrap
+- title: Budget planning
+  desc: Simulate a plan through the fitted transforms, move budget between channels, and split a total budget across channels.
+  contents:
+  - simulate_plan
+  - reallocate
+  - allocate_budget
+  - plot.mm_allocation
 - title: Journey construction
+  desc: Turn a raw event log into customer journeys, and combine or subset them.
   contents:
   - build_paths
+  - bind_paths
   - '`[.mm_paths`'
-  - as_channel_paths
-- title: Attribution
-  contents:
-  - credit
-  - markov_removal
-  - attribute
-  - attribution_spread
 - title: Journey diagnostics
+  desc: Describe a journey table, including how long conversions take, before choosing a lookback or a credit rule.
   contents:
   - path_summary
   - path_lengths
@@ -107,10 +128,23 @@ reference:
   - top_paths
   - conversion_lag
   - path_diagnostics
-- title: Data
+- title: Attribution
+  desc: Credit conversions to channels by rule or by Markov removal effects, compare the rules, and export journeys to ChannelAttribution.
+  contents:
+  - credit
+  - markov_removal
+  - attribute
+  - attribution_spread
+  - plot.mm_attribution
+  - plot.mm_attribution_intervals
+  - as_channel_paths
+- title: Example data
+  desc: A simulated weekly media panel and event log, generated from known parameters so results can be checked.
   contents:
   - mm_weekly
   - mm_events
 - title: Package
+  desc: The package overview, and the colour palette its plots use.
   contents:
   - mediamix-package
+  - mm_palette

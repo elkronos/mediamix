@@ -11,39 +11,46 @@ Description: Feature engineering for marketing mix modelling and multi-touch
     removal-effect attribution. Marginal return on investment is computed by
     counterfactual simulation through the full transform.
     Carryover parameters are selected by cross-validation against an actual
-    key performance indicator using a user-supplied model, rather than by a
-    heuristic. The core transforms depend only on base R and 'stats';
-    optional 'recipes' steps and 'dials' parameter objects support joint
-    tuning of carryover, saturation and model hyperparameters. Adstock
-    methods follow Broadbent (1979, Journal of the Market Research Society,
-    21(3), 139-166) and Jin et al. (2017, Google Inc.); saturation curves
-    follow Hill (1910, The Journal of Physiology, 40, iv-vii); Markov
-    attribution follows Anderl et al. (2016) <doi:10.1016/j.ijresmar.2016.03.001>.
+    key performance indicator using least squares or a user-supplied model,
+    rather than by a heuristic. The core transforms are plain R functions on
+    numeric vectors, and the only non-base dependencies are 'cli', 'rlang'
+    and 'data.table'; optional 'recipes' steps and 'dials' parameter objects
+    support joint tuning of carryover, saturation and model
+    hyperparameters. Geometric and delayed adstock follow Broadbent (1979,
+    Journal of the Market Research Society, 21(3), 139-166) and Jin et al.
+    (2017, Google Inc., <https://research.google/pubs/pub46001/>); the Hill
+    saturation curve follows Hill (1910)
+    <doi:10.1113/jphysiol.1910.sp001386>; Markov attribution follows Anderl
+    et al. (2016) <doi:10.1016/j.ijresmar.2016.03.001>.
 License: MIT + file LICENSE
 Encoding: UTF-8
+Language: en-GB
 Roxygen: list(markdown = TRUE)
 Depends: 
     R (>= 4.1)
 Imports: 
-    cli,
-    data.table,
+    cli (>= 3.4.0),
+    data.table (>= 1.12.0),
     graphics,
     parallel,
+    rlang (>= 1.1.0),
     stats,
     utils
 Suggests: 
     ChannelAttribution,
     dials (>= 1.0.0),
+    dplyr (>= 1.1.0),
     generics,
     glmnet,
-    hardhat,
+    hardhat (>= 0.2.0),
     knitr,
+    nlme,
     parsnip,
-    recipes (>= 1.0.0),
-    rlang,
+    recipes (>= 1.0.4),
     rmarkdown,
     rsample,
-    testthat (>= 3.0.0),
+    testthat (>= 3.1.7),
+    tibble,
     tune,
     workflows,
     yardstick
