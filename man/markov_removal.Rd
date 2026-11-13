@@ -59,8 +59,9 @@ in that case.
 This is the order-1 model, with no dependency beyond base R. For
 higher-order chains, or journey tables with millions of distinct paths,
 hand the output of \code{\link[=as_channel_paths]{as_channel_paths()}} to \pkg{ChannelAttribution}, whose
-\code{markov_model()} implements the same removal-effect definition in C++. The
-two should agree for \code{order = 1}.
+\code{markov_model()} implements the same removal-effect definition in C++. For
+\code{order = 1} the two agree up to the error of \pkg{ChannelAttribution}'s
+simulation.
 
 Removal effects are sensitive to journey construction: repeats collapsed or
 not, direct traffic kept or dropped, lookback length. That is the argument
