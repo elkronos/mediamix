@@ -1,7 +1,7 @@
 #' Moving block bootstrap for time-series statistics
 #'
-#' Puts uncertainty intervals on anything computed from a weekly panel --
-#' coefficients, contributions, average or marginal ROI -- by resampling
+#' Puts uncertainty intervals on anything computed from a weekly panel
+#' (coefficients, contributions, average or marginal ROI) by resampling
 #' *blocks* of consecutive rows, refitting, and recomputing. Resampling single
 #' rows would destroy the autocorrelation that carryover creates and make the
 #' intervals too narrow; resampling blocks keeps it within each block
@@ -61,8 +61,8 @@
 #'   and must not rely on functions or data defined in your session.
 #'
 #' @return An object of class `mm_bootstrap`: a data frame with one row per
-#'   element of the statistic -- `term`, `estimate` (on the original data),
-#'   `lower`, `upper` (percentile interval) and `std_error` -- with the
+#'   element of the statistic and columns `term`, `estimate` (on the original
+#'   data), `lower`, `upper` (percentile interval) and `std_error`, with the
 #'   replicate matrix attached as the attribute `"replicates"` (one row per
 #'   replicate, one column per term). Replicates in which `statistic` failed
 #'   are dropped and counted in a message that quotes the first error. Each
@@ -123,9 +123,9 @@
 #' Percentile intervals from a block bootstrap of a short series cover less
 #' than their nominal level, and the shortfall grows with the autocorrelation.
 #' For the mean of 156 values from an AR(1) process, nominal 90% intervals
-#' from 200 replicates covered the true mean in about 84% of 400 simulated
+#' from 200 replicates covered the true mean in about 81% of 2,000 simulated
 #' series when the autocorrelation was 0.5 and blocks were 6 rows long, and in
-#' about 66% when it was 0.8, rising to about 76% with blocks of 13 rows.
+#' about 71% when it was 0.8, rising to about 75% with blocks of 13 rows.
 #' Circular blocks gave much the same figures. Read the intervals as a lower
 #' bound on the uncertainty.
 #'
@@ -151,7 +151,8 @@
 #' procedure for stationary data. In R. LePage and L. Billard (eds.),
 #' *Exploring the Limits of Bootstrap*, 263--270. Wiley.
 #'
-#' @seealso [contributions()], [roi()], [marginal_roi()]
+#' @seealso [plot.mm_bootstrap()], [contributions()], [roi()],
+#'   [marginal_roi()]
 #'
 #' @examples
 #' data(mm_weekly)
@@ -160,10 +161,11 @@
 #' truth <- attr(mm_weekly, "truth")
 #'
 #' # Transform once, on the full series, then bootstrap the model on top.
-#' media <- as.data.frame(Map(function(x, d, h, s) media_transform(
-#'   x, adstock = list(decay = d), saturation = list(half_max = h, shape = s)),
-#'   north[channels], truth$decay[channels], truth$half_max[channels],
-#'   truth$shape[channels]))
+#' spec <- lapply(stats::setNames(channels, channels), function(ch) list(
+#'   adstock = list(decay = truth$decay[[ch]]),
+#'   saturation = list(half_max = truth$half_max[[ch]],
+#'                     shape = truth$shape[[ch]])))
+#' media <- transform_plan(north[channels], spec)
 #' names(media) <- paste0(channels, "_t")
 #' d <- cbind(north, media, week = seq_len(nrow(north)))
 #'
