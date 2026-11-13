@@ -53,6 +53,16 @@
 
 ## Bug fixes
 
+* The recipe steps, `block_bootstrap()` and `diagnose_media()` keep numeric
+  group ids apart when they differ only beyond the 15th significant digit;
+  such ids used to share one series, so carryover ran from one into the
+  other.
+* `build_paths(direct = "label")` names a blank channel `"(blank)"`, as
+  `"keep"` and `"drop"` do, and an empty journey table keeps its timestamp
+  class and settings, so `bind_paths()` and `rbind()` combine it with others.
+* `contributions(by =)` with a data frame of grouping columns labels each
+  group with its values joined by `" / "`, and `roi()` reports the same
+  labels.
 * Grouping by several columns no longer merges two groups when a value
   contains the character used to join the columns into one key; such values
   are refused with a message.
