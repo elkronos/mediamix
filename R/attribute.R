@@ -21,11 +21,13 @@
 #'   fitted per segment. Each column must take one value per journey and have
 #'   no missing values. See *Segments*.
 #' @param times Number of bootstrap replicates behind intervals on the
-#'   shares, at most 1,000,000. The default, 0, computes no intervals. See
+#'   shares: 0, the default, for no intervals, or from 2 to 1,000,000. See
 #'   *Intervals*.
-#' @param level Confidence level of the percentile intervals.
+#' @param level Confidence level of the percentile intervals, in `(0, 1)`.
 #' @param seed Optional random seed, one whole number, for reproducible
 #'   intervals. The caller's random number stream is restored afterwards.
+#'   Giving `level` or `seed` with `times = 0` has no effect, and a warning
+#'   says so.
 #'
 #' @return A data frame with one row per rule and channel, or per segment,
 #'   rule and channel when `by` is given:
@@ -37,7 +39,7 @@
 #'     \item{`conversions`}{Fractional conversions credited to the channel.}
 #'     \item{`share`}{`conversions` as a share of all conversions credited
 #'       under that rule. Shares sum to 1 within each rule, and within each
-#'       segment.}
+#'       segment; where there is no conversion to share, every share is 0.}
 #'     \item{`lower`, `upper`}{Percentile interval for `share` at `level`,
 #'       present only when `times` is above 0. `NA` where fewer than two
 #'       replicates define the share, as in a segment with no converting
@@ -47,9 +49,10 @@
 #'     \item{`touches`}{Number of touchpoints on the channel across all
 #'       journeys, converting or not.}
 #'   }
-#'   Rows are ordered by segment, then by rule, then by descending
-#'   conversions, with ties in channel order (C locale, so the same on every
-#'   platform). Segments are sorted by their values, factors in level order.
+#'   Rows are ordered by segment, then by rule in the order of `rules`, then
+#'   by descending conversions, with ties in channel order (C locale, so the
+#'   same on every platform). Segments are sorted by their values, factors in
+#'   level order.
 #'
 #'   The result has class `mm_attribution`. With `by` it also has class
 #'   `mm_attribution_segments` and the attribute `"segments"`, naming the
@@ -73,8 +76,9 @@
 #' Each segment is attributed as if it were the whole table: a channel's
 #' share is its share of that segment's credited conversions, `touches`
 #' counts that segment's touches, and a channel appears only in segments
-#' where it has a touch. A segment with no non-converting journeys gets one
-#' warning that names it, as [markov_removal()] gives for a whole table.
+#' where it has a touch. With the `"markov"` rule, one warning names every
+#' segment with no non-converting journeys, as [markov_removal()] warns about
+#' a whole table without them.
 #'
 #' @section Intervals:
 #' With `times` above 0, the journeys of each segment are resampled with
@@ -237,27 +241,28 @@ attribute <- function(paths,
   out
 }
 
-#' How much does the answer depend on the rule?
+#' Range of each channel's share across attribution rules
 #'
 #' Summarises the output of [attribute()] into one row per channel, showing the
-#' range of credited conversions across rules. A channel whose share swings from
-#' 8% to 31% depending on the convention has not been measured; it has been
-#' assigned a number.
+#' range of its share of credited conversions across rules. A channel whose
+#' share swings from 8% to 31% depending on the convention has not been
+#' measured; it has been assigned a number.
 #'
 #' @param attribution The data frame returned by [attribute()].
 #'
 #' @return A data frame with one row per channel, ordered by descending spread:
-#'   `channel`, `min_share`, `max_share`, `mean_share`, `spread` (the difference
-#'   between the first two), and -- only when both the `"first"` and `"last"`
-#'   rules were run -- `first_last_ratio`.
+#'   `channel`, `min_share`, `max_share`, `mean_share`, `spread`
+#'   (`max_share` minus `min_share`) and, only when both the `"first"` and
+#'   `"last"` rules were run, `first_last_ratio` (the first-touch share divided
+#'   by the last-touch share, `NA` when the last-touch share is 0).
 #'   For a result of `attribute(by = )`, one row per segment and channel
 #'   instead, with the segment columns first and rows ordered by segment, then
 #'   by descending spread.
 #'
-#'   Note that `first_last_ratio` here is a ratio of credited *shares*, which is
-#'   not the same quantity as the column of the same name in
-#'   [channel_positions()], a ratio of touchpoint *counts*. They answer the same
-#'   question in different currencies and will not agree numerically.
+#'   `first_last_ratio` here is a ratio of credited *shares*, which is not the
+#'   same quantity as the column of the same name in [channel_positions()], a
+#'   ratio of touchpoint *counts*. They answer the same question in different
+#'   currencies and will not agree numerically.
 #'
 #' @seealso [attribute()]
 #'

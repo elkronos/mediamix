@@ -2,7 +2,7 @@
 % Please edit documentation in R/attribute.R
 \name{attribution_spread}
 \alias{attribution_spread}
-\title{How much does the answer depend on the rule?}
+\title{Range of each channel's share across attribution rules}
 \usage{
 attribution_spread(attribution)
 }
@@ -11,23 +11,24 @@ attribution_spread(attribution)
 }
 \value{
 A data frame with one row per channel, ordered by descending spread:
-\code{channel}, \code{min_share}, \code{max_share}, \code{mean_share}, \code{spread} (the difference
-between the first two), and -- only when both the \code{"first"} and \code{"last"}
-rules were run -- \code{first_last_ratio}.
+\code{channel}, \code{min_share}, \code{max_share}, \code{mean_share}, \code{spread}
+(\code{max_share} minus \code{min_share}) and, only when both the \code{"first"} and
+\code{"last"} rules were run, \code{first_last_ratio} (the first-touch share divided
+by the last-touch share, \code{NA} when the last-touch share is 0).
 For a result of \code{attribute(by = )}, one row per segment and channel
 instead, with the segment columns first and rows ordered by segment, then
 by descending spread.
 
-Note that \code{first_last_ratio} here is a ratio of credited \emph{shares}, which is
-not the same quantity as the column of the same name in
-\code{\link[=channel_positions]{channel_positions()}}, a ratio of touchpoint \emph{counts}. They answer the same
-question in different currencies and will not agree numerically.
+\code{first_last_ratio} here is a ratio of credited \emph{shares}, which is not the
+same quantity as the column of the same name in \code{\link[=channel_positions]{channel_positions()}}, a
+ratio of touchpoint \emph{counts}. They answer the same question in different
+currencies and will not agree numerically.
 }
 \description{
 Summarises the output of \code{\link[=attribute]{attribute()}} into one row per channel, showing the
-range of credited conversions across rules. A channel whose share swings from
-8\% to 31\% depending on the convention has not been measured; it has been
-assigned a number.
+range of its share of credited conversions across rules. A channel whose
+share swings from 8\% to 31\% depending on the convention has not been
+measured; it has been assigned a number.
 }
 \examples{
 data(mm_events)

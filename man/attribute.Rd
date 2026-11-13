@@ -38,13 +38,15 @@ fitted per segment. Each column must take one value per journey and have
 no missing values. See \emph{Segments}.}
 
 \item{times}{Number of bootstrap replicates behind intervals on the
-shares, at most 1,000,000. The default, 0, computes no intervals. See
+shares: 0, the default, for no intervals, or from 2 to 1,000,000. See
 \emph{Intervals}.}
 
-\item{level}{Confidence level of the percentile intervals.}
+\item{level}{Confidence level of the percentile intervals, in \verb{(0, 1)}.}
 
 \item{seed}{Optional random seed, one whole number, for reproducible
-intervals. The caller's random number stream is restored afterwards.}
+intervals. The caller's random number stream is restored afterwards.
+Giving \code{level} or \code{seed} with \code{times = 0} has no effect, and a warning
+says so.}
 }
 \value{
 A data frame with one row per rule and channel, or per segment,
@@ -57,7 +59,7 @@ only with \code{by}.}
 \item{\code{conversions}}{Fractional conversions credited to the channel.}
 \item{\code{share}}{\code{conversions} as a share of all conversions credited
 under that rule. Shares sum to 1 within each rule, and within each
-segment.}
+segment; where there is no conversion to share, every share is 0.}
 \item{\code{lower}, \code{upper}}{Percentile interval for \code{share} at \code{level},
 present only when \code{times} is above 0. \code{NA} where fewer than two
 replicates define the share, as in a segment with no converting
@@ -67,9 +69,10 @@ table carries values.}
 \item{\code{touches}}{Number of touchpoints on the channel across all
 journeys, converting or not.}
 }
-Rows are ordered by segment, then by rule, then by descending
-conversions, with ties in channel order (C locale, so the same on every
-platform). Segments are sorted by their values, factors in level order.
+Rows are ordered by segment, then by rule in the order of \code{rules}, then
+by descending conversions, with ties in channel order (C locale, so the
+same on every platform). Segments are sorted by their values, factors in
+level order.
 
 The result has class \code{mm_attribution}. With \code{by} it also has class
 \code{mm_attribution_segments} and the attribute \code{"segments"}, naming the
@@ -100,8 +103,9 @@ paths$journey_device <- paths$device[last][at_last]
 Each segment is attributed as if it were the whole table: a channel's
 share is its share of that segment's credited conversions, \code{touches}
 counts that segment's touches, and a channel appears only in segments
-where it has a touch. A segment with no non-converting journeys gets one
-warning that names it, as \code{\link[=markov_removal]{markov_removal()}} gives for a whole table.
+where it has a touch. With the \code{"markov"} rule, one warning names every
+segment with no non-converting journeys, as \code{\link[=markov_removal]{markov_removal()}} warns about
+a whole table without them.
 }
 
 \section{Intervals}{
