@@ -472,3 +472,35 @@ test_that("marginal_roi() bounds extend and names spend in the by message", {
   expect_error(marginal_roi(x, 2, by = 1:3), "element of `spend`")
   expect_equal(marginal_roi(x, 2, extend = 3)$spend, 35)
 })
+
+test_that("roi(index =) says when a period has different row counts", {
+  cp <- contributions(data.frame(tv = c(10, 20, 30, 40)), c(tv = 1),
+                      intercept = 0,
+                      index = as.Date(c("2024-01-01", "2024-01-08",
+                                        "2024-01-01", "2024-01-08")),
+                      by = c("north", "north", "south", "south"))
+  north <- data.frame(date = as.Date(c("2024-01-01", "2024-01-08")),
+                      tv = c(10, 20))
+  # One region's spend against both regions' contributions is pooled, which
+  # is wrong here, so it must not be silent.
+  expect_message(roi(cp, north, index = "date"),
+                 "2 per channel in `contributions`, 1 in `spend`")
+  both <- data.frame(date = rep(north$date, 2),
+                     geo = rep(c("north", "south"), each = 2),
+                     tv = c(10, 20, 30, 40))
+  one <- contributions(data.frame(tv = c(10, 20)), c(tv = 1), intercept = 0,
+                       index = north$date)
+  expect_message(roi(one, both, index = "date"),
+                 "1 per channel in `contributions`, 2 in `spend`")
+  # With `by` each series is matched on its own, without a message.
+  expect_no_message(out <- roi(cp, both, index = "date", by = "geo"))
+  expect_equal(out$roi, c(1, 1))
+  expect_equal(out$spend, c(30, 70))
+  # Both sides pooled over the same series give the pooled return quietly.
+  expect_no_message(pooled <- roi(cp, both[c("date", "tv")], index = "date"))
+  expect_equal(pooled$roi, 1)
+  # Spend at a finer grain within a group is summed, with a message.
+  twice <- rbind(both, transform(both[1, ], tv = 0))
+  expect_message(roi(cp, twice, index = "date", by = "geo"),
+                 "aggregate to one row per period and group")
+})

@@ -813,6 +813,34 @@ roi <- function(contributions, spend, by = NULL, index = NULL,
     sep <- .mm_key_sep()
     kc <- paste(c_group, c_period, sep = sep)
     ks <- paste(s_group, s_period, sep = sep)
+    # A period can repeat within a group on either side: spend kept at a finer
+    # grain, or contributions from several series that `by` does not separate.
+    # Both are pooled within the period. That is right when the two sides
+    # cover the same series and wrong when one covers only some of them, so
+    # say so whenever the number of rows per period differs.
+    n_s <- table(ks[keep_s])
+    n_c <- tapply(kc[keep_c], contributions$channel[keep_c],
+                  function(k) table(k), simplify = FALSE)
+    n_c <- if (length(n_c) > 0L) n_c[[1L]] else n_s[0L]
+    shared <- intersect(names(n_s), names(n_c))
+    differs <- shared[as.integer(n_s[shared]) != as.integer(n_c[shared])]
+    if (length(differs) > 0L) {
+      k1 <- differs[1L]
+      p1 <- c_period[match(k1, kc)]
+      cli::cli_inform(c(
+        "{length(differs)} period{?s} {?has/have} a different number of rows \
+         in {.arg contributions} and {.arg spend}, and each side is summed \
+         within the period.",
+        i = "For example {.val {p1}}: {as.integer(n_c[[k1]])} per channel in \
+             {.arg contributions}, {as.integer(n_s[[k1]])} in {.arg spend}.",
+        i = if (is.null(by)) {
+          "If one of them covers only some of the series, pass {.arg by}."
+        } else {
+          "If that is not intended, aggregate to one row per period and \
+           group first."
+        }
+      ))
+    }
     matched_c <- kc %in% ks[keep_s]
     matched_s <- ks %in% kc[keep_c]
     lone_c <- keep_c & !matched_c
