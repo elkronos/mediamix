@@ -317,8 +317,16 @@ build_paths <- function(events,
        {.arg conversion} column.'
     )
   }
+  settings <- list(split_on = split_on, lookback = lookback, gap = gap,
+                   collapse_repeats = collapse_repeats,
+                   keep_null_paths = keep_null_paths, direct = direct,
+                   dedupe = dedupe, keep = keep,
+                   conversion_touch = conversion_touch)
   if (nrow(events) == 0L) {
-    return(.mm_empty_paths(out_units, kept = kept_proto))
+    # The timestamp keeps its class, so an empty table binds with others.
+    ts0 <- .mm_coerce_time(ts_raw, cols$timestamp, tz, timestamp_format)
+    return(.mm_empty_paths(out_units, kept = kept_proto, ts = ts0,
+                           settings = settings))
   }
 
   n_events_in <- nrow(events)
@@ -525,7 +533,8 @@ build_paths <- function(events,
           "No conversions were observed in the input."
         }
       ))
-      return(.mm_empty_paths(out_units, counts, kept_proto))
+      return(.mm_empty_paths(out_units, counts, kept_proto, ts = ts,
+                             settings = settings))
     }
   }
   dt[, ".is_direct" := NULL]
@@ -546,7 +555,8 @@ build_paths <- function(events,
           "No conversions were observed in the input."
         }
       ))
-      return(.mm_empty_paths(out_units, counts, kept_proto))
+      return(.mm_empty_paths(out_units, counts, kept_proto, ts = ts,
+                             settings = settings))
     }
   }
 
@@ -564,7 +574,8 @@ build_paths <- function(events,
           "No conversions were observed in the input."
         }
       ))
-      return(.mm_empty_paths(out_units, counts, kept_proto))
+      return(.mm_empty_paths(out_units, counts, kept_proto, ts = ts,
+                             settings = settings))
     }
   }
   dt[, "anchor" := NULL]
@@ -584,7 +595,8 @@ build_paths <- function(events,
   if (!keep_null_paths) dt <- dt[converted == TRUE]
   if (nrow(dt) == 0L) {
     cli::cli_warn("No journeys remain after filtering.")
-    return(.mm_empty_paths(out_units, counts, kept_proto))
+    return(.mm_empty_paths(out_units, counts, kept_proto, ts = ts,
+                             settings = settings))
   }
 
   # --- ranks -----------------------------------------------------------------
@@ -621,11 +633,7 @@ build_paths <- function(events,
       conversions_unattributable = n_conv_journeys - n_conv_attributable,
       duplicate_events = n_dup
     ),
-    mm_settings = list(split_on = split_on, lookback = lookback, gap = gap,
-                       collapse_repeats = collapse_repeats,
-                       keep_null_paths = keep_null_paths, direct = direct,
-                       dedupe = dedupe, keep = keep,
-                       conversion_touch = conversion_touch)
+    mm_settings = settings
   )
 }
 
@@ -978,10 +986,12 @@ print.mm_paths <- function(x, ...) {
 
 #' @keywords internal
 #' @noRd
-.mm_empty_paths <- function(units, counts = NULL, kept = NULL) {
+.mm_empty_paths <- function(units, counts = NULL, kept = NULL, ts = NULL,
+                            settings = list()) {
   out <- data.frame(
     path_id = character(0), id = character(0), channel = character(0),
-    timestamp = as.POSIXct(character(0)), touch_rank = integer(0),
+    timestamp = if (is.null(ts)) as.POSIXct(character(0)) else ts[0],
+    touch_rank = integer(0),
     touch_n = integer(0), converted = logical(0),
     conversion_value = numeric(0), time_to_conversion = numeric(0),
     stringsAsFactors = FALSE
@@ -995,7 +1005,7 @@ print.mm_paths <- function(x, ...) {
                    duplicate_events = 0L)
   }
   structure(out, class = c("mm_paths", "data.frame"), mm_units = units,
-            mm_counts = counts, mm_settings = list())
+            mm_counts = counts, mm_settings = settings)
 }
 
 # Columns of `events` that build_paths() carries through. A name the journey
@@ -1408,7 +1418,10 @@ rbind.mm_paths <- function(..., deparse.level = 1) {
   same_settings <- all(vapply(settings, identical, logical(1), settings[[1L]]))
   plain <- lapply(seq_along(batches), function(k) {
     b <- as.data.frame(batches[[k]])[cols]
-    if (!is.null(labels)) b$path_id <- paste0(labels[[k]], ":", b$path_id)
+    # paste0() would turn an empty column into one label, so skip it.
+    if (!is.null(labels) && nrow(b) > 0L) {
+      b$path_id <- paste0(labels[[k]], ":", b$path_id)
+    }
     b
   })
   out <- as.data.frame(data.table::rbindlist(plain, use.names = TRUE))

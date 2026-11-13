@@ -989,3 +989,25 @@ test_that("direct = \"label\" names a blank channel as keep and drop do", {
                       direct_labels = "direct")
   expect_identical(kept$channel[1], "(blank)")
 })
+
+test_that("an empty journey table keeps its timestamp class and settings", {
+  jan <- build_paths(data.frame(id = "a", ch = c("tv", "search"),
+                                ts = as.Date("2024-01-01") + 0:1,
+                                conv = c(0, 1)),
+                     "id", "ch", "ts", conversion = "conv",
+                     conversion_touch = "drop")
+  feb <- build_paths(data.frame(id = "b", ch = "checkout",
+                                ts = as.Date("2024-02-01"), conv = 1),
+                     "id", "ch", "ts", conversion = "conv",
+                     conversion_touch = "drop")
+  expect_equal(nrow(feb), 0L)
+  expect_s3_class(feb$timestamp, "Date")
+  expect_identical(attr(feb, "mm_settings"), attr(jan, "mm_settings"))
+  both <- bind_paths(jan = jan, feb = feb)
+  expect_equal(nrow(both), nrow(jan))
+  expect_identical(attr(both, "mm_settings"), attr(jan, "mm_settings"))
+  none <- build_paths(data.frame(id = character(), ch = character(),
+                                 ts = as.Date(character()), conv = numeric()),
+                      "id", "ch", "ts", conversion = "conv")
+  expect_s3_class(none$timestamp, "Date")
+})
