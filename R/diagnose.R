@@ -22,8 +22,8 @@
 #'   flagged.
 #' @param cv_threshold Coefficient of variation below which a channel is flagged
 #'   as insufficiently varying.
-#' @param decay Optional geometric decay for computing collinearity on
-#'   *adstocked* media: a single number for every channel, or a named vector
+#' @param decay Optional geometric decay in `[0, 1)` for computing collinearity
+#'   on *adstocked* media: a single number for every channel, or a named vector
 #'   with one per channel (unnamed channels are left raw). Adstock smooths each
 #'   series, and smoothed series are usually more correlated than the raw
 #'   spend, so this is the collinearity the model will face. Rows must be in
@@ -45,17 +45,18 @@
 #'       `zero_share`, and the flags `low_variation`, `heavily_flighted` and
 #'       `usable`.}
 #'     \item{`collinearity`}{Per channel: the worst group `vif`, the
-#'       `most_correlated_with` partner and its `correlation`, and `identified`
-#'       -- `TRUE`, `FALSE`, or `NA` where the factor could not be computed at
-#'       all. `NA` is not `TRUE`.}
+#'       `most_correlated_with` partner and its `correlation`, and `identified`:
+#'       `TRUE` when `vif` is at most `vif_threshold`, `FALSE` above it, and
+#'       `NA` where the factor could not be computed at all. `NA` is not
+#'       `TRUE`.}
 #'     \item{`correlations`}{Pairwise correlation matrix. With `by` supplied,
 #'       each cell is the group value with the largest magnitude, sign
 #'       preserved.}
-#'     \item{`cpm`}{Implied cost per mille for each row of `data` (`row` is
-#'       the row number), with the series median and an outlier flag, when
-#'       `spend` and `impressions` are supplied; with `by`, the median and
-#'       outlier rule are computed within each series and a `group` column is
-#'       added. `NULL` otherwise.}
+#'     \item{`cpm`}{One row per row of `data` and spend column when `spend`
+#'       and `impressions` are supplied, `NULL` otherwise: `channel` (the spend
+#'       column), `row` (the row number), the implied `cpm`, the series'
+#'       `median_cpm` and the `outlier` flag. With `by`, the median and outlier
+#'       rule are computed within each series and a `group` column is added.}
 #'     \item{`dates`}{One row per series when `date` is supplied, `NULL`
 #'       otherwise: `group` (with `by`), `rows`, the `start` and `end` of the
 #'       series, its `period`, and the counts `out_of_order` (rows that come
@@ -79,13 +80,13 @@
 #' Four things sink marketing mix projects, and all four are visible before a
 #' model is fitted.
 #'
-#' **Channel collinearity** is the biggest practical problem in the field. When
-#' two channels move together -- because they were planned together, which is
-#' usually the case -- the model cannot tell their effects apart. It will still
-#' produce coefficients, and those coefficients will flip sign on small changes
-#' to the specification or the sample. A variance inflation factor above 5
-#' deserves attention and above 10 means the split between those channels is not
-#' identified, however tight the overall fit looks.
+#' **Channel collinearity** is common, because channels are usually planned
+#' together. When two channels move together the model cannot tell their
+#' effects apart. It will still produce coefficients, and those coefficients
+#' can flip sign on small changes to the specification or the sample. A
+#' variance inflation factor above 5 deserves attention and above 10 means the
+#' split between those channels is not identified, however tight the overall
+#' fit looks.
 #'
 #' **Insufficient variation** is the quieter version of the same problem. A
 #' channel spending nearly the same amount every week carries almost no
@@ -96,9 +97,9 @@
 #' of the time has far less effective sample than its row count suggests, and
 #' because carryover across dark periods is where transform bugs hide.
 #'
-#' **Spend and impression inconsistency** -- a wildly varying implied cost per
-#' mille -- almost always means a data-join error upstream rather than a real
-#' change in media pricing. It is worth catching before it becomes a modelling
+#' **Spend and impression inconsistency**, a wildly varying implied cost per
+#' mille, usually means a data-join error upstream rather than a real change
+#' in media pricing. It is worth catching before it becomes a modelling
 #' puzzle. A period is flagged when its CPM is more than five median absolute
 #' deviations from its series' median. When more than half of a series' CPMs
 #' are identical the median absolute deviation is zero, and a period is
@@ -122,7 +123,7 @@
 #' are counted in the order of `data`, one for each row whose time point is
 #' earlier than that of the row above it in the same series.
 #'
-#' @seealso [adstock_geometric()], [contributions()]
+#' @seealso [plot.mm_diagnosis()], [adstock_geometric()], [contributions()]
 #'
 #' @examples
 #' data(mm_weekly)
@@ -194,7 +195,7 @@ diagnose_media <- function(data, media, spend = NULL, impressions = NULL,
 
   # A column with no usable values cannot take part in any regression, and
   # leaving it in would make `complete.cases()` empty out every other column's
-  # design matrix -- turning one dead channel into an all-clear report.
+  # design matrix, which would turn one dead channel into an all-clear report.
   usable <- vapply(m, function(z) sum(is.finite(z)) > 0L, logical(1))
   dead <- media[!usable]
 

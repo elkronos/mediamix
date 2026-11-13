@@ -41,8 +41,8 @@ flagged.}
 \item{cv_threshold}{Coefficient of variation below which a channel is flagged
 as insufficiently varying.}
 
-\item{decay}{Optional geometric decay for computing collinearity on
-\emph{adstocked} media: a single number for every channel, or a named vector
+\item{decay}{Optional geometric decay in \verb{[0, 1)} for computing collinearity
+on \emph{adstocked} media: a single number for every channel, or a named vector
 with one per channel (unnamed channels are left raw). Adstock smooths each
 series, and smoothed series are usually more correlated than the raw
 spend, so this is the collinearity the model will face. Rows must be in
@@ -66,17 +66,18 @@ the lowest group \code{cv} and \code{distinct} count, the highest group
 \code{zero_share}, and the flags \code{low_variation}, \code{heavily_flighted} and
 \code{usable}.}
 \item{\code{collinearity}}{Per channel: the worst group \code{vif}, the
-\code{most_correlated_with} partner and its \code{correlation}, and \code{identified}
--- \code{TRUE}, \code{FALSE}, or \code{NA} where the factor could not be computed at
-all. \code{NA} is not \code{TRUE}.}
+\code{most_correlated_with} partner and its \code{correlation}, and \code{identified}:
+\code{TRUE} when \code{vif} is at most \code{vif_threshold}, \code{FALSE} above it, and
+\code{NA} where the factor could not be computed at all. \code{NA} is not
+\code{TRUE}.}
 \item{\code{correlations}}{Pairwise correlation matrix. With \code{by} supplied,
 each cell is the group value with the largest magnitude, sign
 preserved.}
-\item{\code{cpm}}{Implied cost per mille for each row of \code{data} (\code{row} is
-the row number), with the series median and an outlier flag, when
-\code{spend} and \code{impressions} are supplied; with \code{by}, the median and
-outlier rule are computed within each series and a \code{group} column is
-added. \code{NULL} otherwise.}
+\item{\code{cpm}}{One row per row of \code{data} and spend column when \code{spend}
+and \code{impressions} are supplied, \code{NULL} otherwise: \code{channel} (the spend
+column), \code{row} (the row number), the implied \code{cpm}, the series'
+\code{median_cpm} and the \code{outlier} flag. With \code{by}, the median and outlier
+rule are computed within each series and a \code{group} column is added.}
 \item{\code{dates}}{One row per series when \code{date} is supplied, \code{NULL}
 otherwise: \code{group} (with \code{by}), \code{rows}, the \code{start} and \code{end} of the
 series, its \code{period}, and the counts \code{out_of_order} (rows that come
@@ -105,13 +106,13 @@ contains the information the model will be asked to find. Run this first.
 Four things sink marketing mix projects, and all four are visible before a
 model is fitted.
 
-\strong{Channel collinearity} is the biggest practical problem in the field. When
-two channels move together -- because they were planned together, which is
-usually the case -- the model cannot tell their effects apart. It will still
-produce coefficients, and those coefficients will flip sign on small changes
-to the specification or the sample. A variance inflation factor above 5
-deserves attention and above 10 means the split between those channels is not
-identified, however tight the overall fit looks.
+\strong{Channel collinearity} is common, because channels are usually planned
+together. When two channels move together the model cannot tell their
+effects apart. It will still produce coefficients, and those coefficients
+can flip sign on small changes to the specification or the sample. A
+variance inflation factor above 5 deserves attention and above 10 means the
+split between those channels is not identified, however tight the overall
+fit looks.
 
 \strong{Insufficient variation} is the quieter version of the same problem. A
 channel spending nearly the same amount every week carries almost no
@@ -122,9 +123,9 @@ transform can recover an effect that the data never varied enough to reveal.
 of the time has far less effective sample than its row count suggests, and
 because carryover across dark periods is where transform bugs hide.
 
-\strong{Spend and impression inconsistency} -- a wildly varying implied cost per
-mille -- almost always means a data-join error upstream rather than a real
-change in media pricing. It is worth catching before it becomes a modelling
+\strong{Spend and impression inconsistency}, a wildly varying implied cost per
+mille, usually means a data-join error upstream rather than a real change
+in media pricing. It is worth catching before it becomes a modelling
 puzzle. A period is flagged when its CPM is more than five median absolute
 deviations from its series' median. When more than half of a series' CPMs
 are identical the median absolute deviation is zero, and a period is
@@ -181,5 +182,5 @@ checked$dates
 checked$flags
 }
 \seealso{
-\code{\link[=adstock_geometric]{adstock_geometric()}}, \code{\link[=contributions]{contributions()}}
+\code{\link[=plot.mm_diagnosis]{plot.mm_diagnosis()}}, \code{\link[=adstock_geometric]{adstock_geometric()}}, \code{\link[=contributions]{contributions()}}
 }
