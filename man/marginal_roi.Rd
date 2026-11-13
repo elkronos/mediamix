@@ -19,11 +19,14 @@ marginal_roi(
 \arguments{
 \item{spend}{Numeric vector of raw spend for one channel, in time order.
 Or a data frame with one row per period and a column of spend per
-channel, to compute every channel in one call.}
+channel, to compute every channel in one call. Spend must be complete,
+finite and non-negative.}
 
 \item{coefficient}{The channel's fitted coefficient on the transformed
 regressor. When \code{spend} is a data frame, a numeric vector of
-coefficients named by channel, such as \code{coef(fit)}.}
+coefficients named by channel: \code{coef(fit)} will do with \code{spec}, but
+without \code{spec} every name is taken as a channel, so pass only the
+channels' coefficients.}
 
 \item{adstock, saturation}{Lists describing the transform, exactly as for
 \code{\link[=media_transform]{media_transform()}}. They must match the transform the model was fitted
@@ -38,7 +41,7 @@ per row, or column names of \code{spend}, as for \code{\link[=transform_plan]{tr
 The default \code{0.01} asks what a 1\% larger budget would have returned.}
 
 \item{rows}{Optional logical or integer index of the periods whose spend is
-increased -- the planning window. Defaults to every period. Response is
+increased (the planning window). Defaults to every period. Response is
 always summed over the whole series, so carryover from the window into
 later periods is counted.}
 
@@ -53,7 +56,8 @@ return of slow channels; see "Carryover after the window". Set it to
 
 \item{spec}{Optional list with one transform per channel, named by column,
 as for \code{\link[=transform_plan]{transform_plan()}}: each entry holds \code{adstock} and \code{saturation},
-and optionally \code{order}. Only when \code{spend} is a data frame. The channels
+and optionally \code{order}. Only when \code{spend} is a data frame, and in place
+of \code{adstock} and \code{saturation}, which must then be left out. The channels
 are then the names of \code{spec}, and \code{coefficient} may hold other names,
 which are ignored. Without \code{spec}, the channels are the names of
 \code{coefficient}.}
@@ -62,7 +66,8 @@ which are ignored. Without \code{spec}, the channels are the names of
 A one-row data frame with columns \code{spend} (total spend over the
 series), \code{contribution} (the channel's total response), \code{roi} (their
 ratio, the average return) and \code{mroi} (incremental response per unit of
-incremental spend, when the spend in \code{rows} is increased by \code{lift}).
+incremental spend, when the spend in \code{rows} is increased by \code{lift}). A
+window with no spend is an error.
 
 When \code{spend} is a data frame, one row per channel, in the order of
 \code{spec} or of \code{coefficient}, with a leading \code{channel} column and then the
@@ -72,7 +77,7 @@ too.
 }
 \description{
 Computes a channel's average return and its marginal return by re-running
-the full media transform -- carryover \emph{and} saturation -- on a
+the full media transform (carryover \emph{and} saturation) on a
 counterfactually increased spend plan, rather than by differentiating the
 saturation curve at a single point. This is the definition of marginal ROI
 used in the Bayesian MMM literature (Jin et al., 2017) and in Google's
@@ -81,13 +86,13 @@ spend, divided by the incremental spend.
 }
 \details{
 Differentiating the saturation curve, as \code{\link[=mroi]{mroi()}} does, answers a narrower
-question: the slope of the curve at one level of \emph{transformed} media.
+question: the slope of the curve at one level of \emph{adstocked} media.
 Turning it into a return on \emph{spend} needs two further steps that are easy
 to get wrong.
 \itemize{
 \item \strong{Carryover.} A unit spent this week enters this week's adstock with the
-kernel's first weight only -- \code{1 - decay} for a normalised geometric
-kernel -- but it also enters every later week's adstock. Under a
+kernel's first weight only (\code{1 - decay} for a normalised geometric
+kernel), but it also enters every later week's adstock. Under a
 normalised kernel those weights sum to one, so the \emph{total} marginal return
 is close to the curve's slope, not to the slope times \code{1 - decay}.
 Multiplying by the first weight gives the return inside the week of spend
@@ -124,7 +129,7 @@ should be credited with all the response it produces, pass
 
 The answer is only as good as the fitted curve, and a curve is identified
 only over the spend levels the data contains. A marginal return is a local
-quantity -- a 1\% change is the kind of question the data can speak to; a
+quantity: a 1\% change is the kind of question the data can speak to; a
 50\% change is extrapolation, which is why \code{lift} defaults to 0.01.
 }
 

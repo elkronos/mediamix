@@ -1,7 +1,7 @@
 #' Average and marginal return by counterfactual simulation
 #'
 #' Computes a channel's average return and its marginal return by re-running
-#' the full media transform -- carryover *and* saturation -- on a
+#' the full media transform (carryover *and* saturation) on a
 #' counterfactually increased spend plan, rather than by differentiating the
 #' saturation curve at a single point. This is the definition of marginal ROI
 #' used in the Bayesian MMM literature (Jin et al., 2017) and in Google's
@@ -10,10 +10,13 @@
 #'
 #' @param spend Numeric vector of raw spend for one channel, in time order.
 #'   Or a data frame with one row per period and a column of spend per
-#'   channel, to compute every channel in one call.
+#'   channel, to compute every channel in one call. Spend must be complete,
+#'   finite and non-negative.
 #' @param coefficient The channel's fitted coefficient on the transformed
 #'   regressor. When `spend` is a data frame, a numeric vector of
-#'   coefficients named by channel, such as `coef(fit)`.
+#'   coefficients named by channel: `coef(fit)` will do with `spec`, but
+#'   without `spec` every name is taken as a channel, so pass only the
+#'   channels' coefficients.
 #' @param adstock,saturation Lists describing the transform, exactly as for
 #'   [media_transform()]. They must match the transform the model was fitted
 #'   on. When `spend` is a data frame and `spec` is `NULL`, every channel
@@ -24,7 +27,7 @@
 #' @param lift Proportional increase in spend used for the marginal return.
 #'   The default `0.01` asks what a 1% larger budget would have returned.
 #' @param rows Optional logical or integer index of the periods whose spend is
-#'   increased -- the planning window. Defaults to every period. Response is
+#'   increased (the planning window). Defaults to every period. Response is
 #'   always summed over the whole series, so carryover from the window into
 #'   later periods is counted.
 #' @param extend Number of zero-spend periods appended to the end of the series
@@ -37,7 +40,8 @@
 #'   [effective_window()] of the decay to measure long-run return.
 #' @param spec Optional list with one transform per channel, named by column,
 #'   as for [transform_plan()]: each entry holds `adstock` and `saturation`,
-#'   and optionally `order`. Only when `spend` is a data frame. The channels
+#'   and optionally `order`. Only when `spend` is a data frame, and in place
+#'   of `adstock` and `saturation`, which must then be left out. The channels
 #'   are then the names of `spec`, and `coefficient` may hold other names,
 #'   which are ignored. Without `spec`, the channels are the names of
 #'   `coefficient`.
@@ -45,7 +49,8 @@
 #' @return A one-row data frame with columns `spend` (total spend over the
 #'   series), `contribution` (the channel's total response), `roi` (their
 #'   ratio, the average return) and `mroi` (incremental response per unit of
-#'   incremental spend, when the spend in `rows` is increased by `lift`).
+#'   incremental spend, when the spend in `rows` is increased by `lift`). A
+#'   window with no spend is an error.
 #'
 #'   When `spend` is a data frame, one row per channel, in the order of
 #'   `spec` or of `coefficient`, with a leading `channel` column and then the
@@ -55,13 +60,13 @@
 #'
 #' @details
 #' Differentiating the saturation curve, as [mroi()] does, answers a narrower
-#' question: the slope of the curve at one level of *transformed* media.
+#' question: the slope of the curve at one level of *adstocked* media.
 #' Turning it into a return on *spend* needs two further steps that are easy
 #' to get wrong.
 #'
 #' * **Carryover.** A unit spent this week enters this week's adstock with the
-#'   kernel's first weight only -- `1 - decay` for a normalised geometric
-#'   kernel -- but it also enters every later week's adstock. Under a
+#'   kernel's first weight only (`1 - decay` for a normalised geometric
+#'   kernel), but it also enters every later week's adstock. Under a
 #'   normalised kernel those weights sum to one, so the *total* marginal return
 #'   is close to the curve's slope, not to the slope times `1 - decay`.
 #'   Multiplying by the first weight gives the return inside the week of spend
@@ -94,7 +99,7 @@
 #' @section What this is not:
 #' The answer is only as good as the fitted curve, and a curve is identified
 #' only over the spend levels the data contains. A marginal return is a local
-#' quantity -- a 1% change is the kind of question the data can speak to; a
+#' quantity: a 1% change is the kind of question the data can speak to; a
 #' 50% change is extrapolation, which is why `lift` defaults to 0.01.
 #'
 #' @references
