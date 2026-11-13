@@ -384,7 +384,7 @@ tidy.mm_diagnosis <- function(x, ...) {
 # without `by` gets a message naming the `by` to pass.
 #' @keywords internal
 #' @noRd
-.mm_note_dplyr_groups <- function(data, by, fn) {
+.mm_note_dplyr_groups <- function(data, by, fn, arg = "data") {
   if (!is.null(by) || !inherits(data, "grouped_df")) return(invisible(NULL))
   vars <- setdiff(names(attr(data, "groups", exact = TRUE)), ".rows")
   if (length(vars) == 0L) return(invisible(NULL))
@@ -394,7 +394,7 @@ tidy.mm_diagnosis <- function(x, ...) {
     sprintf("by = c(%s)", paste0('"', vars, '"', collapse = ", "))
   }
   cli::cli_inform(c(
-    "{.arg data} is grouped by {.val {vars}}, but {.fn {fn}} does not use \\
+    "{.arg {arg}} is grouped by {.val {vars}}, but {.fn {fn}} does not use \\
      dplyr groups: the rows are treated as one series.",
     i = "Pass {.code {code}} to treat each group as its own series."
   ))

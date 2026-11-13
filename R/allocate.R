@@ -98,6 +98,7 @@ allocate_budget <- function(plan, spec, coefficients, total = NULL,
                             steps = 200L, extend = 0L) {
   here <- environment()
   .mm_check_plan(plan)
+  .mm_note_dplyr_groups(plan, by, "allocate_budget", arg = "plan")
   channels <- .mm_check_spec(spec)
   .mm_check_channels(plan, channels, values = TRUE)
   cf <- .mm_plan_coefficients(coefficients, channels)

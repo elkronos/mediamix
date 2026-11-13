@@ -266,6 +266,7 @@ marginal_roi <- function(spend, coefficient,
                                    by, lift, rows, extend, spec, shared,
                                    call = parent.frame()) {
   .mm_check_plan(spend, "spend", call = call)
+  .mm_note_dplyr_groups(spend, by, "marginal_roi", arg = "spend")
   if (!is.null(spec)) {
     if (shared) {
       cli::cli_abort(c(

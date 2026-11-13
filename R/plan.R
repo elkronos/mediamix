@@ -64,6 +64,7 @@
 transform_plan <- function(plan, spec, by = NULL) {
   here <- environment()
   .mm_check_plan(plan)
+  .mm_note_dplyr_groups(plan, by, "transform_plan", arg = "plan")
   channels <- .mm_check_spec(spec)
   .mm_check_channels(plan, channels)
   key <- .mm_plan_by(by, plan, channels)
@@ -143,6 +144,7 @@ simulate_plan <- function(plan, spec, coefficients, by = NULL,
                           baseline = NULL, extend = 0L) {
   here <- environment()
   .mm_check_plan(plan)
+  .mm_note_dplyr_groups(plan, by, "simulate_plan", arg = "plan")
   channels <- .mm_check_spec(spec)
   .mm_check_channels(plan, channels, values = TRUE)
   cf <- .mm_plan_coefficients(coefficients, channels)
@@ -233,6 +235,7 @@ simulate_plan <- function(plan, spec, coefficients, by = NULL,
 #' @export
 reallocate <- function(plan, from, to, amount, by = NULL) {
   .mm_check_plan(plan)
+  .mm_note_dplyr_groups(plan, by, "reallocate", arg = "plan")
   for (arg in c("from", "to")) {
     v <- get(arg, inherits = FALSE)
     if (!.mm_is_string(v)) {

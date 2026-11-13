@@ -775,3 +775,20 @@ test_that("marginal_roi() takes by inside adstock, as media_transform() does", {
     "both as an argument and inside"
   )
 })
+
+test_that("the plan functions say when a grouped tibble's groups are ignored", {
+  skip_if_not_installed("dplyr")
+  skip_if_not_installed("tibble")
+  data(mm_weekly, package = "mediamix", envir = environment())
+  gt <- dplyr::group_by(tibble::as_tibble(mm_weekly), geo)
+  sp <- list(tv = list(adstock = list(decay = 0.85),
+                       saturation = list(half_max = 2250, shape = 1.6)))
+  cf <- c(tv = 5200)
+  expect_message(transform_plan(gt, sp), "`plan` is grouped by \"geo\"")
+  expect_message(simulate_plan(gt, sp, cf), "by = \"geo\"")
+  expect_message(reallocate(gt, "tv", "search", 100), "does not use")
+  expect_message(allocate_budget(gt, sp, cf), "does not use")
+  expect_message(marginal_roi(gt, cf, spec = sp), "`spend` is grouped")
+  # With by, nothing is said.
+  expect_no_message(simulate_plan(gt, sp, cf, by = "geo"))
+})
