@@ -249,6 +249,13 @@
 
 ## Documentation
 
+* New articles: an index from tasks to functions, answers to common
+  questions, and a guide to moving a Robyn model to mediamix, whose worked
+  example reproduces Robyn's transformed series.
+* The vignettes, articles and help pages were checked against the code.
+  Numbers in prose are computed inline, claims about other tools cite their
+  source, and the budget walkthrough, the getting-started vignette and the
+  tidymodels vignette use the planning helpers and `step_adstock_channels()`.
 * References carry a DOI wherever one exists.
 * The budget walkthrough checks its recommendation against the parameters the
   data was simulated from. The fitted model ranks the channels differently
