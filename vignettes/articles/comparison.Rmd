@@ -45,7 +45,7 @@ with no compiled code and no Python:
 | Heuristic and Markov attribution side by side | `attribute()`, `attribution_spread()` | ChannelAttribution (Markov and heuristics) |
 | Uncertainty intervals | `block_bootstrap()` around any model | Posterior intervals in Meridian and PyMC-Marketing; in Robyn, bootstrapped intervals across each cluster of candidate models |
 | Bayesian estimation with priors | No; use `brms` or Stan on mediamix transforms | Meridian, PyMC-Marketing |
-| Budget optimisation | No; `marginal_roi()`, and scenarios simulated by hand | Robyn, Meridian, PyMC-Marketing |
+| Budget optimisation | `allocate_budget()`: the split of a given total that maximises predicted media response, keeping each channel's flighting and within bounds on each channel's total; it optimises point estimates. `simulate_plan()` and `reallocate()` test single moves | Robyn, Meridian, PyMC-Marketing |
 | Reach and frequency, geo hierarchies | No | Meridian |
 
 ## Choosing
