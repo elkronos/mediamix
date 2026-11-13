@@ -26,9 +26,9 @@
 #'   the curve would reject.
 #' @param ref How to set each column's reference level from the training data:
 #'   `"max"` (the default), `"q99"`, `"q95"` or `"mean"`. Using a high quantile
-#'   rather than the maximum makes the reference robust to a single outlying
-#'   week, but a channel that ran in only a few training periods can have a
-#'   95th percentile of zero.
+#'   rather than the maximum keeps a single outlying week from setting the
+#'   reference, but a channel that ran in only a few training periods can have
+#'   a 95th percentile of zero.
 #' @param by Optional character vector naming grouping columns. When given,
 #'   each group gets its own reference level, so a small geography is placed
 #'   on the curve by its own scale rather than by the largest one's. `NULL`
@@ -36,14 +36,6 @@
 #' @param role Not used by this step, since new columns are not created.
 #' @param trained Has the step been prepared?
 #' @param columns,refs,group_refs Populated by `prep()`; not set directly.
-#'
-#' @section Negative and missing values:
-#' Saturation curves are defined for non-negative media. Missing values are
-#' treated as zero spend, and negative values are clamped to zero with a
-#' warning. The commonest way to produce negatives is a `step_normalize()`
-#' earlier in the recipe, which centres each column on its mean and therefore
-#' sends about half of every column below zero. Saturate first, or normalise
-#' something other than the media. Infinite values are an error.
 #' @param skip Should the step be skipped when baking? Must remain `FALSE`.
 #' @param id A unique step identifier.
 #'
@@ -67,8 +59,8 @@
 #' it lands further up the curve.
 #'
 #' Under the hood, `half_max` is converted to whichever native parameter the
-#' chosen curve uses -- the Hill and Michaelis--Menten half-points directly, and
-#' \eqn{\log 2 / x_{1/2}} for the exponential rate -- so the fraction means the
+#' chosen curve uses (the Hill and Michaelis--Menten half-points directly, and
+#' \eqn{\log 2 / x_{1/2}} for the exponential rate), so the fraction means the
 #' same thing across all three bounded curves.
 #'
 #' @section Panel data:
@@ -90,6 +82,14 @@
 #' When `step_adstock()` keeps the raw spend (`keep_original_cols = TRUE`), the
 #' adstocked values are in its new columns, so select those here, for example
 #' with `starts_with("adstock_")`.
+#'
+#' @section Negative and missing values:
+#' Saturation curves are defined for non-negative media. Missing values are
+#' treated as zero spend, and negative values are clamped to zero with a
+#' warning. The commonest way to produce negatives is a `step_normalize()`
+#' earlier in the recipe, which centres each column on its mean and therefore
+#' sends about half of every column below zero. Saturate first, or normalise
+#' something other than the media. Infinite values are an error.
 #'
 #' @section Tidying:
 #' `tidy()` returns a tibble with one row per selected column, or per column

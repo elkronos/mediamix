@@ -49,9 +49,9 @@ the curve would reject.}
 
 \item{ref}{How to set each column's reference level from the training data:
 \code{"max"} (the default), \code{"q99"}, \code{"q95"} or \code{"mean"}. Using a high quantile
-rather than the maximum makes the reference robust to a single outlying
-week, but a channel that ran in only a few training periods can have a
-95th percentile of zero.}
+rather than the maximum keeps a single outlying week from setting the
+reference, but a channel that ran in only a few training periods can have
+a 95th percentile of zero.}
 
 \item{by}{Optional character vector naming grouping columns. When given,
 each group gets its own reference level, so a small geography is placed
@@ -76,16 +76,6 @@ Applies a diminishing-returns curve to media columns inside a \pkg{recipes}
 pipeline, with the half-saturation point expressed relative to each column's
 own scale so that one tunable parameter works across channels.
 }
-\section{Negative and missing values}{
-
-Saturation curves are defined for non-negative media. Missing values are
-treated as zero spend, and negative values are clamped to zero with a
-warning. The commonest way to produce negatives is a \code{step_normalize()}
-earlier in the recipe, which centres each column on its mean and therefore
-sends about half of every column below zero. Saturate first, or normalise
-something other than the media. Infinite values are an error.
-}
-
 \section{Why the half-saturation point is relative}{
 
 Television spend might run to six figures a week and affiliate to three. An
@@ -105,8 +95,8 @@ it unchanged. A test-set value above the training reference is not clipped:
 it lands further up the curve.
 
 Under the hood, \code{half_max} is converted to whichever native parameter the
-chosen curve uses -- the Hill and Michaelis--Menten half-points directly, and
-\eqn{\log 2 / x_{1/2}} for the exponential rate -- so the fraction means the
+chosen curve uses (the Hill and Michaelis--Menten half-points directly, and
+\eqn{\log 2 / x_{1/2}} for the exponential rate), so the fraction means the
 same thing across all three bounded curves.
 }
 
@@ -132,6 +122,16 @@ the capped values past the ceiling. See \code{\link[=media_transform]{media_tran
 When \code{step_adstock()} keeps the raw spend (\code{keep_original_cols = TRUE}), the
 adstocked values are in its new columns, so select those here, for example
 with \code{starts_with("adstock_")}.
+}
+
+\section{Negative and missing values}{
+
+Saturation curves are defined for non-negative media. Missing values are
+treated as zero spend, and negative values are clamped to zero with a
+warning. The commonest way to produce negatives is a \code{step_normalize()}
+earlier in the recipe, which centres each column on its mean and therefore
+sends about half of every column below zero. Saturate first, or normalise
+something other than the media. Infinite values are an error.
 }
 
 \section{Tidying}{
