@@ -1,8 +1,9 @@
 #' Assign conversion credit across a journey
 #'
 #' Five rules for dividing one conversion among the touchpoints that preceded
-#' it, plus a hook for your own. Each returns the journey table with a `credit`
-#' column added, so they compose and can be compared side by side.
+#' it, plus a hook for your own. Each returns the journey table with its own
+#' `credit` column, replacing any already there, so the results of different
+#' rules can be compared side by side.
 #'
 #' @param paths An `mm_paths` object from [build_paths()].
 #' @param first_weight,last_weight Share of credit reserved for the first and
@@ -16,8 +17,8 @@
 #' @param fn For `credit_custom()`, a function of
 #'   `(touch_rank, touch_n, recency)` returning a numeric vector of weights the
 #'   same length as its inputs. `recency` is time from each touch to the
-#'   conversion, in the journey table's units -- see the `units` argument of
-#'   [build_paths()], which sets them. `fn` is called once per *converting*
+#'   conversion, in the journey table's units, which the `units` argument of
+#'   [build_paths()] sets. `fn` is called once per *converting*
 #'   journey and never for a non-converting one, so `recency` is always
 #'   present and the weights need no missing-value handling. The three vectors
 #'   run in `touch_rank` order, whatever the order of the rows, and the weights
@@ -35,13 +36,13 @@
 #'
 #'   The five built-in rules always assign positive weight somewhere, so for
 #'   them total credit always equals the number of converting journeys.
-#'   `credit_custom()` can decline a journey by returning all-zero weights --
-#'   see its entry under *Custom rules*.
+#'   `credit_custom()` can decline a journey by returning all-zero weights;
+#'   see *Custom rules*.
 #'
 #' @details
-#' `credit_first()` and `credit_last()` are the two defaults most reporting
-#' systems ship with, and they disagree with each other by design: comparing
-#' them is the cheapest read on whether a channel opens journeys or closes them.
+#' `credit_first()` and `credit_last()` are the simplest rules, and they
+#' disagree with each other by design: comparing them is the cheapest read on
+#' whether a channel opens journeys or closes them.
 #' [attribute()] runs several rules at once for exactly this reason.
 #'
 #' `credit_position()` gives the first and last touch a fixed share and splits
@@ -53,18 +54,19 @@
 #' `credit_time_decay()` is [adstock_geometric()] run backwards. Adstock takes
 #' one impulse of spend and spreads its effect forward in time with geometric
 #' decay; time-decay attribution takes one conversion and spreads its credit
-#' backward across prior touchpoints with the same geometric kernel. Same
-#' arithmetic, opposite arrow, and the same `decay` vocabulary in both
-#' directions. With `decay = 0` there is no carryover, and all the credit goes
-#' to the most recent touch, shared equally when several touches tie.
+#' backward across prior touchpoints with the same geometric kernel. The
+#' arithmetic is the same with the arrow reversed, and `decay` means the same
+#' thing in both directions. With `decay = 0` there is no carryover, and all
+#' the credit goes to the most recent touch, shared equally when several
+#' touches tie.
 #'
 #' @section Custom rules:
 #' `credit_custom()` takes a function of `(touch_rank, touch_n, recency)` and is
 #' called once per converting journey, with vectors as long as that journey.
 #' Non-converting journeys are never passed to it; they always get zero.
 #'
-#' A rule that qualifies only some touches -- "credit only touches within a day
-#' of conversion", say -- will meet journeys where *nothing* qualifies. When
+#' A rule that qualifies only some touches, such as "credit only touches within
+#' a day of conversion", will meet journeys where *nothing* qualifies. When
 #' `fn` returns all zeros for a journey, that journey receives no credit at all
 #' and is counted in a message. Crediting its touches equally instead would
 #' invent an answer the rule never gave, and it is a surprisingly easy way to
@@ -180,8 +182,8 @@ credit_time_decay <- function(paths, decay = decay_from_half_life(7),
       return(w / sum(w))
     }
     # Normalise in log space. Evaluating decay^(recency/period) directly
-    # underflows to all-zero once recency/period passes a few hundred -- which
-    # a journey table in seconds reaches easily -- and an all-zero kernel
+    # underflows to all-zero once recency/period passes a few hundred, which
+    # a journey table in seconds reaches easily, and an all-zero kernel
     # cannot be normalised into the geometric weights the rule specifies.
     lw <- (recency / period) * log(decay)
     lw <- lw - max(lw)
