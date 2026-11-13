@@ -7,7 +7,7 @@
 #'
 #' @param x An `mm_allocation` object from [allocate_budget()].
 #' @param ... Graphical arguments: `main` replaces the title, and `col` gives
-#'   two colours, the first for recommended spend and response gains, the
+#'   two colours, the first for the spend markers and response gains, the
 #'   second for response losses. Others are ignored.
 #'
 #' @return `x`, invisibly.

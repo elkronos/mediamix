@@ -10,7 +10,7 @@
 \item{x}{An \code{mm_allocation} object from \code{\link[=allocate_budget]{allocate_budget()}}.}
 
 \item{...}{Graphical arguments: \code{main} replaces the title, and \code{col} gives
-two colours, the first for recommended spend and response gains, the
+two colours, the first for the spend markers and response gains, the
 second for response losses. Others are ignored.}
 }
 \value{
