@@ -156,6 +156,18 @@ marginal_roi <- function(spend, coefficient,
                          saturation = list(type = "none"),
                          by = NULL, lift = 0.01, rows = NULL, extend = 0L,
                          spec = NULL) {
+  # `adstock` may carry `by`, as in media_transform(). Moving it to `by` here
+  # lets the padding for `extend` and the window see the groups too.
+  if (is.list(adstock) && "by" %in% names(adstock)) {
+    if (!is.null(by)) {
+      cli::cli_abort(c(
+        "{.arg by} is given both as an argument and inside {.arg adstock}.",
+        i = "Give it once."
+      ))
+    }
+    by <- adstock$by
+    adstock$by <- NULL
+  }
   if (is.data.frame(spend)) {
     return(.mm_marginal_roi_table(
       spend, coefficient, adstock, saturation, by, lift, rows, extend, spec,

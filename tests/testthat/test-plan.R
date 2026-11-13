@@ -755,3 +755,23 @@ test_that("the allocation plot names the columns it needs", {
   edited$allocation <- NULL
   expect_error(plot(edited), "data frame", class = "rlang_error")
 })
+
+test_that("marginal_roi() takes by inside adstock, as media_transform() does", {
+  x <- c(100, 0, 50, 80, 0, 20)
+  g <- rep(c("north", "south"), each = 3)
+  expect_equal(
+    marginal_roi(x, 2, adstock = list(decay = 0.5, by = g), extend = 2),
+    marginal_roi(x, 2, adstock = list(decay = 0.5), by = g, extend = 2)
+  )
+  d <- data.frame(tv = x, search = rev(x))
+  expect_equal(
+    marginal_roi(d, c(tv = 2, search = 1),
+                 adstock = list(decay = 0.5, by = g), extend = 2),
+    marginal_roi(d, c(tv = 2, search = 1), adstock = list(decay = 0.5),
+                 by = g, extend = 2)
+  )
+  expect_error(
+    marginal_roi(x, 2, adstock = list(decay = 0.5, by = g), by = g),
+    "both as an argument and inside"
+  )
+})
