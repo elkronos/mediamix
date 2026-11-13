@@ -23,13 +23,17 @@ the implementation makes, so a result can be reproduced, cited or challenged.
 | `tune_carryover_joint()` | Coordinate descent over per-channel carryover in one model | Standard |
 | `adstock_steady_state()` | Steady-state filter initialisation | Standard |
 | `block_bootstrap()` | Moving block bootstrap | Künsch (1989); Lahiri (2003) |
-| `step_adstock()` | Geometric adstock continued across resampling boundaries | This package |
+| `step_adstock()` | Adstock continued across resampling boundaries | This package |
 | `contributions()` | Additive decomposition, baseline as residual | Standard |
 | `marginal_roi()` | Counterfactual marginal ROI | Jin et al. (2017); Meridian |
+| `allocate_budget()` | Best split of a budget on a grid of spend levels, by dynamic programming | Bellman and Dreyfus (1962) |
 | `diagnose_media()` | Variance inflation factors, coefficient of variation, CPM outliers | Standard |
+| `diagnose_media(date =)` | Time-index check: order, repeated periods and gaps | This package |
+| `from_robyn()` | Conversion of Robyn's adstock and Hill hyperparameters | Robyn's `transformation.R` |
 | `build_paths()` | Journey construction | This package |
 | `credit_*()` | Rule-based attribution | Industry conventions |
 | `markov_removal()` | First-order Markov removal effects | Anderl et al. (2016) |
+| `attribute(times =)` | Bootstrap intervals on attribution shares | Efron (1979) |
 
 ## Carryover
 
@@ -62,7 +66,12 @@ one puts it two periods later, at `peak = 2`.
 `"cdf"` form is a running product of $1 - F(l)$, always decreasing but with
 a time-varying rate; the `"pdf"` form uses the density itself and can peak
 late. Robyn expresses the scale as a quantile of the window, so its fitted
-scale values do not transfer directly.
+scale values do not transfer directly. `from_robyn()` converts the scale of
+the CDF form to periods, and Robyn's geometric decay and Hill `alpha` and
+`gamma` to `media_transform()` arguments, following the transformation code
+in Robyn's repository (`R/R/transformation.R`). Robyn rescales the PDF form's
+weights so that the smallest is 0, which `adstock_weibull()` does not, so
+`from_robyn()` refuses that form rather than approximate it.
 
 **Start-up bias.** Every filter here is cold-started at zero unless given
 a `state`. For a slow channel that understates the first weeks of the series:
@@ -152,6 +161,12 @@ bootstrapping: re-adstocking resampled rows would carry spend across the joins
 between blocks. The resulting intervals describe sampling uncertainty given
 the transform parameters, not the uncertainty in choosing them.
 
+`attribute(times =)` puts intervals on attribution shares with the ordinary
+bootstrap of Efron (1979): journeys are drawn independently with replacement,
+every rule is recomputed on each draw, and the intervals are percentiles of
+the resampled shares. They hold journey construction and the choice of rule
+fixed, and treat a customer's several journeys as unrelated.
+
 ## Joint tuning with tidymodels
 
 `step_adstock()` stores each group's training time points and media values at
@@ -198,6 +213,23 @@ returns
 The shortcut understates the marginal return
 `r round(returns[["simulated"]] / returns[["shortcut"]], 1)`-fold here.
 
+## Budget allocation
+
+`allocate_budget()` chooses each channel's total spend to maximise the
+predicted media response, each channel's coefficient times the sum of its
+transformed series, given a fixed total and bounds on each channel's total.
+Each channel's series is rescaled as a whole, so its flighting is kept. Its
+response is evaluated at its lower bound and at every multiple of a step
+above it, the step being the budget above the lower bounds divided by
+`steps`. Dynamic programming over the channels, the one-dimensional
+allocation process of Bellman and Dreyfus (1962, chapter I), then finds the
+combination of levels that spends the total exactly with the largest
+response. That is the best split on the grid whatever the shape of the
+curves. A greedy search, which gives each increment to the channel whose
+next increment returns most, can leave an S-shaped channel unfunded, because
+its first increments return little. Nothing between grid points is searched,
+and the coefficients are taken as exact.
+
 ## Diagnostics
 
 `diagnose_media()` reports variance inflation factors (regressing each channel
@@ -206,6 +238,11 @@ implied cost-per-mille outliers (a median-absolute-deviation rule). With
 `decay`, collinearity is measured on adstocked media, which is what the model
 sees. With `by`, each is computed within series and the worst case reported,
 since pooling geographies that differ in scale manufactures correlation.
+With `date`, each series' time index is checked for rows out of order,
+repeated periods and missing periods, judged against the series' usual
+spacing: the median step between its distinct time points, as in
+`step_adstock()`. Adstock treats adjacent rows as adjacent periods, and none
+of these raises an error in the transforms themselves.
 
 ## Journeys and attribution
 
@@ -257,6 +294,9 @@ the customer journey: Lessons learned from graph-based online attribution
 modeling. *International Journal of Research in Marketing*, 33(3), 457–474.
 <https://doi.org/10.1016/j.ijresmar.2016.03.001>
 
+Bellman, R. E. and Dreyfus, S. E. (1962). *Applied Dynamic Programming.*
+Princeton University Press. <https://doi.org/10.1515/9781400874651>
+
 Bergmeir, C. and Benítez, J. M. (2012). On the use of cross-validation for
 time series predictor evaluation. *Information Sciences*, 191, 192–213.
 <https://doi.org/10.1016/j.ins.2011.12.028>
@@ -267,6 +307,9 @@ Regression Trees*. Wadsworth.
 
 Broadbent, S. (1979). One way TV advertisements work. *Journal of the Market
 Research Society*, 21(3), 139–166.
+
+Efron, B. (1979). Bootstrap methods: another look at the jackknife. *The
+Annals of Statistics*, 7(1), 1–26. <https://doi.org/10.1214/aos/1176344552>
 
 Hastie, T., Tibshirani, R. and Friedman, J. (2009). *The Elements of
 Statistical Learning* (2nd ed.). Springer.
@@ -294,6 +337,11 @@ Lahiri, S. N. (2003). *Resampling Methods for Dependent Data.* Springer.
 Politis, D. N. and Romano, J. P. (1992). A circular block-resampling
 procedure for stationary data. In R. LePage and L. Billard (eds.), *Exploring
 the Limits of Bootstrap*, 263–270. Wiley.
+
+Robyn, Meta's open-source marketing mix modelling package.
+<https://github.com/facebookexperimental/Robyn>. `from_robyn()` follows
+`R/R/transformation.R` at commit `5915aa9`, and at release 3.11.1 for the
+range-based Hill inflexion point.
 
 Tashman, L. J. (2000). Out-of-sample tests of forecasting accuracy: an analysis
 and review. *International Journal of Forecasting*, 16(4), 437–450.
