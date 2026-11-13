@@ -46,6 +46,10 @@ paths that Markov removal effects are computed against.}
 \item{Timestamp ties}{624 pairs of events (1,248 events) share a customer
 and a timestamp exactly, so journey order depends on a deterministic
 tie-break.}
+\item{Exact duplicates}{117 of those pairs also share a channel, which
+makes the two rows identical. \code{\link[=build_paths]{build_paths()}} drops one row of each
+under its default \code{dedupe = TRUE}, and \code{\link[=path_summary]{path_summary()}} reports the 117
+as \code{duplicate_events}.}
 \item{Channels with positional roles}{Display and social tend to open
 journeys, paid search and email to close them, so first-touch and
 last-touch attribution disagree about them, which is what makes
@@ -63,6 +67,9 @@ table(mm_events$channel, useNA = "ifany")
 
 # Rows are shuffled, as a real export would be
 is.unsorted(mm_events$timestamp)
+
+# Exact duplicate rows, which build_paths() drops by default
+sum(duplicated(mm_events))
 
 # Customers converting more than once
 conv <- table(mm_events$customer_id[mm_events$conversion == 1])
