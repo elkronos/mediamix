@@ -114,15 +114,10 @@
       i = "Every row needs a group. Fill in or drop the missing labels first."
     ), call = call)
   }
-  if (inherits(x, "POSIXt")) {
-    return(format(as.POSIXct(x), "%Y-%m-%d %H:%M:%S", tz = "UTC"))
-  }
-  if (is.numeric(x)) {
-    u <- unique(as.numeric(x))
-    u[u == 0] <- 0
-    return(trimws(sprintf("%.15g", u))[match(as.numeric(x), u)])
-  }
-  as.character(x)
+  # The same keys as everywhere else in the package. Fifteen significant
+  # digits merged distinct ids such as 1000000000000001 and
+  # 1000000000000002, so one series inherited the other's carryover.
+  .mm_key_values(x)
 }
 
 #' @keywords internal

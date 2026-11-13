@@ -1382,3 +1382,17 @@ test_that("the Weibull kernel has weight somewhere over the whole tuning range",
     }
   }
 })
+
+test_that("numeric group ids that differ beyond 15 digits stay separate", {
+  skip_if_not_installed("recipes")
+  d <- data.frame(store = rep(c(1000000000000001, 1000000000000002), each = 4),
+                  date = as.Date("2024-01-01") + 7 * 0:7,
+                  tv = c(100, rep(0, 7)), y = 0)
+  rec <- recipes::prep(step_adstock(recipes::recipe(y ~ ., d), tv,
+                                    index = "date", by = "store",
+                                    decay = 0.5))
+  expect_equal(recipes::bake(rec, NULL)$tv,
+               adstock_geometric(d$tv, 0.5, by = d$store))
+  expect_identical(generics::tidy(rec, 1)$group,
+                   c("1000000000000001", "1000000000000002"))
+})
