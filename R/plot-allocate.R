@@ -88,7 +88,9 @@ plot.mm_allocation <- function(x, ...) {
              xjust = 0.5, yjust = 0.5, horiz = TRUE, xpd = NA,
              col = c(pal[[1L]], ink[["surface"]]), pch = 21,
              pt.bg = c(ink[["surface"]], pal[[1L]]), pt.cex = c(1.3, 1.5),
-             pt.lwd = 2, text.width = NA)
+             pt.lwd = 2,
+             # Column-wise text widths need R 4.2.0 or later.
+             text.width = if (getRversion() >= "4.2.0") NA)
   panel_title("Total spend")
 
   # Response change: a bar from zero, its value at the tip. The limits leave

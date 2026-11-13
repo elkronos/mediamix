@@ -289,13 +289,13 @@ test_that("cores = 2 gives the same result as cores = 1", {
   expect_match(msg_serial, "above the full mean")
   expect_identical(msg_forked, msg_serial)
 
-  # Panels, and more cores than the machine has.
+  # Panels.
   p <- data.frame(geo = rep(c("a", "b"), each = 60), t = rep(1:60, 2),
                   y = stats::rnorm(120))
   pooled <- function(d) c(m = mean(d$y))
   expect_identical(
     as.data.frame(block_bootstrap(p, pooled, times = 20, by = "geo",
-                                  index = "t", seed = 7, cores = 64)),
+                                  index = "t", seed = 7, cores = 2)),
     as.data.frame(block_bootstrap(p, pooled, times = 20, by = "geo",
                                   index = "t", seed = 7))
   )
@@ -308,6 +308,24 @@ test_that("cores = 2 gives the same result as cores = 1", {
   block_bootstrap(d, noisy, times = 10, cores = 2)
   after_forked <- stats::runif(1)
   expect_identical(after_forked, after_serial)
+})
+
+test_that("more cores than the machine has gives the serial result", {
+  skip_on_os("windows")
+  skip_on_cran()
+  # R CMD check sets this to allow tests two processes at most.
+  skip_if(nzchar(Sys.getenv("_R_CHECK_LIMIT_CORES_")),
+          "R CMD check limits the number of cores")
+  set.seed(33)
+  p <- data.frame(geo = rep(c("a", "b"), each = 60), t = rep(1:60, 2),
+                  y = stats::rnorm(120))
+  pooled <- function(d) c(m = mean(d$y))
+  expect_identical(
+    as.data.frame(block_bootstrap(p, pooled, times = 20, by = "geo",
+                                  index = "t", seed = 7, cores = 64)),
+    as.data.frame(block_bootstrap(p, pooled, times = 20, by = "geo",
+                                  index = "t", seed = 7))
+  )
 })
 
 test_that("circular blocks draw the first row as often as any other", {

@@ -50,6 +50,7 @@ Suggests:
     rmarkdown,
     rsample,
     testthat (>= 3.1.7),
+    tibble,
     tune,
     workflows,
     yardstick

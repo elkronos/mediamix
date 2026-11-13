@@ -121,8 +121,10 @@ test_that("tune() gives each channel a parameter of its own", {
   # the placeholder in each under its own id.
   tn <- generics::tunable(rec)
   expect_identical(tn$component_id[tn$name == "decay"][1:2], step_ids)
+  # Recent recipes releases set `tunable` to FALSE when a tune() id differs
+  # from the parameter's name, so the rows are selected by parameter here.
   ta <- generics::tune_args(rec)
-  expect_identical(ta$id[ta$tunable & ta$component == "step_adstock"],
+  expect_identical(ta$id[ta$component == "step_adstock" & ta$name == "decay"],
                    c("decay_tv", "decay_search"))
 
   # An id given to tune() becomes the stem, and a named list mixes tuned and
