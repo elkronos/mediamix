@@ -53,6 +53,11 @@
 
 ## Bug fixes
 
+* Grouping by several columns no longer merges two groups when a value
+  contains the character used to join the columns into one key; such values
+  are refused with a message.
+* Error messages no longer suggest `Inf` for an argument that refuses it, and
+  give an infinite bound as open when infinite values are refused.
 * `rlang` is now in Imports. Every error, warning and message goes through
   `cli`, which calls `rlang`, so without it installed even a warning stopped
   the call with "there is no package called 'rlang'".
@@ -137,6 +142,46 @@
 
 ## New features
 
+* Budget planning from a per-channel spec, a named list of
+  `media_transform()` arguments: `transform_plan()` transforms every channel
+  of a plan, `simulate_plan()` reports each channel's spend and predicted
+  response (with `baseline =`, the change from another plan), `reallocate()`
+  moves spend between two channels and keeps both channels' flighting, and
+  `allocate_budget()` splits a total across channels within per-channel
+  bounds, by dynamic programming on a grid of spend levels, with a `plot()`
+  method. `marginal_roi(spec =)` takes a data frame of spend and returns one
+  row per channel.
+* `from_robyn()` converts one channel's Robyn hyperparameters (geometric
+  `theta`, Weibull CDF `shape` and `scale`, Hill `alpha` and `gamma`) into
+  `media_transform()` arguments that reproduce Robyn's transformed series.
+  `inflexion` chooses Robyn's Hill rule for version 3.12.0 and later, or for
+  3.7.0 to 3.11.1.
+* `fourier_terms()` and `holiday_flags()` build seasonality controls: sine and
+  cosine pairs by time of year, and flags for the daily or weekly periods
+  that contain a holiday.
+* `step_adstock()` gains Weibull and delayed kernels (`kernel`, `shape`,
+  `scale`, `type`, `peak`), steady-state starts (`start = "steady"`), and
+  `keep_original_cols` with `prefix` to keep the raw spend beside the
+  adstocked column. `step_adstock_channels()` adds one step per channel, each
+  with its own decay or its own `tune()` id, and `carryover_shape()`,
+  `carryover_scale()` and `carryover_peak()` are the new kernels' dials
+  parameters.
+* `diagnose_media(date =)` checks each series for rows out of time order,
+  repeated periods, missing periods and uneven steps.
+* `roi()` gains `by`, `index` and `periods` for returns by group and period.
+* `block_bootstrap(cores =)` evaluates replicates in parallel, with results
+  that do not depend on `cores`. `tune_carryover()` and
+  `tune_carryover_joint()` keep out-of-sample predictions with `save_pred`.
+* `build_paths(keep =)` carries other event columns, such as campaign, device
+  or cost, into the journey table, and `conversion_touch = "drop"` stops the
+  channel recorded on a conversion from counting as a touch.
+* `attribute(by =)` attributes each segment's journeys separately, and
+  `attribute(times =, level =, seed =)` adds percentile intervals on the
+  shares from resampled journeys, with `plot()` methods for both.
+  `markov_removal()` gains `p_without` and returns the fitted transition
+  matrix as an attribute.
+* `decay_from_half_life()`, `half_life()` and `effective_window()` are
+  vectorised over their first argument.
 * `marginal_roi()` computes average and marginal return by re-running
   carryover and saturation on a slightly larger budget, following Jin et al.
   (2017), with optional planning windows and carryover run-out.
@@ -194,6 +239,7 @@
 
 ## Documentation
 
+* References carry a DOI wherever one exists.
 * The budget walkthrough checks its recommendation against the parameters the
   data was simulated from. The fitted model ranks the channels differently
   from the truth, and the article now presents the reallocation as a test

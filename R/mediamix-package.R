@@ -5,13 +5,15 @@
 #' carryover- and saturation-adjusted regressors, and raw event logs into
 #' attributed customer journeys.
 #'
-#' It is a preprocessing and reporting package. It does not fit models --
+#' It is a preprocessing and reporting package and does not fit models;
 #' `lm()`, `glmnet` and `brms` do that better than a marketing package would.
 #' It computes order-1 Markov removal effects natively; for higher-order chains
 #' [as_channel_paths()] hands your journeys to \pkg{ChannelAttribution}.
 #'
-#' Full documentation, an end-to-end walkthrough and the methods behind each
-#' function are at <https://elkronos.github.io/mediamix/>.
+#' Full documentation is at <https://elkronos.github.io/mediamix/>, including
+#' an end-to-end budget walkthrough, an index from tasks to functions, answers
+#' to common questions, a guide to moving a Robyn model across, and the
+#' methods behind each function.
 #'
 #' @section Where to start:
 #' Five vignettes, in the order most people need them:
@@ -32,30 +34,39 @@
 #' \describe{
 #'   \item{Carryover}{[adstock_geometric()] for the standard geometric kernel,
 #'     [adstock_weibull()] and [adstock_delayed()] when the response peaks
-#'     after the spend,
-#'     [adstock_filter()] for a kernel of your own. [adstock_weights()] and
-#'     [adstock_weights_weibull()] expose the kernels themselves, and
+#'     after the spend, [adstock_filter()] for a kernel of your own.
+#'     [adstock_weights()], [adstock_weights_weibull()] and
+#'     [adstock_weights_delayed()] expose the kernels themselves, and
 #'     [adstock_state()] carries a filter across a boundary.}
 #'   \item{Saturation}{[saturate_hill()], [saturate_exponential()],
 #'     [saturate_michaelis_menten()], [saturate_power()], and the
 #'     [saturate()] dispatcher.}
 #'   \item{Composing them}{[media_transform()] applies carryover then
-#'     saturation, in that order, and will not do it backwards quietly.}
+#'     saturation, in that order, and will not do it backwards quietly.
+#'     [transform_plan()] does the same for every channel of a plan, each with
+#'     its own parameters, and [from_robyn()] converts Robyn's
+#'     hyperparameters to these arguments.}
 #'   \item{Choosing parameters}{[decay_from_half_life()], [half_life()] and
 #'     [effective_window()] translate between half-lives and decay
 #'     coefficients. [tune_carryover()] and [tune_carryover_joint()] select
 #'     them by cross-validation against an actual KPI;
 #'     [adstock_steady_state()] removes start-up bias.}
+#'   \item{Controls}{[fourier_terms()] and [holiday_flags()] build seasonality
+#'     terms for the model and for the tuners' `controls`.}
 #' }
 #'
 #' @section The attribution half:
 #' \describe{
 #'   \item{Journeys}{[build_paths()] turns an event log into journeys,
-#'     handling the seven things that go wrong on the way.}
+#'     handling the seven things that go wrong on the way, and can carry other
+#'     event columns such as device or campaign. [bind_paths()] combines
+#'     journey tables.}
 #'   \item{Credit}{[credit_linear()], [credit_first()], [credit_last()],
 #'     [credit_position()], [credit_time_decay()] and [credit_custom()], and
-#'     the data-driven [markov_removal()]. [attribute()] runs several at once and [attribution_spread()] reports
-#'     how much the answer depends on which you picked.}
+#'     the data-driven [markov_removal()]. [attribute()] runs several at once,
+#'     by segment and with resampled intervals if asked, and
+#'     [attribution_spread()] reports how much the answer depends on which
+#'     rule you picked.}
 #'   \item{Diagnostics}{[path_summary()], [path_lengths()],
 #'     [channel_positions()], [assisted_conversions()], [top_paths()] and
 #'     [conversion_lag()], or [path_diagnostics()] for all of them.}
@@ -63,12 +74,16 @@
 #'     \pkg{ChannelAttribution}'s format.}
 #' }
 #'
-#' @section Reporting, diagnostics and tidymodels:
-#' [diagnose_media()] checks whether the data can support a model at all --
+#' @section Reporting, planning and tidymodels:
+#' [diagnose_media()] checks whether the data can support a model at all, so
 #' run it first. [contributions()], [roi()], [marginal_roi()], [mroi()],
 #' [response_curve()] and [spend_for()] turn a fitted model into a
-#' deliverable, and [block_bootstrap()] puts intervals on it. Each result has
-#' a `plot()` method; [mm_palette()] exposes their colours. [step_adstock()] and
+#' deliverable, and [block_bootstrap()] puts intervals on it.
+#' [simulate_plan()], [reallocate()] and [allocate_budget()] compare and split
+#' budgets through the same transforms. Contributions, response curves,
+#' bootstrap intervals, tuning results, attribution shares, budget allocations
+#' and diagnostics each have a `plot()` method; [mm_palette()] exposes their
+#' colours. [step_adstock()], [step_adstock_channels()] and
 #' [step_saturation()] are \pkg{recipes} steps that carry filter state across
 #' the train/test boundary, with [carryover_decay()] and friends as their
 #' \pkg{dials} parameters.
@@ -80,11 +95,11 @@
 #' that breaks a naive journey pipeline.
 #'
 #' @section Dependencies:
-#' The core transforms need only base R, `stats`, and `cli` for error messages.
-#' `data.table` is used by the attribution half, where event logs are large.
-#' \pkg{recipes}, \pkg{dials} and the rest of tidymodels are optional and
-#' registered conditionally, so the transforms work equally well from a Stan or
-#' \pkg{brms} workflow that will never touch them.
+#' The core transforms need only base R and `stats`, plus `cli` and `rlang` for
+#' error messages. `data.table` is used by the attribution half, where event
+#' logs are large. \pkg{recipes}, \pkg{dials} and the rest of tidymodels are
+#' optional and registered conditionally, so the transforms work equally well
+#' from a Stan or \pkg{brms} workflow that will never touch them.
 #'
 #' @examples
 #' # The media half: spend in, model-ready regressor out
