@@ -1,7 +1,7 @@
 #' Carryover decay vocabulary
 #'
-#' Practitioners reason about media carryover in half-lives ("television keeps
-#' working for about three weeks"), while the arithmetic needs a decay
+#' Practitioners reason about media carryover in half-lives ("television's
+#' effect halves every three weeks"), while the arithmetic needs a decay
 #' coefficient. These three functions translate between the two and are shared
 #' by both halves of the package: `decay` means the same thing in
 #' [adstock_geometric()], which spreads one impulse of spend *forward* through
@@ -50,7 +50,8 @@
 #' `decay_from_half_life(c(1, 2, 4))` builds a grid of decays from half-lives,
 #' ready for the `decays` argument of [tune_carryover()]. `period` and
 #' `coverage` take a single value, which applies to every element. A missing
-#' or out-of-range element is an error that names the element.
+#' or out-of-range element is an error; in a vector of several, the message
+#' gives the position of the first out-of-range element.
 #'
 #' @seealso [adstock_geometric()], which spreads spend forward with this decay,
 #'   and [credit_time_decay()], which spreads credit backward with the same one.

@@ -41,8 +41,8 @@ periods with the default \code{period = 1}; days for \code{half_life(decay, peri
 periods.
 }
 \description{
-Practitioners reason about media carryover in half-lives ("television keeps
-working for about three weeks"), while the arithmetic needs a decay
+Practitioners reason about media carryover in half-lives ("television's
+effect halves every three weeks"), while the arithmetic needs a decay
 coefficient. These three functions translate between the two and are shared
 by both halves of the package: \code{decay} means the same thing in
 \code{\link[=adstock_geometric]{adstock_geometric()}}, which spreads one impulse of spend \emph{forward} through
@@ -68,7 +68,8 @@ The first argument of each function is vectorised, so
 \code{decay_from_half_life(c(1, 2, 4))} builds a grid of decays from half-lives,
 ready for the \code{decays} argument of \code{\link[=tune_carryover]{tune_carryover()}}. \code{period} and
 \code{coverage} take a single value, which applies to every element. A missing
-or out-of-range element is an error that names the element.
+or out-of-range element is an error; in a vector of several, the message
+gives the position of the first out-of-range element.
 }
 \examples{
 # A three-week half-life on weekly data
