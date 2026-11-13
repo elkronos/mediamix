@@ -152,7 +152,7 @@ this invariant explicitly, precisely because the shortcut depends on it.
 head(tuned$results, 5)
 ```
 
-The `results` grid is worth looking at rather than just taking `best`. If the
+The `results` grid is worth looking at rather than taking `best` on trust. If the
 metric is nearly flat across a wide band of decay, the data does not identify
 carryover tightly and a confident point estimate would be overstating things.
 

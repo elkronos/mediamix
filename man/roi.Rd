@@ -81,14 +81,14 @@ point in opposite directions.
 
 Where they sit relative to each other depends on the shape of the curve.
 
-For a \strong{concave} response (\code{saturate_hill()} with \code{shape <= 1},
+For a \emph{concave} response (\code{saturate_hill()} with \code{shape <= 1},
 Michaelis--Menten, negative exponential, \code{saturate_power()}), marginal ROI
 is below average ROI everywhere, and the gap widens the further up the curve
 a channel sits. Reallocating on average ROI then systematically over-funds
 channels that are already saturated, which are exactly the channels that look
 best on an average-ROI table.
 
-For an \strong{S-shaped} response (\code{saturate_hill()} with \code{shape > 1}, the usual
+For an \emph{S-shaped} response (\code{saturate_hill()} with \code{shape > 1}, the usual
 way to represent a threshold effect), the curve is \emph{convex} below its
 inflection point, and there marginal ROI is \emph{above} average ROI. A channel
 in that region has not saturated: each extra pound works harder than the

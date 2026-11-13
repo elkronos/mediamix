@@ -1,9 +1,9 @@
 #' Decompose predicted KPI into channel contributions
 #'
 #' Splits a fitted model's prediction into a per-channel contribution plus a
-#' baseline. This is what a marketing mix model deliverable actually is: not the
-#' coefficients, but the answer to "how much of last year's revenue did each
-#' channel produce, and what would have happened anyway".
+#' baseline. A marketing mix model is usually delivered as this decomposition,
+#' the answer to "how much of last year's revenue did each channel produce,
+#' and what would have happened anyway", rather than as its coefficients.
 #'
 #' @param media A data frame of the *transformed* media regressors (adstocked
 #'   and saturated), exactly as they entered the model. Column names must match
@@ -532,14 +532,14 @@ contributions <- function(media, model, intercept = NULL, index = NULL,
 #'
 #' Where they sit relative to each other depends on the shape of the curve.
 #'
-#' For a **concave** response (`saturate_hill()` with `shape <= 1`,
+#' For a *concave* response (`saturate_hill()` with `shape <= 1`,
 #' Michaelis--Menten, negative exponential, `saturate_power()`), marginal ROI
 #' is below average ROI everywhere, and the gap widens the further up the curve
 #' a channel sits. Reallocating on average ROI then systematically over-funds
 #' channels that are already saturated, which are exactly the channels that look
 #' best on an average-ROI table.
 #'
-#' For an **S-shaped** response (`saturate_hill()` with `shape > 1`, the usual
+#' For an *S-shaped* response (`saturate_hill()` with `shape > 1`, the usual
 #' way to represent a threshold effect), the curve is *convex* below its
 #' inflection point, and there marginal ROI is *above* average ROI. A channel
 #' in that region has not saturated: each extra pound works harder than the

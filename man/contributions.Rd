@@ -72,9 +72,9 @@ that are not among the media columns.
 }
 \description{
 Splits a fitted model's prediction into a per-channel contribution plus a
-baseline. This is what a marketing mix model deliverable actually is: not the
-coefficients, but the answer to "how much of last year's revenue did each
-channel produce, and what would have happened anyway".
+baseline. A marketing mix model is usually delivered as this decomposition,
+the answer to "how much of last year's revenue did each channel produce,
+and what would have happened anyway", rather than as its coefficients.
 }
 \details{
 Contributions are computed as \eqn{\beta_j x_{jt}} for each channel, with
