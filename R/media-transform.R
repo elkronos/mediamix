@@ -17,16 +17,19 @@
 #'   `list(kernel = "none")`, for saturation alone.
 #' @param saturation A named list of arguments for the saturation step,
 #'   including a `type` element of `"hill"`, `"exponential"`,
-#'   `"michaelis_menten"`, `"power"` or `"none"`. Remaining elements are passed
-#'   to the corresponding `saturate_*()` function -- for `"hill"` that means
-#'   `half_max`, which has no default because a sensible value depends entirely
-#'   on the scale of your spend.
+#'   `"michaelis_menten"`, `"power"` or `"none"`. A list without `type` uses
+#'   the Hill curve, so `list(half_max = 300)` is a Hill curve and `list()` is
+#'   an error asking for `half_max`. Remaining elements are passed to the
+#'   corresponding `saturate_*()` function: for `"hill"` that means
+#'   `half_max`, which has no default because a sensible value depends
+#'   entirely on the scale of your spend, and optionally `shape`.
 #'
-#'   Saturation defaults to `"none"`, so calling `media_transform()` with only
-#'   an `adstock` argument applies carryover alone. `saturation = NULL` does
-#'   the same.
+#'   The argument itself defaults to `list(type = "none")`, no saturation, so
+#'   calling `media_transform()` with only an `adstock` argument applies
+#'   carryover alone. `saturation = NULL` does the same.
 #' @param by Optional grouping vector, or data frame of grouping vectors, the
-#'   same length as `x`.
+#'   same length as `x`. Carryover runs within each group, as in
+#'   [adstock_geometric()].
 #' @param order Transform order. `"adstock_then_saturate"` is the convention and
 #'   the default. `"saturate_then_adstock"` is permitted but warns, because it
 #'   is nearly always a mistake rather than a choice.
@@ -54,7 +57,7 @@
 #' @examples
 #' spend <- c(0, 500, 800, 300, 0, 0, 1200, 400)
 #'
-#' # Carryover only -- saturation is off by default
+#' # Carryover only: saturation is off by default
 #' round(media_transform(spend, adstock = list(decay = 0.5)), 4)
 #'
 #' # Carryover and saturation together, in the conventional order

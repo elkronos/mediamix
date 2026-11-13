@@ -28,17 +28,20 @@ only \code{saturation} is given. Pass \code{adstock = NULL}, or
 
 \item{saturation}{A named list of arguments for the saturation step,
 including a \code{type} element of \code{"hill"}, \code{"exponential"},
-\code{"michaelis_menten"}, \code{"power"} or \code{"none"}. Remaining elements are passed
-to the corresponding \verb{saturate_*()} function -- for \code{"hill"} that means
-\code{half_max}, which has no default because a sensible value depends entirely
-on the scale of your spend.
+\code{"michaelis_menten"}, \code{"power"} or \code{"none"}. A list without \code{type} uses
+the Hill curve, so \code{list(half_max = 300)} is a Hill curve and \code{list()} is
+an error asking for \code{half_max}. Remaining elements are passed to the
+corresponding \verb{saturate_*()} function: for \code{"hill"} that means
+\code{half_max}, which has no default because a sensible value depends
+entirely on the scale of your spend, and optionally \code{shape}.
 
-Saturation defaults to \code{"none"}, so calling \code{media_transform()} with only
-an \code{adstock} argument applies carryover alone. \code{saturation = NULL} does
-the same.}
+The argument itself defaults to \code{list(type = "none")}, no saturation, so
+calling \code{media_transform()} with only an \code{adstock} argument applies
+carryover alone. \code{saturation = NULL} does the same.}
 
 \item{by}{Optional grouping vector, or data frame of grouping vectors, the
-same length as \code{x}.}
+same length as \code{x}. Carryover runs within each group, as in
+\code{\link[=adstock_geometric]{adstock_geometric()}}.}
 
 \item{order}{Transform order. \code{"adstock_then_saturate"} is the convention and
 the default. \code{"saturate_then_adstock"} is permitted but warns, because it
@@ -70,7 +73,7 @@ backwards quietly.
 \examples{
 spend <- c(0, 500, 800, 300, 0, 0, 1200, 400)
 
-# Carryover only -- saturation is off by default
+# Carryover only: saturation is off by default
 round(media_transform(spend, adstock = list(decay = 0.5)), 4)
 
 # Carryover and saturation together, in the conventional order
