@@ -24,9 +24,10 @@ the C locale.
 }
 \description{
 Collapses an \code{mm_paths} object into the aggregated \code{"a > b > c"} table that
-\pkg{ChannelAttribution} consumes. This package builds the journeys;
-\pkg{ChannelAttribution} computes Markov removal effects on them in C++.
-Neither needs to do the other's job.
+\pkg{ChannelAttribution} consumes. This package builds the journeys and
+fits the order-1 chain of \code{\link[=markov_removal]{markov_removal()}};
+\pkg{ChannelAttribution} computes Markov removal effects on them in C++,
+for higher-order chains too.
 }
 \details{
 The \code{total_null} column is why \code{\link[=build_paths]{build_paths()}} keeps non-converting journeys
@@ -57,5 +58,5 @@ if (requireNamespace("ChannelAttribution", quietly = TRUE)) {
 }
 }
 \seealso{
-\code{\link[=build_paths]{build_paths()}}, \code{\link[=attribute]{attribute()}}
+\code{\link[=build_paths]{build_paths()}}, \code{\link[=markov_removal]{markov_removal()}}, \code{\link[=attribute]{attribute()}}
 }

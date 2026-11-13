@@ -1,9 +1,10 @@
 #' Export journeys in ChannelAttribution's format
 #'
 #' Collapses an `mm_paths` object into the aggregated `"a > b > c"` table that
-#' \pkg{ChannelAttribution} consumes. This package builds the journeys;
-#' \pkg{ChannelAttribution} computes Markov removal effects on them in C++.
-#' Neither needs to do the other's job.
+#' \pkg{ChannelAttribution} consumes. This package builds the journeys and
+#' fits the order-1 chain of [markov_removal()];
+#' \pkg{ChannelAttribution} computes Markov removal effects on them in C++,
+#' for higher-order chains too.
 #'
 #' @param paths An `mm_paths` object from [build_paths()].
 #' @param sep Separator between channels, `" > "` by default. A channel name
@@ -27,7 +28,7 @@
 #' down depending on how the missing non-converting journeys differ from the
 #' converting ones.
 #'
-#' @seealso [build_paths()], [attribute()]
+#' @seealso [build_paths()], [markov_removal()], [attribute()]
 #'
 #' @examples
 #' data(mm_events)
