@@ -62,10 +62,10 @@ the curves rather than by multiplying by a marginal return.
 \details{
 A channel's response is the quantity \code{\link[=marginal_roi]{marginal_roi()}} divides by spend: its
 coefficient times the sum of its transformed series over every row of the
-plan. It leaves out the intercept and the controls, which a change of media
-plan does not move, so the difference in response between two plans is
-the difference in the KPI the model predicts for them. The sum of
-\code{response_change} is the total gain or loss.
+plan and any \code{extend} periods after it. It leaves out the intercept and the
+controls, which a change of media plan does not move, so the difference in
+response between two plans is the difference in the KPI the model predicts
+for them. The sum of \code{response_change} is the total gain or loss.
 
 Two plans of different lengths can be compared, since each response is a
 total; compare plans over the same periods for a like-for-like answer.
