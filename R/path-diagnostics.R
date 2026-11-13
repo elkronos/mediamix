@@ -23,7 +23,8 @@
 #'       `conversion_touch = "drop"`, and so cannot be credited to any
 #'       channel. That number should be reported, not absorbed.}
 #'     \item{`journeys_before_filtering`}{Journeys found before post-conversion
-#'       touches, direct traffic, the lookback and null paths were removed.}
+#'       touches, direct traffic, conversion events under
+#'       `conversion_touch = "drop"`, the lookback and null paths were removed.}
 #'     \item{`duplicate_events`}{Exact duplicate events dropped before
 #'       journeys were built (see the `dedupe` argument of [build_paths()]).
 #'       `direct_events` and `conversion_events` count what remained.}
@@ -166,8 +167,8 @@ channel_positions <- function(paths, converting_only = TRUE) {
 #' first channel somewhere before the second. Read a row as "this channel
 #' assisted these channels".
 #'
-#' The diagonal counts journeys where a channel appears before *itself* --
-#' repeat exposure. Note that under `build_paths()`'s default
+#' The diagonal counts journeys where a channel appears before *itself*, which
+#' is repeat exposure. Under `build_paths()`'s default
 #' `collapse_repeats = TRUE`, consecutive repeats have already been merged, so
 #' the diagonal only picks up channels that recur after an intervening
 #' different channel. Build the paths with `collapse_repeats = FALSE` if you
@@ -198,9 +199,9 @@ assisted_conversions <- function(paths, normalise = FALSE) {
               dimnames = list(assisting = chans, assisted = chans))
   if (nrow(p) == 0L) return(m)
 
-  # Index by position, not by name. A channel label may legitimately be the
-  # empty string -- `build_paths(direct = "keep")` preserves whatever the log
-  # contained -- and matrix name-indexing throws on "" even when it is a real
+  # Index by position, not by name. A channel label can still be the empty
+  # string, as when `build_paths(direct = "label")` is given `direct_labels`
+  # without "", and matrix name-indexing throws on "" even when it is a real
   # dimname.
   code <- match(p$channel, chans)
   dt <- data.table::data.table(pid = p$path_id, rank = p$touch_rank,
@@ -344,7 +345,9 @@ conversion_lag <- function(paths, probs = c(0.5, 0.75, 0.9, 0.95, 0.99, 1)) {
 #' Run every journey diagnostic at once
 #'
 #' A convenience wrapper returning the diagnostics an analyst normally presents
-#' together. Each element is exactly what the corresponding function returns.
+#' together. Each element is what the corresponding function returns with its
+#' defaults, except `assists`, which is
+#' `assisted_conversions(paths, normalise = TRUE)`.
 #'
 #' @param paths An `mm_paths` object from [build_paths()].
 #' @param n Number of top paths to include.

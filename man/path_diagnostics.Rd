@@ -17,7 +17,9 @@ A named list with elements \code{summary}, \code{lengths}, \code{positions},
 }
 \description{
 A convenience wrapper returning the diagnostics an analyst normally presents
-together. Each element is exactly what the corresponding function returns.
+together. Each element is what the corresponding function returns with its
+defaults, except \code{assists}, which is
+\code{assisted_conversions(paths, normalise = TRUE)}.
 }
 \examples{
 data(mm_events)

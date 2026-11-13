@@ -23,8 +23,8 @@ first channel somewhere before the second. Read a row as "this channel
 assisted these channels".
 }
 \details{
-The diagonal counts journeys where a channel appears before \emph{itself} --
-repeat exposure. Note that under \code{build_paths()}'s default
+The diagonal counts journeys where a channel appears before \emph{itself}, which
+is repeat exposure. Under \code{build_paths()}'s default
 \code{collapse_repeats = TRUE}, consecutive repeats have already been merged, so
 the diagonal only picks up channels that recur after an intervening
 different channel. Build the paths with \code{collapse_repeats = FALSE} if you
