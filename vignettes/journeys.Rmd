@@ -361,8 +361,10 @@ attr(mk, "p_conversion")
 ```
 
 `p_conversion` is the baseline, the model's probability that a journey
-converts, and each channel's `conversions` are the converting journeys divided
-in proportion to the removal effects. The null paths are what make this work:
+converts, and `p_without` the same probability once the channel is removed, so
+`removal_effect` is `1 - p_without / p_conversion`. Each channel's
+`conversions` are the converting journeys divided in proportion to the
+removal effects. The null paths are what make this work:
 they are how the model learns how often a journey ends in nothing, which is
 why `build_paths()` keeps them by default. `attribute()` runs this model as
 its `"markov"` rule, so the spread table above already included it:
@@ -375,6 +377,34 @@ Markov attribution is still not incrementality. Removing a state from a chain
 assumes every customer who would have passed through it is lost and none finds
 another route to the same purchase. It is a more data-driven convention than
 first-touch, and a convention nonetheless.
+
+## Sampling noise and segments
+
+The spread measures how much a share depends on the rule. `attribute(times =)`
+measures how much it depends on the sample: it draws the journeys with
+replacement `times` times, reruns every rule on each draw, and adds percentile
+intervals, 90% by default, as `lower` and `upper`. `seed` makes them
+reproducible, and `plot()` draws each rule's share with its interval:
+
+```{r intervals}
+boot <- attribute(paths, rules = c("first", "last", "markov"), times = 200,
+                  seed = 1)
+boot[boot$channel == "display", c("rule", "share", "lower", "upper")]
+plot(boot, n = 6)
+```
+
+No interval in `boot` is wider than
+`r round(100 * max(boot$upper - boot$lower), 1)` percentage points, while
+display's share moves
+`r round(100 * spread$spread[spread$channel == "display"])` points between
+rules. The intervals hold the journey construction and each rule fixed, and
+they treat a customer's several journeys as unrelated draws.
+
+To compare segments, such as devices or campaigns, carry the column into the
+journey table with `build_paths(keep =)` and name it in `attribute(by =)`.
+Every rule then runs on each segment's journeys alone, so each rule's shares
+sum to 1 within each segment. A segment column must take one value per journey;
+`mm_events` has none.
 
 ## Handing off to ChannelAttribution
 
