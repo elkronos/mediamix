@@ -44,6 +44,7 @@ Suggests:
     glmnet,
     hardhat (>= 0.2.0),
     knitr,
+    nlme,
     parsnip,
     recipes (>= 1.0.4),
     rmarkdown,

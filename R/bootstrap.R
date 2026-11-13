@@ -5,7 +5,7 @@
 #' *blocks* of consecutive rows, refitting, and recomputing. Resampling single
 #' rows would destroy the autocorrelation that carryover creates and make the
 #' intervals too narrow; resampling blocks keeps it within each block
-#' (Kunsch, 1989).
+#' (\enc{Künsch}{Kunsch}, 1989).
 #'
 #' @param data A data frame, rows in time order (within each group when `by`
 #'   is supplied), unless `index` names a column to order them by. It should
@@ -98,7 +98,7 @@
 #' @section Panels:
 #' With `by` and the default `panel = "shared"`, each replicate draws one set
 #' of blocks of periods and takes every group's rows for those periods, the
-#' moving blocks bootstrap for panels of Goncalves (2011). Shocks common to
+#' moving blocks bootstrap for panels of \enc{Gonçalves}{Goncalves} (2011). Shocks common to
 #' every group, such as a national holiday or a competitor's launch, then stay
 #' together, which they must for a statistic pooled across groups. Each
 #' group's rows are passed to `statistic` together, in time order, one group
@@ -135,14 +135,17 @@
 #' would repeat the data.
 #'
 #' @references
-#' Goncalves, S. (2011). The moving blocks bootstrap for panel linear
-#' regression models with individual fixed effects. *Econometric Theory*,
-#' 27(5), 1048--1082.
+#' \enc{Gonçalves}{Goncalves}, S. (2011). The moving blocks bootstrap for
+#' panel linear regression models with individual fixed effects.
+#' *Econometric Theory*, 27(5), 1048--1082.
+#' \doi{10.1017/S0266466610000630}
 #'
-#' Kunsch, H. R. (1989). The jackknife and the bootstrap for general stationary
-#' observations. *The Annals of Statistics*, 17(3), 1217--1241.
+#' \enc{Künsch}{Kunsch}, H. R. (1989). The jackknife and the bootstrap for
+#' general stationary observations. *The Annals of Statistics*, 17(3),
+#' 1217--1241. \doi{10.1214/aos/1176347265}
 #'
 #' Lahiri, S. N. (2003). *Resampling Methods for Dependent Data*. Springer.
+#' \doi{10.1007/978-1-4757-3803-2}
 #'
 #' Politis, D. N. and Romano, J. P. (1992). A circular block-resampling
 #' procedure for stationary data. In R. LePage and L. Billard (eds.),

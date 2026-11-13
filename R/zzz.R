@@ -5,9 +5,11 @@
 #' @keywords internal
 #' @noRd
 .mm_require_recipes <- function(call = parent.frame()) {
-  missing_pkgs <- c("recipes", "rlang")[
-    !vapply(c("recipes", "rlang"), requireNamespace, logical(1), quietly = TRUE)
-  ]
+  missing_pkgs <- if (requireNamespace("recipes", quietly = TRUE)) {
+    character(0)
+  } else {
+    "recipes"
+  }
   .mm_abort_missing_recipes(missing_pkgs, call = call)
   invisible(TRUE)
 }

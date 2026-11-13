@@ -211,12 +211,15 @@
 #' @references
 #' Breiman, L., Friedman, J., Olshen, R. and Stone, C. (1984).
 #' *Classification and Regression Trees*. Wadsworth.
+#' \doi{10.1201/9781315139470}
 #'
 #' Hastie, T., Tibshirani, R. and Friedman, J. (2009). *The Elements of
 #' Statistical Learning* (2nd ed.). Springer.
+#' \doi{10.1007/978-0-387-84858-7}
 #'
-#' Bergmeir, C. and Benitez, J. M. (2012). On the use of cross-validation for
-#' time series predictor evaluation. *Information Sciences*, 191, 192--213.
+#' Bergmeir, C. and \enc{Benítez}{Benitez}, J. M. (2012). On the use of
+#' cross-validation for time series predictor evaluation. *Information
+#' Sciences*, 191, 192--213. \doi{10.1016/j.ins.2011.12.028}
 #'
 #' @seealso [tune_carryover_joint()] for several channels at once,
 #'   [adstock_geometric()], [fit_ols()], [effective_window()]
