@@ -996,10 +996,13 @@ test_that("an empty journey table keeps its timestamp class and settings", {
                                 conv = c(0, 1)),
                      "id", "ch", "ts", conversion = "conv",
                      conversion_touch = "drop")
-  feb <- build_paths(data.frame(id = "b", ch = "checkout",
-                                ts = as.Date("2024-02-01"), conv = 1),
-                     "id", "ch", "ts", conversion = "conv",
-                     conversion_touch = "drop")
+  expect_warning(
+    feb <- build_paths(data.frame(id = "b", ch = "checkout",
+                                  ts = as.Date("2024-02-01"), conv = 1),
+                       "id", "ch", "ts", conversion = "conv",
+                       conversion_touch = "drop"),
+    "no journeys remain"
+  )
   expect_equal(nrow(feb), 0L)
   expect_s3_class(feb$timestamp, "Date")
   expect_identical(attr(feb, "mm_settings"), attr(jan, "mm_settings"))
