@@ -414,6 +414,9 @@ build_paths <- function(events,
   n_direct <- sum(is_direct)
   if (direct == "label") {
     ch[is_direct] <- "(direct)"
+    # A blank label that is not a direct label gets the name "keep" and
+    # "drop" give it.
+    ch[!is_direct & trimws(ch) == ""] <- "(blank)"
   } else {
     # Under "keep", labels are preserved as they are, except that an absent
     # label is given a name so it can be referred to at all. A channel called

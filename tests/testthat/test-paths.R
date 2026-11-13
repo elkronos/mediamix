@@ -976,3 +976,16 @@ test_that("print.mm_paths writes to standard output and passes ... on", {
   expect_true(any(grepl("12.3", short, fixed = TRUE)))
   expect_identical(capture.output(print(p[0, ]))[2L], "No journeys.")
 })
+
+test_that("direct = \"label\" names a blank channel as keep and drop do", {
+  ev <- data.frame(id = "a", ch = c("", "tv", "direct"), ts = 1:3,
+                   conv = c(0, 0, 1))
+  labelled <- build_paths(ev, id = "id", channel = "ch", timestamp = "ts",
+                          conversion = "conv", direct = "label",
+                          direct_labels = "direct")
+  expect_identical(labelled$channel, c("(blank)", "tv", "(direct)"))
+  kept <- build_paths(ev, id = "id", channel = "ch", timestamp = "ts",
+                      conversion = "conv", direct = "keep",
+                      direct_labels = "direct")
+  expect_identical(kept$channel[1], "(blank)")
+})
