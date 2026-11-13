@@ -57,6 +57,12 @@ mediamix provides those pieces separately, for use around a model you choose:
   definition used by Jin et al. (2017) and by Meridian. The common shortcut,
   a curve's slope times the kernel's first weight, understates slow channels
   several-fold.
+- `allocate_budget()` splits a budget across channels to maximise the media
+  response a fitted model predicts, rescaling each channel's series so its
+  flighting is kept. It compares every spend level of every channel on a
+  grid, so an S-shaped channel that returns little on its first increments is
+  not left unfunded. `simulate_plan()` and `reallocate()` test a single move
+  through the same curves.
 - `tune_carryover()` and, for every channel at once inside one model with
   controls, `tune_carryover_joint()` score candidates on held-out KPI with
   forward-only resampling and report the one-standard-error choice alongside
@@ -79,10 +85,10 @@ mediamix provides those pieces separately, for use around a model you choose:
 | In | Out | Because |
 |---|---|---|
 | Adstock and saturation transforms | Model fitting | `lm`, `glmnet`, `brms` already exist |
-| Carryover selection by cross-validation | Bespoke optimisers | `tune` does this properly |
+| Carryover selection by cross-validation | Bespoke hyperparameter optimisers | `tune` does this properly |
 | Journey construction from event logs | Higher-order Markov chains | `ChannelAttribution` does them in C++ |
 | Rule-based credit and order-1 Markov removal effects | Causal incrementality | Requires experiments, not logs |
-| Contribution, ROI and counterfactual marginal ROI | Budget optimisation | Deserves its own design pass |
+| Contribution, ROI, counterfactual marginal ROI and budget allocation | Allocation under parameter uncertainty | `allocate_budget()` takes point estimates; `block_bootstrap()` measures how far they move |
 | Media data diagnostics | Generic regression diagnostics | `broom`, `performance` |
 
 `as_channel_paths()` exports journeys straight into `ChannelAttribution`'s
@@ -157,19 +163,19 @@ alongside, as `joint$best_1se`.
 The joint search does not tune saturation, so to keep the example short the
 model below uses the parameters `mm_weekly` was simulated from: geometric
 adstock (Broadbent, 1979) followed by a Hill curve (Hill, 1910), which
-`media_transform()` applies in that order. Any model can go on top; here it
-is `lm()` with the controls. `contributions()` splits the fitted revenue into
-one part per channel and a baseline, and `roi()` divides each channel's
-contribution by its spend:
+`media_transform()` applies in that order. `transform_plan()` does the same
+for every channel of a plan, each with its own entry in `spec`. Any model can
+go on top; here it is `lm()` with the controls. `contributions()` splits the
+fitted revenue into one part per channel and a baseline, and `roi()` divides
+each channel's contribution by its spend:
 
 ```{r}
-one_channel <- function(ch) {
-  media_transform(north[[ch]],
-                  adstock = list(decay = truth$decay[[ch]]),
-                  saturation = list(half_max = truth$half_max[[ch]],
-                                    shape = truth$shape[[ch]]))
-}
-media <- as.data.frame(sapply(channels, one_channel))
+spec <- lapply(stats::setNames(channels, channels), function(ch) list(
+  adstock = list(decay = truth$decay[[ch]]),
+  saturation = list(half_max = truth$half_max[[ch]],
+                    shape = truth$shape[[ch]])
+))
+media <- transform_plan(north, spec)[channels]
 fit <- lm(north$revenue ~ ., data = cbind(media, controls))
 contrib <- contributions(media, fit, index = north$date)
 roi(contrib, north[channels])
@@ -236,13 +242,12 @@ steps <- rbind(
   "naive one-path-per-customer" = c(length(naive), mean(lengths(naive))),
   "split on conversion" = step(split_on = "conversion",
                                collapse_repeats = FALSE),
-  "+ 30-day inactivity gap" = step(split_on = c("conversion", "gap"), gap = 30,
-                                   collapse_repeats = FALSE),
-  "+ collapse consecutive duplicates" = step(split_on = c("conversion", "gap"),
-                                             gap = 30, collapse_repeats = TRUE)
+  # build_paths()'s defaults: split on conversion, collapse repeats
+  "+ collapse consecutive duplicates" = step()
 )
-more <- round(100 * (steps[4, 1] / steps[1, 1] - 1))
-shorter <- round(100 * (1 - steps[4, 2] / steps[1, 2]))
+last <- nrow(steps)
+more <- round(100 * (steps[last, 1] / steps[1, 1] - 1))
+shorter <- round(100 * (1 - steps[last, 2] / steps[1, 2]))
 ```
 
 On `mm_events`, the package's
@@ -257,10 +262,10 @@ knitr::kable(data.frame(
 ), align = c("l", "r", "r"), row.names = FALSE)
 ```
 
-The last row has `r more`% more journeys than the first, and they are
-`r shorter`% shorter. Journey counts and lengths feed a Markov transition
-matrix directly, so those are not rounding differences. Each of these choices
-is an argument to `build_paths()`:
+The last row is `build_paths()` with its defaults: `r more`% more journeys
+than the first row, and `r shorter`% shorter. Journey counts and lengths feed
+a Markov transition matrix directly, so those are not rounding differences.
+Each of these choices is an argument to `build_paths()`:
 
 ```{r}
 paths <- build_paths(

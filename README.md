@@ -45,6 +45,12 @@ model you choose:
   the definition used by Jin et al. (2017) and by Meridian. The common
   shortcut, a curve’s slope times the kernel’s first weight, understates
   slow channels several-fold.
+- `allocate_budget()` splits a budget across channels to maximise the
+  media response a fitted model predicts, rescaling each channel’s
+  series so its flighting is kept. It compares every spend level of
+  every channel on a grid, so an S-shaped channel that returns little on
+  its first increments is not left unfunded. `simulate_plan()` and
+  `reallocate()` test a single move through the same curves.
 - `tune_carryover()` and, for every channel at once inside one model
   with controls, `tune_carryover_joint()` score candidates on held-out
   KPI with forward-only resampling and report the one-standard-error
@@ -64,14 +70,14 @@ model you choose:
 
 ## Scope
 
-| In                                                   | Out                            | Because                               |
-|------------------------------------------------------|--------------------------------|---------------------------------------|
-| Adstock and saturation transforms                    | Model fitting                  | `lm`, `glmnet`, `brms` already exist  |
-| Carryover selection by cross-validation              | Bespoke optimisers             | `tune` does this properly             |
-| Journey construction from event logs                 | Higher-order Markov chains     | `ChannelAttribution` does them in C++ |
-| Rule-based credit and order-1 Markov removal effects | Causal incrementality          | Requires experiments, not logs        |
-| Contribution, ROI and counterfactual marginal ROI    | Budget optimisation            | Deserves its own design pass          |
-| Media data diagnostics                               | Generic regression diagnostics | `broom`, `performance`                |
+| In                                                                   | Out                                    | Because                                                                                   |
+|----------------------------------------------------------------------|----------------------------------------|-------------------------------------------------------------------------------------------|
+| Adstock and saturation transforms                                    | Model fitting                          | `lm`, `glmnet`, `brms` already exist                                                      |
+| Carryover selection by cross-validation                              | Bespoke hyperparameter optimisers      | `tune` does this properly                                                                 |
+| Journey construction from event logs                                 | Higher-order Markov chains             | `ChannelAttribution` does them in C++                                                     |
+| Rule-based credit and order-1 Markov removal effects                 | Causal incrementality                  | Requires experiments, not logs                                                            |
+| Contribution, ROI, counterfactual marginal ROI and budget allocation | Allocation under parameter uncertainty | `allocate_budget()` takes point estimates; `block_bootstrap()` measures how far they move |
+| Media data diagnostics                                               | Generic regression diagnostics         | `broom`, `performance`                                                                    |
 
 `as_channel_paths()` exports journeys straight into
 `ChannelAttribution`’s format, for higher-order models and very large
@@ -148,19 +154,20 @@ is reported alongside, as `joint$best_1se`.
 The joint search does not tune saturation, so to keep the example short
 the model below uses the parameters `mm_weekly` was simulated from:
 geometric adstock (Broadbent, 1979) followed by a Hill curve (Hill,
-1910), which `media_transform()` applies in that order. Any model can go
-on top; here it is `lm()` with the controls. `contributions()` splits
-the fitted revenue into one part per channel and a baseline, and `roi()`
-divides each channel’s contribution by its spend:
+1910), which `media_transform()` applies in that order.
+`transform_plan()` does the same for every channel of a plan, each with
+its own entry in `spec`. Any model can go on top; here it is `lm()` with
+the controls. `contributions()` splits the fitted revenue into one part
+per channel and a baseline, and `roi()` divides each channel’s
+contribution by its spend:
 
 ``` r
-one_channel <- function(ch) {
-  media_transform(north[[ch]],
-                  adstock = list(decay = truth$decay[[ch]]),
-                  saturation = list(half_max = truth$half_max[[ch]],
-                                    shape = truth$shape[[ch]]))
-}
-media <- as.data.frame(sapply(channels, one_channel))
+spec <- lapply(stats::setNames(channels, channels), function(ch) list(
+  adstock = list(decay = truth$decay[[ch]]),
+  saturation = list(half_max = truth$half_max[[ch]],
+                    shape = truth$shape[[ch]])
+))
+media <- transform_plan(north, spec)[channels]
 fit <- lm(north$revenue ~ ., data = cbind(media, controls))
 contrib <- contributions(media, fit, index = north$date)
 roi(contrib, north[channels])
@@ -222,13 +229,12 @@ On `mm_events`, the package’s 20,799-event synthetic log:
 |:-----------------------------------|---------:|------------:|
 | naive one-path-per-customer        |    5,400 |        3.85 |
 | split on conversion                |    6,105 |        3.39 |
-| \+ 30-day inactivity gap           |    6,105 |        3.39 |
 | \+ collapse consecutive duplicates |    6,105 |        2.83 |
 
-The last row has 13% more journeys than the first, and they are 27%
-shorter. Journey counts and lengths feed a Markov transition matrix
-directly, so those are not rounding differences. Each of these choices
-is an argument to `build_paths()`:
+The last row is `build_paths()` with its defaults: 13% more journeys
+than the first row, and 27% shorter. Journey counts and lengths feed a
+Markov transition matrix directly, so those are not rounding
+differences. Each of these choices is an argument to `build_paths()`:
 
 ``` r
 paths <- build_paths(
