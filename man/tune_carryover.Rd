@@ -33,16 +33,19 @@ tune_carryover(
 given. It must be finite and must vary: a constant series carries no
 information about carryover.}
 
-\item{y}{Numeric vector of the KPI, the same length as \code{x}.}
+\item{y}{Numeric vector of the KPI, the same length as \code{x}. It may have
+missing values: the default model leaves those rows out of its fits, and
+a split with no KPI to assess is left out.}
 
 \item{fit_fn}{A function of \verb{(x_adstocked, y)} returning a fitted model.
 Defaults to \code{\link[=fit_ols]{fit_ols()}}. When \code{controls} are supplied it receives a data
-frame instead -- the adstocked media as column \code{media}, then the
-controls -- and the default becomes least squares on all of them. For
+frame instead, with the adstocked media as column \code{media} followed by the
+controls, and the default becomes least squares on all of them. For
 several channels at once, see \code{\link[=tune_carryover_joint]{tune_carryover_joint()}}.}
 
 \item{predict_fn}{A function of \verb{(model, newdata)} returning predictions,
-where \code{newdata} is the adstocked media for the assessment rows. Defaults to
+where \code{newdata} is the adstocked media for the assessment rows, or with
+\code{controls} a data frame of the same shape \code{fit_fn} receives. Defaults to
 \code{\link[stats:predict]{stats::predict()}}.}
 
 \item{max_lags}{Integer vector of candidate kernel lengths. \code{Inf} is allowed
@@ -55,9 +58,10 @@ and denotes the infinite recursive kernel.}
 
 \item{scheme}{Resampling scheme. \code{"rolling_origin"} (the default) grows the
 training window one step at a time and assesses on the periods immediately
-following. \code{"k_fold_forward"} splits the series into \code{k} contiguous forward
-blocks. Both are forward-only; neither ever trains on data that follows
-what it assesses.}
+following. \code{"k_fold_forward"} splits the periods after the first training
+window into \code{k} contiguous blocks and assesses each with a model trained
+on every period before it. Both are forward-only; neither ever trains on
+data that follows what it assesses.}
 
 \item{metric_fn}{A function of \verb{(actual, predicted)} returning a single
 number to be minimised. Defaults to \code{\link[=rmse]{rmse()}}.}
@@ -168,25 +172,28 @@ candidate's rows gives its \code{metric}.}
 \description{
 Searches a grid of geometric adstock parameters and returns the pair that
 best predicts a held-out key performance indicator, using forward-only
-resampling and a model you supply.
+resampling and least squares or a model you supply.
 }
 \section{What this fixes}{
 
 It is tempting to choose carryover parameters by asking which transformed
-series is best-behaved -- smoothest, most trend-like, easiest to extrapolate.
-That criterion has no dependent variable in it, and it has a defect that is
-easy to miss: the objective is monotone in how hard the filter smooths, so it
-drifts toward the longest lag and highest decay in whatever grid it is given.
-The chosen parameters then say more about the grid's upper corner than about
-the media.
+series is best-behaved: smoothest, most trend-like, easiest to extrapolate.
+That criterion has no dependent variable in it, so it gives the same answer
+whatever the media did to the KPI. It ranks the candidates by how hard the
+filter smooths the media, and its choice usually lands at one end of the
+decay grid, the lowest decay for some spend series and the highest for
+others. On the series simulated in \code{vignette("carryover")}, whose true decay
+is 0.7, its error rises with decay and it picks the lowest. The chosen
+parameters then say more about the grid's edges than about the media.
 
 The fix is to put the KPI in the loop. Here every candidate \verb{(max_lag, decay)}
 is scored by how well a model fitted on adstocked media predicts \emph{held-out
 KPI}, so the winner is the carryover structure that actually improves
 forecasts of the thing being modelled. It also means the answer depends on
 the model you intend to fit, which is a feature: carryover and the rest of
-the specification are not separable, and pretending otherwise is how a
-three-week half-life turns into a nine-week one once seasonality is added.
+the specification are not separable. In the last example below, leaving the
+trend and seasonality out of the model selects a longer carryover than the
+one the data were simulated with.
 }
 
 \section{Why full-series adstock is safe here}{
@@ -194,9 +201,9 @@ three-week half-life turns into a nine-week one once seasonality is added.
 The media series is adstocked once per grid point and then sliced into folds,
 rather than being re-adstocked inside each fold. That is valid because the
 filter is causal: the adstock value at time \eqn{t} depends only on media at
-times \eqn{\le t}. Assessment-period regressors therefore draw on training
--period \emph{media}, which is information genuinely available at prediction time,
-and never on future media. No KPI information crosses the boundary at any
+times \eqn{\le t}. Assessment-period regressors therefore draw on
+training-period \emph{media}, which is information genuinely available at
+prediction time, and never on future media. No KPI information crosses the boundary at any
 point. The \code{adstock(x)[1:m] == adstock(x[1:m])} invariant is enforced by the
 test suite precisely because this shortcut depends on it.
 }
@@ -208,8 +215,8 @@ curve is often nearly flat across a wide band of decay, and the minimum
 moves around from sample to sample. \code{best} reports the minimum; \code{best_1se}
 applies the one-standard-error rule (Breiman et al., 1984; Hastie,
 Tibshirani and Friedman, 2009, section 7.10), choosing the \emph{shortest}
-carryover -- lowest half-life, then shortest kernel -- that the
-resampling cannot distinguish from the best candidate. When the two
+carryover (lowest half-life, then shortest kernel) that the resampling
+cannot distinguish from the best candidate. When the two
 disagree, the shorter carryover is the more conservative claim.
 
 The comparison is \emph{paired} and is made on the quantity \code{best} minimises.
@@ -249,9 +256,13 @@ rarely decides the answer, but it biases the fit towards short carryover on
 short series. \code{warm_start = TRUE} seeds every candidate with
 \code{\link[=adstock_steady_state]{adstock_steady_state()}}, averaging spend over \code{effective_window(decay)}
 periods or the first training window, whichever is shorter, so the seed
-uses only media that every split trains on. Better still, pass real
-pre-period spend through \code{\link[=adstock_state]{adstock_state()}} and your own \code{fit_fn} when you
-have it.
+uses only media that every split trains on. The tuner takes no starting
+state: it has no \code{state} argument, and \code{fit_fn} receives media that is
+already adstocked. To use real pre-period spend, put it at the front of \code{x}
+with \code{NA} for those periods in \code{y}; the default model leaves rows without
+a KPI out of every fit. Or tune with \code{warm_start = TRUE}, and when you apply
+the selected decay, start \code{\link[=adstock_geometric]{adstock_geometric()}} from the state
+\code{\link[=adstock_state]{adstock_state()}} computes from the pre-period spend.
 }
 
 \section{Panel data}{
@@ -328,6 +339,7 @@ cross-validation for time series predictor evaluation. \emph{Information
 Sciences}, 191, 192--213. \doi{10.1016/j.ins.2011.12.028}
 }
 \seealso{
+\code{\link[=plot_carryover]{plot_carryover()}} for the error across the grid,
 \code{\link[=tune_carryover_joint]{tune_carryover_joint()}} for several channels at once,
 \code{\link[=adstock_geometric]{adstock_geometric()}}, \code{\link[=fit_ols]{fit_ols()}}, \code{\link[=effective_window]{effective_window()}}
 }

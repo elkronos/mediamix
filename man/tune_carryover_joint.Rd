@@ -58,9 +58,10 @@ channel. See \code{\link[=tune_carryover]{tune_carryover()}}.}
 
 \item{scheme}{Resampling scheme. \code{"rolling_origin"} (the default) grows the
 training window one step at a time and assesses on the periods immediately
-following. \code{"k_fold_forward"} splits the series into \code{k} contiguous forward
-blocks. Both are forward-only; neither ever trains on data that follows
-what it assesses.}
+following. \code{"k_fold_forward"} splits the periods after the first training
+window into \code{k} contiguous blocks and assesses each with a model trained
+on every period before it. Both are forward-only; neither ever trains on
+data that follows what it assesses.}
 
 \item{metric_fn}{A function of \verb{(actual, predicted)} returning a single
 number to be minimised. Defaults to \code{\link[=rmse]{rmse()}}.}

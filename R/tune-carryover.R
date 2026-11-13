@@ -2,19 +2,22 @@
 #'
 #' Searches a grid of geometric adstock parameters and returns the pair that
 #' best predicts a held-out key performance indicator, using forward-only
-#' resampling and a model you supply.
+#' resampling and least squares or a model you supply.
 #'
 #' @param x Numeric vector of media spend, in time order unless `index` is
 #'   given. It must be finite and must vary: a constant series carries no
 #'   information about carryover.
-#' @param y Numeric vector of the KPI, the same length as `x`.
+#' @param y Numeric vector of the KPI, the same length as `x`. It may have
+#'   missing values: the default model leaves those rows out of its fits, and
+#'   a split with no KPI to assess is left out.
 #' @param fit_fn A function of `(x_adstocked, y)` returning a fitted model.
 #'   Defaults to [fit_ols()]. When `controls` are supplied it receives a data
-#'   frame instead -- the adstocked media as column `media`, then the
-#'   controls -- and the default becomes least squares on all of them. For
+#'   frame instead, with the adstocked media as column `media` followed by the
+#'   controls, and the default becomes least squares on all of them. For
 #'   several channels at once, see [tune_carryover_joint()].
 #' @param predict_fn A function of `(model, newdata)` returning predictions,
-#'   where `newdata` is the adstocked media for the assessment rows. Defaults to
+#'   where `newdata` is the adstocked media for the assessment rows, or with
+#'   `controls` a data frame of the same shape `fit_fn` receives. Defaults to
 #'   [stats::predict()].
 #' @param max_lags Integer vector of candidate kernel lengths. `Inf` is allowed
 #'   and denotes the infinite recursive kernel.
@@ -23,9 +26,10 @@
 #'   [adstock_geometric()].
 #' @param scheme Resampling scheme. `"rolling_origin"` (the default) grows the
 #'   training window one step at a time and assesses on the periods immediately
-#'   following. `"k_fold_forward"` splits the series into `k` contiguous forward
-#'   blocks. Both are forward-only; neither ever trains on data that follows
-#'   what it assesses.
+#'   following. `"k_fold_forward"` splits the periods after the first training
+#'   window into `k` contiguous blocks and assesses each with a model trained
+#'   on every period before it. Both are forward-only; neither ever trains on
+#'   data that follows what it assesses.
 #' @param metric_fn A function of `(actual, predicted)` returning a single
 #'   number to be minimised. Defaults to [rmse()].
 #' @param initial Size of the first training window, in periods. Defaults to
@@ -122,28 +126,31 @@
 #'
 #' @section What this fixes:
 #' It is tempting to choose carryover parameters by asking which transformed
-#' series is best-behaved -- smoothest, most trend-like, easiest to extrapolate.
-#' That criterion has no dependent variable in it, and it has a defect that is
-#' easy to miss: the objective is monotone in how hard the filter smooths, so it
-#' drifts toward the longest lag and highest decay in whatever grid it is given.
-#' The chosen parameters then say more about the grid's upper corner than about
-#' the media.
+#' series is best-behaved: smoothest, most trend-like, easiest to extrapolate.
+#' That criterion has no dependent variable in it, so it gives the same answer
+#' whatever the media did to the KPI. It ranks the candidates by how hard the
+#' filter smooths the media, and its choice usually lands at one end of the
+#' decay grid, the lowest decay for some spend series and the highest for
+#' others. On the series simulated in `vignette("carryover")`, whose true decay
+#' is 0.7, its error rises with decay and it picks the lowest. The chosen
+#' parameters then say more about the grid's edges than about the media.
 #'
 #' The fix is to put the KPI in the loop. Here every candidate `(max_lag, decay)`
 #' is scored by how well a model fitted on adstocked media predicts *held-out
 #' KPI*, so the winner is the carryover structure that actually improves
 #' forecasts of the thing being modelled. It also means the answer depends on
 #' the model you intend to fit, which is a feature: carryover and the rest of
-#' the specification are not separable, and pretending otherwise is how a
-#' three-week half-life turns into a nine-week one once seasonality is added.
+#' the specification are not separable. In the last example below, leaving the
+#' trend and seasonality out of the model selects a longer carryover than the
+#' one the data were simulated with.
 #'
 #' @section Why full-series adstock is safe here:
 #' The media series is adstocked once per grid point and then sliced into folds,
 #' rather than being re-adstocked inside each fold. That is valid because the
 #' filter is causal: the adstock value at time \eqn{t} depends only on media at
-#' times \eqn{\le t}. Assessment-period regressors therefore draw on training
-#' -period *media*, which is information genuinely available at prediction time,
-#' and never on future media. No KPI information crosses the boundary at any
+#' times \eqn{\le t}. Assessment-period regressors therefore draw on
+#' training-period *media*, which is information genuinely available at
+#' prediction time, and never on future media. No KPI information crosses the boundary at any
 #' point. The `adstock(x)[1:m] == adstock(x[1:m])` invariant is enforced by the
 #' test suite precisely because this shortcut depends on it.
 #'
@@ -153,8 +160,8 @@
 #' moves around from sample to sample. `best` reports the minimum; `best_1se`
 #' applies the one-standard-error rule (Breiman et al., 1984; Hastie,
 #' Tibshirani and Friedman, 2009, section 7.10), choosing the *shortest*
-#' carryover -- lowest half-life, then shortest kernel -- that the
-#' resampling cannot distinguish from the best candidate. When the two
+#' carryover (lowest half-life, then shortest kernel) that the resampling
+#' cannot distinguish from the best candidate. When the two
 #' disagree, the shorter carryover is the more conservative claim.
 #'
 #' The comparison is *paired* and is made on the quantity `best` minimises.
@@ -190,9 +197,13 @@
 #' short series. `warm_start = TRUE` seeds every candidate with
 #' [adstock_steady_state()], averaging spend over `effective_window(decay)`
 #' periods or the first training window, whichever is shorter, so the seed
-#' uses only media that every split trains on. Better still, pass real
-#' pre-period spend through [adstock_state()] and your own `fit_fn` when you
-#' have it.
+#' uses only media that every split trains on. The tuner takes no starting
+#' state: it has no `state` argument, and `fit_fn` receives media that is
+#' already adstocked. To use real pre-period spend, put it at the front of `x`
+#' with `NA` for those periods in `y`; the default model leaves rows without
+#' a KPI out of every fit. Or tune with `warm_start = TRUE`, and when you apply
+#' the selected decay, start [adstock_geometric()] from the state
+#' [adstock_state()] computes from the pre-period spend.
 #'
 #' @section Panel data:
 #' With `by` and `index`, `x`, `y` and `controls` hold several series stacked,
@@ -221,7 +232,8 @@
 #' cross-validation for time series predictor evaluation. *Information
 #' Sciences*, 191, 192--213. \doi{10.1016/j.ins.2011.12.028}
 #'
-#' @seealso [tune_carryover_joint()] for several channels at once,
+#' @seealso [plot_carryover()] for the error across the grid,
+#'   [tune_carryover_joint()] for several channels at once,
 #'   [adstock_geometric()], [fit_ols()], [effective_window()]
 #'
 #' @examples
@@ -810,9 +822,9 @@ tidy.mm_carryover <- function(x, ...) {
 # `fit_ols`, or the answer would depend on which fitter the user happened to
 # pass. Two things secure that: the coefficients come from the same
 # `.mm_ols_from_moments()` the direct fitter uses, and the one place prefix sums
-# can lose precision -- a regressor whose variance is tiny next to its mean
-# square, where `sum(z^2) - sum(z)^2/n` cancels catastrophically -- is detected
-# and handed back to the general path instead of being answered badly.
+# can lose precision is detected and handed back to the general path instead of
+# being answered badly: a regressor whose variance is tiny next to its mean
+# square, where `sum(z^2) - sum(z)^2/n` cancels catastrophically.
 #' @keywords internal
 #' @noRd
 .mm_cv_fast <- function(z, y, splits) {
