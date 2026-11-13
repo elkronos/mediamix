@@ -19,12 +19,15 @@
 #'   a name with a channel.
 #' @param fit_fn,predict_fn Optional model. `fit_fn(X, y)` receives a data frame
 #'   of the adstocked media followed by the controls; `predict_fn(model, X)`
-#'   returns predictions for new rows of the same shape. Both `NULL` (the
-#'   default) fits ordinary least squares with an intercept.
+#'   returns predictions for new rows of the same shape. Leaving both `NULL`
+#'   (the default) fits ordinary least squares with an intercept; giving only
+#'   one is an error.
 #' @param max_lags,decays Candidate kernel lengths and decays, shared by every
 #'   channel. See [tune_carryover()].
-#' @param start Optional named numeric vector of starting decays in `[0, 1]`,
-#'   one per channel. Defaults to the middle of `decays`.
+#' @param start Optional numeric vector of starting decays in `[0, 1]`, named
+#'   by channel. Each channel it names starts at the grid point with the
+#'   nearest decay; the others start, as every channel does by default, at the
+#'   middle of `decays`.
 #' @param max_iter Maximum number of full sweeps over the channels.
 #' @param warm_start Seed each adstocked series with
 #'   [adstock_steady_state()] instead of starting from zero, removing the
@@ -43,6 +46,11 @@
 #'   The other grid points' predictions are not kept: each channel's final
 #'   profile alone holds one set per grid point, so keeping them would need a
 #'   row for every channel, grid point and assessed row.
+#' @param by,index Panel data, as in [tune_carryover()]. `by` assigns each row
+#'   to a series, as a vector or a data frame of key columns, and `index` gives
+#'   each row's period, as a number, [Date] or [POSIXct]. With `index` the rows
+#'   may come in any order. `by` needs `index`. Every channel is adstocked
+#'   within each series; see *Panel data* in [tune_carryover()].
 #' @inheritParams tune_carryover
 #'
 #' @return An object of class `mm_carryover_joint`: a list with
@@ -106,7 +114,8 @@
 #' against the profiles' `std_err`, the channels' near-ties do not add up to a
 #' near-tie for the set, and `best_1se` is better read one channel at a time.
 #'
-#' @seealso [tune_carryover()] for one channel, [adstock_steady_state()]
+#' @seealso [tune_carryover()] for one channel, [plot_carryover()] for the
+#'   profiles, [adstock_steady_state()]
 #'
 #' @examples
 #' data(mm_weekly)

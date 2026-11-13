@@ -47,8 +47,9 @@ a name with a channel.}
 
 \item{fit_fn, predict_fn}{Optional model. \code{fit_fn(X, y)} receives a data frame
 of the adstocked media followed by the controls; \code{predict_fn(model, X)}
-returns predictions for new rows of the same shape. Both \code{NULL} (the
-default) fits ordinary least squares with an intercept.}
+returns predictions for new rows of the same shape. Leaving both \code{NULL}
+(the default) fits ordinary least squares with an intercept; giving only
+one is an error.}
 
 \item{max_lags, decays}{Candidate kernel lengths and decays, shared by every
 channel. See \code{\link[=tune_carryover]{tune_carryover()}}.}
@@ -90,8 +91,10 @@ split and averages, which is the \pkg{tune} convention. With
 \code{assess = 1} a per-split RMSE is an absolute error, so the mean of them is
 a mean absolute error whatever \code{metric_fn} is called.}
 
-\item{start}{Optional named numeric vector of starting decays in \verb{[0, 1]},
-one per channel. Defaults to the middle of \code{decays}.}
+\item{start}{Optional numeric vector of starting decays in \verb{[0, 1]}, named
+by channel. Each channel it names starts at the grid point with the
+nearest decay; the others start, as every channel does by default, at the
+middle of \code{decays}.}
 
 \item{max_iter}{Maximum number of full sweeps over the channels.}
 
@@ -108,10 +111,11 @@ and \code{predict_fn} must call other packages with \code{pkg::fun()} and must n
 rely on functions or data defined in your session. \code{metric_fn} runs in
 your session.}
 
-\item{by, index}{Panel data. \code{by} assigns each row to a series, as a vector
-or a data frame of key columns, and \code{index} gives each row's period, as a
-number, \link{Date} or \link{POSIXct}. With \code{index} the rows may come in any order.
-\code{by} needs \code{index}. See \emph{Panel data}.}
+\item{by, index}{Panel data, as in \code{\link[=tune_carryover]{tune_carryover()}}. \code{by} assigns each row
+to a series, as a vector or a data frame of key columns, and \code{index} gives
+each row's period, as a number, \link{Date} or \link{POSIXct}. With \code{index} the rows
+may come in any order. \code{by} needs \code{index}. Every channel is adstocked
+within each series; see \emph{Panel data} in \code{\link[=tune_carryover]{tune_carryover()}}.}
 
 \item{se_block}{Number of consecutive splits the jackknife leaves out
 together when it computes \code{std_err} and the one-standard-error rule. \code{1},
@@ -219,5 +223,6 @@ kept <- joint$predictions[joint$predictions$selection == "best", ]
 head(kept[c("split", "row", "observed", "predicted")])
 }
 \seealso{
-\code{\link[=tune_carryover]{tune_carryover()}} for one channel, \code{\link[=adstock_steady_state]{adstock_steady_state()}}
+\code{\link[=tune_carryover]{tune_carryover()}} for one channel, \code{\link[=plot_carryover]{plot_carryover()}} for the
+profiles, \code{\link[=adstock_steady_state]{adstock_steady_state()}}
 }
