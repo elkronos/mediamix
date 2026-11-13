@@ -1,0 +1,539 @@
+# Migrating from Robyn
+
+This article is for an analyst with a Robyn model who wants to reproduce
+it, or build on it, with mediamix. Robyn, Meta’s open-source marketing
+mix modelling package, adstocks and saturates each channel, fits a ridge
+regression, and searches the transform parameters and the penalty with
+the Python library Nevergrad. mediamix implements the same geometric,
+Weibull and Hill transforms as plain R functions, and
+[`from_robyn()`](https://elkronos.github.io/mediamix/reference/from_robyn.md)
+converts a channel’s Robyn hyperparameters into arguments that reproduce
+the series Robyn fitted on. From there every reporting and planning
+function in mediamix runs on Robyn’s regressors, with Robyn’s
+coefficients or with those of a model you fit yourself.
+
+Statements about Robyn here come from its R source (Zhou et al., 2025)
+on the main branch of
+[facebookexperimental/Robyn](https://github.com/facebookexperimental/Robyn)
+at commit `5915aa9` (version 3.12.1, June 2025), in the files
+`transformation.R`, `model.R`, `allocator.R`, `inputs.R`, `pareto.R`,
+`clusters.R`, `calibration.R` and `refresh.R` under `R/R/`. Where a rule
+changed between releases, the release tags are named.
+
+## How the pieces correspond
+
+| Robyn | mediamix | Notes |
+|----|----|----|
+| Geometric adstock, `theta` | [`adstock_geometric()`](https://elkronos.github.io/mediamix/reference/adstock_geometric.md) with `decay = theta` and `normalise = FALSE` | Exact; [`from_robyn()`](https://elkronos.github.io/mediamix/reference/from_robyn.md) converts it |
+| Weibull CDF adstock, `shape` and `scale` | [`adstock_weibull()`](https://elkronos.github.io/mediamix/reference/adstock_weibull.md) with `type = "cdf"` and `normalise = FALSE` | Exact once `scale` is converted to periods, which [`from_robyn()`](https://elkronos.github.io/mediamix/reference/from_robyn.md) does |
+| Weibull PDF adstock | [`adstock_filter()`](https://elkronos.github.io/mediamix/reference/adstock_filter.md) with Robyn’s kernel as weights | No [`adstock_weibull()`](https://elkronos.github.io/mediamix/reference/adstock_weibull.md) arguments reproduce it |
+| Hill `alpha` and `gamma` | [`saturate_hill()`](https://elkronos.github.io/mediamix/reference/saturation.md) with `shape = alpha` and the converted `half_max` | Exact given the series and the window; the rule for `half_max` depends on the Robyn version |
+| Modelling window | Transform every row, then use the window’s rows; `window` in [`from_robyn()`](https://elkronos.github.io/mediamix/reference/from_robyn.md) | Exact |
+| Decomposition (`xDecompAgg`) | [`contributions()`](https://elkronos.github.io/mediamix/reference/contributions.md) | Same products; non-media terms pooled into `"(baseline)"` |
+| `roi_total` | [`roi()`](https://elkronos.github.io/mediamix/reference/roi.md) | Same definition |
+| The allocator’s marginal response | [`marginal_roi()`](https://elkronos.github.io/mediamix/reference/marginal_roi.md) | A different definition |
+| `robyn_response()` | [`response_curve()`](https://elkronos.github.io/mediamix/reference/response_curve.md), [`simulate_plan()`](https://elkronos.github.io/mediamix/reference/simulate_plan.md) |  |
+| `robyn_allocator()` | [`allocate_budget()`](https://elkronos.github.io/mediamix/reference/allocate_budget.md) | A different method |
+| Ridge regression with glmnet | [`glmnet::glmnet()`](https://glmnet.stanford.edu/reference/glmnet.html) with `alpha = 0` on the transformed columns | mediamix fits no model |
+| Nevergrad search | [`tune_carryover_joint()`](https://elkronos.github.io/mediamix/reference/tune_carryover_joint.md) for the decays; [`step_adstock_channels()`](https://elkronos.github.io/mediamix/reference/step_adstock_channels.md) and [`step_saturation()`](https://elkronos.github.io/mediamix/reference/step_saturation.md) with tune for the rest | One objective instead of two or three |
+| Prophet trend, season and holiday terms | [`fourier_terms()`](https://elkronos.github.io/mediamix/reference/seasonality.md), [`holiday_flags()`](https://elkronos.github.io/mediamix/reference/seasonality.md) and a week counter, as controls | A different method |
+| Calibration, Pareto fronts, clustering, refresh | None |  |
+
+## Reproducing Robyn’s transformed series
+
+`Robyn::run_transformations()` adstocks every row of
+`InputCollect$dt_mod`, then saturates the rows of the modelling window,
+computing the Hill inflexion point from those rows.
+[`from_robyn()`](https://elkronos.github.io/mediamix/reference/from_robyn.md)
+therefore needs the channel’s column of `dt_mod` in date order, its
+hyperparameters, and the window as row positions,
+`rollingWindowStartWhich:rollingWindowEndWhich` in `InputCollect`.
+
+Suppose a Robyn model of weekly revenue in the north geography of
+`mm_weekly`, with geometric adstock and a modelling window starting on 3
+July 2023, the 27th week, had chosen these hyperparameters for
+television and search:
+
+``` r
+
+library(mediamix)
+data(mm_weekly)
+north <- mm_weekly[mm_weekly$geo == "north", ]
+north <- north[order(north$date), ]
+window <- which(north$date >= as.Date("2023-07-03"))
+
+robyn_hyp <- list(tv_thetas = 0.6, tv_alphas = 2.2, tv_gammas = 0.5,
+                  search_thetas = 0.1, search_alphas = 1.1,
+                  search_gammas = 0.4)
+```
+
+Each channel converts in one call:
+
+``` r
+
+channels <- c(tv = "tv", search = "search")
+args <- lapply(channels, function(ch) {
+  from_robyn(north[[ch]],
+             theta = robyn_hyp[[paste0(ch, "_thetas")]],
+             alpha = robyn_hyp[[paste0(ch, "_alphas")]],
+             gamma = robyn_hyp[[paste0(ch, "_gammas")]],
+             window = window)
+})
+str(args$tv)
+#> List of 2
+#>  $ adstock   :List of 3
+#>   ..$ kernel   : chr "geometric"
+#>   ..$ decay    : num 0.6
+#>   ..$ normalise: logi FALSE
+#>  $ saturation:List of 3
+#>   ..$ type    : chr "hill"
+#>   ..$ half_max: num 3213
+#>   ..$ shape   : num 2.2
+```
+
+`theta` becomes the geometric `decay`, with `normalise = FALSE` because
+Robyn accumulates the unnormalised recursion
+$`a_t = x_t + \theta a_{t-1}`$ from $`a_1 = x_1`$. `alpha` becomes the
+`shape` of the Hill curve (Hill, 1910). `gamma` becomes `half_max`, an
+amount of adstocked media: the inflexion point Robyn computed from this
+series.
+[`half_life()`](https://elkronos.github.io/mediamix/reference/decay_vocabulary.md)
+reads a `theta` as a half-life in weeks:
+
+``` r
+
+half_life(c(tv = 0.6, search = 0.1))
+#>     tv search 
+#>  1.357  0.301
+```
+
+To check the conversion without Robyn, the next chunk re-creates the two
+functions Robyn applies, `Robyn::adstock_geometric()` and
+`Robyn::saturation_hill()`, from `R/R/transformation.R` at commit
+`5915aa9` (the file last changed in commit `33baf19`, June 2025). They
+are reduced to the values compared here, and Robyn’s names are written
+in snake_case, as in the package’s tests.
+
+``` r
+
+# Robyn's adstock_geometric(): the unnormalised recursion, from a_1 = x_1.
+robyn_geometric <- function(x, theta) {
+  x_decayed <- c(x[1], rep(0, length(x) - 1))
+  for (xi in 2:length(x_decayed)) {
+    x_decayed[xi] <- x[xi] + theta * x_decayed[xi - 1]
+  }
+  x_decayed
+}
+
+# Robyn's saturation_hill() from 3.12.0: the inflexion point is gamma times
+# the largest adstocked value in the window.
+robyn_hill <- function(x, alpha, gamma) {
+  inflexion <- max(x) * gamma
+  x**alpha / (x**alpha + inflexion**alpha)
+}
+```
+
+Robyn adstocks the whole series and saturates the window’s rows;
+[`media_transform()`](https://elkronos.github.io/mediamix/reference/media_transform.md)
+with the converted arguments transforms every row, and the two agree on
+every row of the window:
+
+``` r
+
+difference <- vapply(channels, function(ch) {
+  adstocked <- robyn_geometric(north[[ch]], robyn_hyp[[paste0(ch, "_thetas")]])
+  robyn <- robyn_hill(adstocked[window],
+                      alpha = robyn_hyp[[paste0(ch, "_alphas")]],
+                      gamma = robyn_hyp[[paste0(ch, "_gammas")]])
+  ours <- media_transform(north[[ch]], adstock = args[[ch]]$adstock,
+                          saturation = args[[ch]]$saturation)[window]
+  max(abs(ours - robyn))
+}, numeric(1))
+difference
+#>        tv    search 
+#> 2.220e-16 1.665e-16
+```
+
+The largest difference, on a scale from 0 to 1, is rounding error.
+
+## The Hill inflexion point depends on the Robyn version
+
+Robyn’s `gamma` places the inflexion point relative to the adstocked
+series in the window, and the rule changed in release 3.12.0. From
+3.12.0, `Robyn::saturation_hill()` puts the point at `gamma` times the
+largest adstocked value in the window. Releases 3.7.0 to 3.11.1
+interpolated within the window’s range instead,
+`(1 - gamma) * min + gamma * max`. The two rules agree when the
+adstocked series reaches zero inside the window. Search runs every week
+here, so its adstocked series never does, and the older rule moves its
+`half_max`:
+
+``` r
+
+old <- from_robyn(north$search, theta = 0.1, alpha = 1.1, gamma = 0.4,
+                  window = window, inflexion = "range")
+c(robyn_3.12 = args$search$saturation$half_max,
+  robyn_3.11 = old$saturation$half_max)
+#> robyn_3.12 robyn_3.11 
+#>      372.4      527.1
+```
+
+Set `inflexion = "range"` for a model fitted by Robyn 3.7.0 to 3.11.1.
+Releases 3.0.0 to 3.6.3 computed the same range point as a quantile of
+100 evenly spaced values between the minimum and the maximum, rounded to
+four decimal places, so for their models `"range"` gives the inflexion
+point to that rounding. From 3.12.0 Robyn also stores the inflexion
+point each channel used, in `OutputCollect$resultHypParam`, in a column
+named after the channel with `_inflexion` appended. A converted
+`half_max` equal to it confirms that the series, the window and the
+version all match.
+
+## Weibull adstock
+
+Robyn measures the Weibull `scale` as a share of the series length and
+converts it to periods as `round(quantile(1:n, scale))`, where `n` is
+the number of rows it adstocks; its CDF kernel spans all `n` lags and
+starts at a weight of 1.
+[`from_robyn()`](https://elkronos.github.io/mediamix/reference/from_robyn.md)
+makes the same conversion, so one `scale` means a longer carryover on a
+longer series:
+
+``` r
+
+w156 <- from_robyn(north$tv, adstock = "weibull_cdf", shape = 1.2,
+                   scale = 0.04)
+w104 <- from_robyn(north$tv[1:104], adstock = "weibull_cdf", shape = 1.2,
+                   scale = 0.04)
+c(periods_from_156_rows = w156$adstock$scale,
+  periods_from_104_rows = w104$adstock$scale)
+#> periods_from_156_rows periods_from_104_rows 
+#>                     7                     5
+```
+
+The same check as before, against `Robyn::adstock_weibull()` with
+`type = "cdf"`, its
+[`dplyr::lag()`](https://dplyr.tidyverse.org/reference/lead-lag.html)
+written in base R:
+
+``` r
+
+robyn_weibull_cdf <- function(x, shape, scale) {
+  windlen <- length(x)
+  x_bin <- 1:windlen
+  scale_trans <- round(quantile(1:windlen, scale), 0)
+  theta_vec <- c(1, 1 - pweibull(head(x_bin, -1), shape = shape,
+                                 scale = scale_trans))
+  theta_vec_cum <- cumprod(theta_vec)
+  x_decayed <- mapply(function(x_val, x_pos) {
+    x_vec <- c(rep(0, x_pos - 1), rep(x_val, windlen - x_pos + 1))
+    lagged <- c(rep(0, x_pos - 1), theta_vec_cum)[seq_len(windlen)]
+    x_vec * lagged
+  }, x_val = x, x_pos = seq_along(x))
+  rowSums(x_decayed)
+}
+
+ours <- media_transform(north$tv, adstock = w156$adstock, saturation = NULL)
+max(abs(ours - robyn_weibull_cdf(north$tv, shape = 1.2, scale = 0.04)))
+#> [1] 5.457e-12
+```
+
+The difference is again rounding error, here on adstocked values in the
+thousands. From release 3.10.0 a `shape` or `scale` of 0 switches
+Robyn’s Weibull carryover off, and
+[`from_robyn()`](https://elkronos.github.io/mediamix/reference/from_robyn.md)
+then returns `kernel = "none"`.
+
+Robyn’s PDF form rescales the Weibull density over its `n` lags so that
+the smallest weight is 0 and the largest 1.
+[`adstock_weibull()`](https://elkronos.github.io/mediamix/reference/adstock_weibull.md)
+divides by the largest weight only, so no
+[`adstock_weibull()`](https://elkronos.github.io/mediamix/reference/adstock_weibull.md)
+arguments reproduce Robyn’s series, and
+[`from_robyn()`](https://elkronos.github.io/mediamix/reference/from_robyn.md)
+refuses `adstock = "weibull_pdf"` rather than return an approximation.
+[`adstock_filter()`](https://elkronos.github.io/mediamix/reference/adstock_filter.md)
+applies Robyn’s kernel when it is given as weights, and the package’s
+tests check the result against Robyn’s series:
+
+``` r
+
+n <- nrow(north)
+d <- dweibull(1:n, shape = 2.5, scale = round(quantile(1:n, 0.1)))
+robyn_pdf_kernel <- (d - min(d)) / (max(d) - min(d))
+tv_pdf <- adstock_filter(north$tv, weights = robyn_pdf_kernel)
+```
+
+## The modelling window
+
+Robyn fits its model on the window’s rows only, but adstocks from the
+first row of `dt_mod`, so the weeks before the window give its first
+weeks their carryover; its documentation of `window_start` recommends
+not starting the window on the first date for that reason. In mediamix,
+transform the whole series and pass only the window’s rows to the model,
+to
+[`contributions()`](https://elkronos.github.io/mediamix/reference/contributions.md)
+and to [`roi()`](https://elkronos.github.io/mediamix/reference/roi.md).
+Without earlier weeks to draw on,
+[`adstock_steady_state()`](https://elkronos.github.io/mediamix/reference/adstock_steady_state.md)
+gives the filter a starting state instead.
+
+## Bringing a fitted Robyn model across
+
+A Robyn model’s hyperparameters are in `OutputCollect$resultHypParam`
+and its coefficients in `OutputCollect$xDecompAgg`, one set per `solID`;
+Robyn’s own allocator reads them from there. The code below needs a
+Robyn model and was not run here. It converts every paid channel, checks
+the inflexion points and reports the returns, assuming each channel was
+modelled on its spend rather than on an exposure metric such as
+impressions, so that its column of `dt_mod` holds spend.
+
+``` r
+
+sol <- "1_210_4"   # the solID of the model you chose
+hyp <- as.data.frame(OutputCollect$resultHypParam)
+hyp <- hyp[hyp$solID == sol, ]
+decomp <- as.data.frame(OutputCollect$xDecompAgg)
+decomp <- decomp[decomp$solID == sol, ]
+coefs <- stats::setNames(decomp$coef, decomp$rn)
+
+dt <- as.data.frame(InputCollect$dt_mod)
+window <- with(InputCollect, rollingWindowStartWhich:rollingWindowEndWhich)
+paid <- InputCollect$paid_media_selected
+
+spec <- lapply(stats::setNames(paid, paid), function(ch) {
+  h <- function(p) hyp[[paste0(ch, "_", p)]]
+  if (InputCollect$adstock == "geometric") {
+    from_robyn(dt[[ch]], theta = h("thetas"), alpha = h("alphas"),
+               gamma = h("gammas"), window = window)
+  } else {
+    from_robyn(dt[[ch]], adstock = InputCollect$adstock,
+               shape = h("shapes"), scale = h("scales"),
+               alpha = h("alphas"), gamma = h("gammas"), window = window)
+  }
+})
+
+# Each converted half_max should equal the inflexion point Robyn stored
+cbind(mediamix = sapply(spec, function(s) s$saturation$half_max),
+      robyn = unlist(hyp[paste0(paid, "_inflexion")]))
+
+media <- transform_plan(dt, spec)[window, ]
+contrib <- contributions(media[paid], coefs[c("(Intercept)", paid)],
+                         index = media$ds)
+roi(contrib, dt[window, paid])
+marginal_roi(dt, coefs, spec = spec, rows = window)
+```
+
+[`contributions()`](https://elkronos.github.io/mediamix/reference/contributions.md)
+gets a bare coefficient vector here, so its `"(baseline)"` is Robyn’s
+intercept alone, while its media rows are Robyn’s media decomposition.
+With `rows`,
+[`marginal_roi()`](https://elkronos.github.io/mediamix/reference/marginal_roi.md)
+raises spend in the window only. For a model from Robyn 3.7.0 to 3.11.1,
+take the channels from `InputCollect$paid_media_spends`, since
+`paid_media_selected` arrived in 3.12.0, add `inflexion = "range"` to
+the
+[`from_robyn()`](https://elkronos.github.io/mediamix/reference/from_robyn.md)
+calls, and drop the comparison with the stored inflexion points, which
+those releases do not keep.
+
+## Reporting
+
+Robyn’s decomposition multiplies each regressor by its coefficient over
+the window, keeping the intercept, each Prophet term and each control as
+a separate line, and splits every channel’s effect into immediate and
+carryover parts.
+[`contributions()`](https://elkronos.github.io/mediamix/reference/contributions.md)
+makes the same products for the media columns and pools everything else
+into `"(baseline)"`; it has no immediate and carryover split. Robyn’s
+`roi_total` divides a channel’s total effect in the window by its total
+spend there, which is what
+[`roi()`](https://elkronos.github.io/mediamix/reference/roi.md) computes
+from the same rows.
+
+The marginal returns differ. Robyn’s allocator evaluates each channel’s
+Hill curve at its mean spend per period plus its mean historical
+carryover, and takes the change in that one period’s response when the
+mean spend rises by one unit.
+[`marginal_roi()`](https://elkronos.github.io/mediamix/reference/marginal_roi.md)
+raises spend by 1% in every period, re-runs carryover and saturation
+over the whole series and divides the extra response by the extra spend,
+the definition of Jin et al. (2017), so carryover into later weeks and
+the spread of weekly spend both count.
+
+`robyn_response()` returns a channel’s response to a given level of
+spend.
+[`response_curve()`](https://elkronos.github.io/mediamix/reference/response_curve.md)
+traces a fitted curve across levels of adstocked media, with its
+marginal return at each, and
+[`simulate_plan()`](https://elkronos.github.io/mediamix/reference/simulate_plan.md)
+gives the response to a whole weekly plan through the transforms.
+
+## Budget allocation
+
+`robyn_allocator()` and
+[`allocate_budget()`](https://elkronos.github.io/mediamix/reference/allocate_budget.md)
+both split a budget across channels to maximise the predicted response,
+in different ways.
+
+- Robyn works with each channel’s mean spend per period over
+  `date_range`, adds the mean historical carryover, and evaluates the
+  Hill curve at that single point.
+  [`allocate_budget()`](https://elkronos.github.io/mediamix/reference/allocate_budget.md)
+  rescales each channel’s whole weekly series and runs carryover and
+  saturation week by week, so flighting and the carryover between weeks
+  enter the response.
+- Robyn optimises with nloptr’s augmented Lagrangian method around a
+  local, gradient-based search, SLSQP by default or MMA.
+  [`allocate_budget()`](https://elkronos.github.io/mediamix/reference/allocate_budget.md)
+  evaluates every channel on a grid of `steps` increments and picks the
+  best combination by dynamic programming, which handles S-shaped curves
+  and is only as fine as the grid.
+- Robyn’s `channel_constr_low` and `channel_constr_up` are multiples of
+  each channel’s mean spend;
+  [`allocate_budget()`](https://elkronos.github.io/mediamix/reference/allocate_budget.md)’s
+  `lower` and `upper` are total spend.
+- Robyn also has a `target_efficiency` scenario, which looks for the
+  spend that meets a target ROAS or CPA, and by default leaves out
+  channels whose coefficient is 0.
+  [`allocate_budget()`](https://elkronos.github.io/mediamix/reference/allocate_budget.md)
+  splits a given total only.
+
+[`allocate_budget()`](https://elkronos.github.io/mediamix/reference/allocate_budget.md)
+rescales every row of the plan it is given, so give it the weeks being
+planned. Both answers rest on curves that are identified only over the
+spend levels in the data.
+
+## Fitting the model
+
+mediamix has no model of its own. Robyn’s internal `model_refit()` calls
+[`glmnet::glmnet()`](https://glmnet.stanford.edu/reference/glmnet.html)
+with `family = "gaussian"` and `alpha = 0`, a ridge regression (Hoerl
+and Kennard, 1970; Friedman et al., 2010), at a `lambda` that its search
+chooses between bounds computed from the data. Paid media coefficients
+have a lower limit of 0 by default (`paid_media_signs = "positive"`),
+and when the intercept comes out negative Robyn refits without one
+(`intercept_sign = "non_negative"`, the default). With
+`ts_validation = TRUE` it splits the window into training, validation
+and test sets by a `train_size` hyperparameter. A refit outside Robyn
+can make the same
+[`glmnet::glmnet()`](https://glmnet.stanford.edu/reference/glmnet.html)
+call on the transformed columns, or use any other model.
+
+## Choosing the hyperparameters
+
+Robyn searches every hyperparameter at once with Nevergrad (Rapin and
+Teytaud, 2018), `TwoPointsDE` by default, reached through reticulate. It
+scores each candidate on NRMSE, the model’s fit error, and DECOMP.RSSD,
+the distance between each channel’s share of the media effect and its
+share of spend, with MAPE against experiments as a third objective when
+it is calibrating. mediamix has no multi-objective search.
+
+[`tune_carryover_joint()`](https://elkronos.github.io/mediamix/reference/tune_carryover_joint.md)
+chooses each channel’s geometric decay and kernel length by forward-only
+cross-validation of one model holding every channel and the controls, on
+a single metric, RMSE by default; it does not tune saturation. For
+carryover, saturation and the ridge penalty together, a tidymodels
+workflow tunes
+[`step_adstock_channels()`](https://elkronos.github.io/mediamix/reference/step_adstock_channels.md)
+and
+[`step_saturation()`](https://elkronos.github.io/mediamix/reference/step_saturation.md)
+alongside a glmnet model. The code below needs the tune, parsnip,
+workflows, yardstick, rsample and glmnet packages and was not run here:
+
+``` r
+
+library(recipes)
+library(parsnip)
+library(workflows)
+library(tune)
+
+media_cols <- c("tv", "video", "search", "social", "display")
+rec <- recipe(revenue ~ ., data = north) |>
+  update_role(date, new_role = "index") |>
+  step_rm(geo) |>
+  step_adstock_channels(media_cols, index = "date", decay = tune(),
+                        normalise = FALSE) |>
+  step_saturation(all_of(media_cols), half_max = tune(), shape = tune()) |>
+  step_normalize(all_numeric_predictors())
+
+ridge <- linear_reg(penalty = tune(), mixture = 0) |> set_engine("glmnet")
+wf <- workflow() |> add_recipe(rec) |> add_model(ridge)
+folds <- rsample::rolling_origin(north, initial = 104, assess = 13,
+                                 skip = 12, cumulative = TRUE)
+res <- tune_bayes(wf, resamples = folds, initial = 10, iter = 20)
+```
+
+[`step_adstock_channels()`](https://elkronos.github.io/mediamix/reference/step_adstock_channels.md)
+gives each channel a decay of its own. With `ref = "max"`, the default,
+[`step_saturation()`](https://elkronos.github.io/mediamix/reference/step_saturation.md)
+sets `half_max` as a fraction of the largest adstocked value in the
+training data, the same idea as Robyn’s `gamma` from 3.12.0, and its
+`shape` is Robyn’s `alpha`. One
+[`step_saturation()`](https://elkronos.github.io/mediamix/reference/step_saturation.md)
+shares those two values across the columns it selects; Robyn’s
+per-channel `alpha` and `gamma` need a step per channel, each with its
+own [`tune()`](https://hardhat.tidymodels.org/reference/tune.html) ids.
+[`vignette("tidymodels")`](https://elkronos.github.io/mediamix/articles/tidymodels.md)
+covers the steps in detail.
+
+## What has no counterpart
+
+- **Calibration.** Robyn’s `calibration_input` takes lift-test results
+  and adds the error against them as an objective, and the experimental
+  `robyn_calibrate()` fits a Hill curve to spend and response data.
+  mediamix calibrates nothing; an experiment can still check its
+  answers.
+- **Model selection.** Robyn keeps the candidates on its Pareto fronts
+  of NRMSE and DECOMP.RSSD (`robyn_pareto()`), groups them by k-means
+  (`robyn_clusters()`) and reports intervals from bootstrapping the ROIs
+  of the models in each cluster. mediamix’s tuners return one choice on
+  one metric, and
+  [`block_bootstrap()`](https://elkronos.github.io/mediamix/reference/block_bootstrap.md)
+  puts intervals on one model by resampling blocks of weeks, which
+  measures sampling variation rather than the spread between candidate
+  models.
+- **Prophet terms.** Robyn fits Prophet (Taylor and Letham, 2018) to the
+  dependent variable and enters its trend, season and holiday components
+  as regressors. mediamix builds calendar controls directly with
+  [`fourier_terms()`](https://elkronos.github.io/mediamix/reference/seasonality.md)
+  and
+  [`holiday_flags()`](https://elkronos.github.io/mediamix/reference/seasonality.md).
+- **Refreshing a model.** `robyn_refresh()` rebuilds a selected model on
+  new data, with hyperparameter bounds set around the old values.
+  mediamix has no equivalent;
+  [`step_adstock()`](https://elkronos.github.io/mediamix/reference/step_adstock.md)
+  continues the carryover filter into new weeks, but the model is
+  refitted by you.
+
+## References
+
+Friedman, J., Hastie, T. and Tibshirani, R. (2010). Regularization paths
+for generalized linear models via coordinate descent. *Journal of
+Statistical Software*, 33(1), 1–22.
+<https://doi.org/10.18637/jss.v033.i01>
+
+Hill, A. V. (1910). The possible effects of the aggregation of the
+molecules of haemoglobin on its dissociation curves. *The Journal of
+Physiology*, 40, iv–vii.
+<https://doi.org/10.1113/jphysiol.1910.sp001386>
+
+Hoerl, A. E. and Kennard, R. W. (1970). Ridge regression: Biased
+estimation for nonorthogonal problems. *Technometrics*, 12(1), 55–67.
+<https://doi.org/10.1080/00401706.1970.10488634>
+
+Jin, Y., Wang, Y., Sun, Y., Chan, D. and Koehler, J. (2017). *Bayesian
+methods for media mix modeling with carryover and shape effects.* Google
+Inc. <https://research.google/pubs/pub46001/>
+
+Rapin, J. and Teytaud, O. (2018). *Nevergrad: A gradient-free
+optimization platform.* GitHub repository.
+<https://github.com/facebookresearch/nevergrad>
+
+Taylor, S. J. and Letham, B. (2018). Forecasting at scale. *The American
+Statistician*, 72(1), 37–45.
+<https://doi.org/10.1080/00031305.2017.1380080>
+
+Zhou, G., Lares, B., Skokan, I. and Sentana, L. (2025). *Robyn:
+Semi-automated marketing mix modeling (MMM) from Meta Marketing
+Science.* R package version 3.12.1, main branch at commit `5915aa9`. MIT
+licence. <https://github.com/facebookexperimental/Robyn>

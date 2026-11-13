@@ -1,9 +1,9 @@
 # Build customer journeys from a raw event log
 
 Turns a table of individual touchpoint events into the journeys that
-attribution models consume. This is the step most attribution packages
-assume you have already done, and the step where most attribution
-numbers are quietly decided.
+attribution models consume. This is the step that attribution packages
+such as ChannelAttribution leave to you, and the step where most
+attribution numbers are quietly decided.
 
 ## Usage
 
@@ -23,7 +23,11 @@ build_paths(
   keep_null_paths = TRUE,
   direct = c("keep", "drop", "label"),
   direct_labels = c("direct", "(direct)", "none", "(none)", "(not set)", "unknown", ""),
-  tz = "UTC"
+  tz = "UTC",
+  timestamp_format = NULL,
+  dedupe = TRUE,
+  keep = NULL,
+  conversion_touch = c("keep", "drop")
 )
 ```
 
@@ -44,12 +48,15 @@ build_paths(
 - timestamp:
 
   Name of the column holding the event time, as a string. May be
-  `POSIXct`, `Date`, or numeric (a period index).
+  `POSIXct`, `Date`, numeric (a period index), or character. See
+  *Timestamps* for how character and numeric values are read.
 
 - conversion:
 
   Name of a column flagging conversion events, as a string, or `NULL`.
-  Logical, or numeric where non-zero means converted.
+  Logical, numeric where non-zero means converted, or character holding
+  numbers or `"true"`/`"false"`, `"yes"`/`"no"`, `"t"`/`"f"`,
+  `"y"`/`"n"`. Any other character value is an error.
 
 - value:
 
@@ -59,8 +66,8 @@ build_paths(
 - lookback:
 
   Maximum age of a touchpoint relative to the end of its journey.
-  Touches older than this are dropped. `NULL` (the default) keeps
-  everything. Numeric, interpreted in `units`, or a `difftime`.
+  Touches older than this are dropped. `NULL` (the default) or `Inf`
+  keeps everything. Numeric, interpreted in `units`, or a `difftime`.
 
 - split_on:
 
@@ -89,9 +96,14 @@ build_paths(
   `"hours"` for a gap will shorten a time-decay half-life by a factor of
   24 unless `period` is changed to match.
 
-  For a numeric `timestamp` column the index is taken at face value and
-  `units` has no effect; passing a `difftime` against a numeric index is
-  an error, since a calendar duration has no meaning there.
+  Durations are exact, so a day is 86,400 seconds and a week 604,800. In
+  a time zone with daylight saving, a seven-day `lookback` that spans
+  the change therefore reaches back to a wall-clock time one hour off.
+
+  For a numeric `timestamp` column the index is taken at face value,
+  `units` has no effect (supplying it gives a warning) and the table
+  records its units as `"index"`; passing a `difftime` against a numeric
+  index is an error, since a calendar duration has no meaning there.
 
 - collapse_repeats:
 
@@ -120,7 +132,52 @@ build_paths(
 
 - tz:
 
-  Time zone used when coercing a character `timestamp` column.
+  Time zone used when reading a character `timestamp` column. Values
+  that carry their own UTC offset keep it; `tz` applies to the rest.
+
+- timestamp_format:
+
+  A [`strptime()`](https://rdrr.io/r/base/strptime.html) format for a
+  character `timestamp` column, such as `"%d/%m/%Y %H:%M"`, or `NULL`
+  (the default) to accept ISO 8601 dates and date-times only. Every
+  value must match the whole format.
+
+- dedupe:
+
+  Drop exact duplicate events before building journeys? Defaults to
+  `TRUE`. Two rows are duplicates when they share the customer, channel,
+  timestamp, conversion flag and conversion value, as when a tracking
+  pixel fires twice; without this a duplicated conversion row becomes a
+  second converting journey.
+  [`path_summary()`](https://elkronos.github.io/mediamix/reference/path_summary.md)
+  reports how many rows were dropped.
+
+- keep:
+
+  Names of other columns of `events` to carry into the result, such as
+  campaign, device or cost, or `NULL` (the default) for none. They
+  travel per touch, each row of the result taking its values from the
+  event it was built from, since one journey can span several campaigns
+  or devices. Kept columns play no part in building journeys. Duplicates
+  are still found on the five columns `dedupe` names, and a run that
+  `collapse_repeats` merges keeps its first event's values, so a cost
+  column then holds that event's cost rather than the run's total; set
+  `collapse_repeats = FALSE` to keep every event. A kept column cannot
+  share a name with a column of the result, or with `credit` and
+  `credit_value`, which the credit rules add.
+
+- conversion_touch:
+
+  Does the channel recorded on a conversion event count as a touch?
+  `"keep"` (the default) counts each conversion event as a touch, the
+  last of its journey under the default `split_on`, so a sale logged on
+  `"email"` gives email a touch. `"drop"` removes conversion events from
+  the touches once the journey's conversion time and value have been
+  read from them; use it when the conversion row records where the sale
+  happened, such as a checkout page, rather than a marketing touch. A
+  touch sharing the conversion's timestamp stays. A journey whose only
+  event was its conversion is left with no touches, and its conversion
+  is reported as unattributable.
 
 ## Value
 
@@ -164,13 +221,15 @@ touchpoint and the columns
   Time from this touch to the journey's conversion, in `units`. `NA` for
   non-converting journeys.
 
-Construction counts are attached as attributes and reported by
+followed by the columns named in `keep`, in that order. Construction
+counts are attached as attributes and reported by
 [`path_summary()`](https://elkronos.github.io/mediamix/reference/path_summary.md).
 
 ## Details
 
-Seven things go wrong between an event log and a set of journeys. All
-seven are arguments here rather than assumptions.
+Seven things go wrong between an event log and a set of journeys. The
+first five are arguments here rather than assumptions, and the last two,
+ordering and accounting, are handled the same way every time.
 
 **Journey splitting.** A customer who converts in March and again in
 September is two journeys, not one nine-month journey with two
@@ -186,9 +245,12 @@ a non-converting one, from the last touch.
 
 **Non-converting journeys.** These are kept by default because Markov
 removal effects are computed *against* them: the transition matrix needs
-to know how often a path ends in nothing. Dropping them does not merely
-lose data, it biases every channel's estimated effect upward, and it
-does so silently.
+to know how often a path ends in nothing. Without them the baseline
+conversion probability is 1, and every channel's removal effect moves,
+up or down depending on how the dropped journeys differed from the
+converting ones.
+[`markov_removal()`](https://elkronos.github.io/mediamix/reference/markov_removal.md)
+warns when a table has none.
 
 **Direct, none and missing channels.** Every real log has them and every
 tutorial handles them differently. `"drop"` treats direct as
@@ -201,20 +263,27 @@ keeps the *first* touch of each run, which preserves when the channel
 entered the journey. If you are using
 [`credit_time_decay()`](https://elkronos.github.io/mediamix/reference/credit.md),
 consider `FALSE`: keeping the first of a run pushes each channel's
-apparent recency backward.
+apparent recency backward. Exact duplicate rows are a different case:
+they are one event logged twice, and `dedupe = TRUE` drops them before
+journeys are built, so a conversion recorded twice is one conversion.
 
 **Deterministic ordering.** Events sharing a timestamp are broken by
 their original row order, so the same input always yields the same
-journeys. Ties are common in logs written at second resolution, and a
+journeys. The one exception is a conversion, which sorts after every
+touch sharing its timestamp: a touch logged in the same second as a sale
+belongs to the journey that sale closes, wherever the two rows sit in
+the file. Ties are common in logs written at second resolution, and a
 non-deterministic tie-break makes first-touch and last-touch results
 unreproducible.
 
 **Accounting.** A direct-traffic rule can strip a converting journey of
 every touchpoint, leaving a conversion that no channel can be credited
-with. (A lookback alone cannot do this: the conversion touch is always
-inside its own window.) Those conversions are counted and reported by
+with, and so can `conversion_touch = "drop"`, alone or with a lookback.
+(A lookback alone cannot do this while the conversion event is a touch,
+since it is always inside its own window.) Those conversions are counted
+and reported by
 [`path_summary()`](https://elkronos.github.io/mediamix/reference/path_summary.md)
-as `conversions_unattributable` rather than disappearing – including in
+as `conversions_unattributable` rather than disappearing, including in
 the degenerate case where filtering removes every row and the returned
 table is empty.
 
@@ -228,12 +297,33 @@ default `split_on = "conversion"` this is invisible, since every journey
 ends at its conversion by construction. Under `split_on = "none"` or
 `"gap"` it is not: a customer's events after their last conversion are
 discarded, because a touch that happened after the sale cannot have
-caused it. If you want those events, they belong to the next journey –
-split on conversion.
+caused it. If you want those events, split on conversion: they belong to
+the next journey.
 
 Journeys with no remaining touchpoints are dropped entirely, and any
 conversion they carried is reported as unattributable rather than as
 absent.
+
+## Timestamps
+
+A character `timestamp` column is parsed completely or not at all.
+Without `timestamp_format`, every value must be an ISO 8601 date such as
+`"2024-05-01"` or date-time such as `"2024-05-01 09:30"`,
+`"2024-05-01T09:30:15.250Z"` or `"2024-05-01T11:30:15+02:00"`; a `/` may
+replace the `-` in the date, and a trailing `UTC` or `GMT` reads as
+offset zero. A value with a UTC offset is that instant. A value without
+one is read in `tz`, and a date alone is midnight in `tz`. A column that
+mixes dates with date-times is an error, because reading `"2024-05-01"`
+as midnight would place it before every touch logged later that day. Any
+other text, such as `"05/01/2024"`, is an error that names values which
+did not parse; give `timestamp_format`, or convert the column with
+[`as.POSIXct()`](https://rdrr.io/r/base/as.POSIXlt.html) first.
+
+A numeric `timestamp` column is a period index taken at face value:
+`lookback`, `gap` and `time_to_conversion` are all in index units, and
+`units` has no effect. Values that look like Unix epoch time give a
+warning, since seconds since 1970 read as an index make `lookback = 30`
+thirty seconds.
 
 ## On what these numbers mean
 
@@ -247,6 +337,8 @@ deal, and it is not incrementality.
 
 ## See also
 
+[`path_summary()`](https://elkronos.github.io/mediamix/reference/path_summary.md)
+for what was dropped,
 [`credit_linear()`](https://elkronos.github.io/mediamix/reference/credit.md)
 and friends for assigning credit,
 [`attribute()`](https://elkronos.github.io/mediamix/reference/attribute.md)
@@ -279,11 +371,11 @@ paths <- build_paths(
 )
 path_summary(paths)
 #>   events_in events_out journeys converting_journeys mean_length median_length
-#> 1     20799      17306     6137                2741    2.819945             3
+#> 1     20799      17282     6105                2741    2.830794             3
 #>   max_length direct_events conversion_events conversions_observed
 #> 1          9          1597              2741                 2741
-#>   conversions_unattributable
-#> 1                          0
+#>   conversions_unattributable journeys_before_filtering duplicate_events
+#> 1                          0                      6105              117
 
 # A 30-day lookback, splitting also on two weeks of inactivity
 paths30 <- build_paths(
@@ -296,9 +388,27 @@ paths30 <- build_paths(
 )
 path_summary(paths30)
 #>   events_in events_out journeys converting_journeys mean_length median_length
-#> 1     20799      17317     6215                2741    2.786323             3
+#> 1     20799      17289     6162                2741    2.805745             3
 #>   max_length direct_events conversion_events conversions_observed
 #> 1          9          1597              2741                 2741
-#>   conversions_unattributable
-#> 1                          0
+#>   conversions_unattributable journeys_before_filtering duplicate_events
+#> 1                          0                      6162              117
+
+# Carry a campaign column, and stop counting the checkout page as a touch
+ev <- data.frame(
+  id = "a", ch = c("display", "search", "checkout"), ts = 1:3,
+  conv = c(0, 0, 1), campaign = c("spring", "brand", NA)
+)
+build_paths(ev, id = "id", channel = "ch", timestamp = "ts",
+            conversion = "conv", keep = "campaign",
+            conversion_touch = "drop")
+#> <mm_paths>
+#> 1 journey over 2 touchpoints (1 converting)
+#> Mean journey length: 2
+#>   path_id id channel timestamp touch_rank touch_n converted conversion_value
+#> 1     a#1  a display         1          1       2      TRUE               NA
+#> 2     a#1  a  search         2          2       2      TRUE               NA
+#>   time_to_conversion campaign
+#> 1                  2   spring
+#> 2                  1    brand
 ```

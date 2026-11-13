@@ -1,9 +1,9 @@
 # Plot a carryover cross-validation profile
 
-The cross-validated error across the decay grid, with the minimum
-(filled) and the one-standard-error choice (open) marked. A flat profile
-is the finding: the data does not pin carryover down, however precise
-`best` looks.
+The cross-validated error across the decay grid, one line per `max_lag`,
+with the minimum (filled) and the one-standard-error choice (open)
+marked on the line they belong to. A flat profile is the finding: the
+data does not pin carryover down, however precise `best` looks.
 
 ## Usage
 
@@ -32,11 +32,20 @@ plot(x, truth = NULL, ...)
 
 - ...:
 
-  Ignored.
+  Graphical arguments: `main`, `xlab` and `ylab` replace the titles, and
+  `col` gives the line colours, one per `max_lag` in legend order. In
+  the joint version `main` is the overall title and `xlab` and `ylab`
+  label every panel. Others are ignored.
 
 ## Value
 
 `x`, invisibly.
+
+## Details
+
+With more than eight `max_lag` values, the seven with the lowest error
+keep a colour each and the others are drawn as thin grey lines, with a
+message.
 
 ## Examples
 

@@ -26,11 +26,23 @@ plot(x, type = c("time", "total"), ...)
 
 - ...:
 
-  Ignored.
+  Graphical arguments: `main`, `xlab` and `ylab` replace the defaults,
+  and `col` gives one colour per channel, in the order the channels
+  first appear in `x`. Others are ignored.
 
 ## Value
 
 `x`, invisibly.
+
+## Details
+
+Periods are drawn in sorted order: dates and date-times on a date axis,
+numbers at their values, and text labels in sort order, so pass a factor
+to set the order of text labels. With more than eight channels the time
+chart keeps the seven largest and draws the rest together as "Other",
+with a message. A missing or infinite contribution is counted as zero,
+and a row with a missing period is left out of the time chart, each with
+a warning.
 
 ## Examples
 
@@ -39,9 +51,10 @@ data(mm_weekly)
 north <- mm_weekly[mm_weekly$geo == "north", ]
 ch <- c("tv", "search")
 tr <- attr(mm_weekly, "truth")
-media <- as.data.frame(Map(function(x, d, h, s) media_transform(
-  x, adstock = list(decay = d), saturation = list(half_max = h, shape = s)),
-  north[ch], tr$decay[ch], tr$half_max[ch], tr$shape[ch]))
+spec <- lapply(stats::setNames(ch, ch), function(k) list(
+  adstock = list(decay = tr$decay[[k]]),
+  saturation = list(half_max = tr$half_max[[k]], shape = tr$shape[[k]])))
+media <- transform_plan(north[ch], spec)
 fit <- lm(north$revenue ~ ., data = media)
 contrib <- contributions(media, fit, index = north$date)
 plot(contrib)

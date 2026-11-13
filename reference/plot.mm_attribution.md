@@ -25,11 +25,19 @@ plot(x, n = 10L, ...)
 
 - ...:
 
-  Ignored.
+  Graphical arguments: `main`, `xlab` and `ylab` replace the defaults,
+  and `col` gives the colours of the first-touch, last-touch and Markov
+  markers. Others are ignored.
 
 ## Value
 
 `x`, invisibly.
+
+## Details
+
+A missing share is left out of the plot with a warning. The mean share
+that ranks the channels is taken over the shares that are present, and a
+channel with no share at all ranks last.
 
 ## Examples
 

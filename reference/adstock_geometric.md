@@ -4,7 +4,8 @@ Spreads each period's media forward in time with geometric decay, the
 standard representation of advertising carryover. This is the
 forward-facing half of the package's spine;
 [`credit_time_decay()`](https://elkronos.github.io/mediamix/reference/credit.md)
-is the same kernel run backward.
+is the same kernel run backward (see
+[`vignette("spine")`](https://elkronos.github.io/mediamix/articles/spine.md)).
 
 ## Usage
 
@@ -16,7 +17,8 @@ adstock_geometric(
   normalise = TRUE,
   state = 0,
   by = NULL,
-  na_action = c("error", "zero", "keep")
+  na_action = c("error", "zero", "keep"),
+  missing_state = c("error", "cold")
 )
 ```
 
@@ -28,7 +30,9 @@ adstock_geometric(
   `x` must already be sorted by time and evenly spaced; the function has
   no index argument and cannot check this for you. Use
   [`step_adstock()`](https://elkronos.github.io/mediamix/reference/step_adstock.md)
-  if you want the time index validated.
+  if you want the time index validated. Infinite values are an error,
+  since the filter would carry them into later periods; missing values
+  are handled by `na_action`.
 
 - decay:
 
@@ -40,24 +44,29 @@ adstock_geometric(
 
   Number of periods the kernel spans. The default `Inf` uses the
   infinite (recursive) form; a finite value truncates the kernel. See
-  *Details*.
+  *Infinite versus truncated kernels* below.
 
 - normalise:
 
-  Should the kernel sum to 1? Defaults to `TRUE`. See the
-  *Normalisation* section.
+  Should the kernel sum to 1? Defaults to `TRUE`. See *Normalisation*
+  below.
 
 - state:
 
   Carryover already in flight at the start of `x`, for chaining calls
   across contiguous chunks of a series. The default `0` is a cold start,
   meaning no media ran before `x` began. For the infinite kernel this is
-  a single number; for a finite `max_lag` it is the preceding
-  `max_lag - 1` values of `x`. Obtain it from
-  [`adstock_state()`](https://elkronos.github.io/mediamix/reference/adstock_state.md).
+  a single number, the raw (unnormalised) accumulator; for a finite
+  `max_lag` it is the `max_lag - 1` values that came before `x`, oldest
+  first. Obtain it from
+  [`adstock_state()`](https://elkronos.github.io/mediamix/reference/adstock_state.md),
+  which records the `max_lag` (and, for the infinite kernel, the
+  `decay`) it was computed for, so that a state from another kernel is
+  refused rather than used. A plain numeric vector of the right length
+  is accepted too.
 
   When `by` is supplied, pass either the scalar `0` (or `NULL`) to
-  cold-start every group, or a named list with one entry per group –
+  cold-start every group, or a named list with one entry per group,
   which is the shape
   [`adstock_state()`](https://elkronos.github.io/mediamix/reference/adstock_state.md)
   returns when it is given `by`. A list with a `NULL` entry is an error
@@ -70,7 +79,8 @@ adstock_geometric(
   which is what geo-level and panel models need. Never rely on
   [`dplyr::group_by()`](https://dplyr.tidyverse.org/reference/group_by.html)
   for this: grouping metadata does not reliably survive into every
-  context where this function is called.
+  context where this function is called. Missing values are an error, in
+  a vector or in any column of a data frame.
 
 - na_action:
 
@@ -80,20 +90,29 @@ adstock_geometric(
   `NA` propagate through the filter, which for the recursive form
   poisons every subsequent value.
 
+- missing_state:
+
+  What to do when `state` is a per-group list with no entry for a group
+  in `by`. `"error"` (the default) refuses; `"cold"` cold-starts those
+  groups, as
+  [`step_adstock()`](https://elkronos.github.io/mediamix/reference/step_adstock.md)
+  does by default for groups it did not see at `prep()` time.
+
 ## Value
 
-A numeric vector the same length as `x`, in the same order. Row count
-and order are preserved unconditionally.
+A numeric vector the same length as `x`, in the same order, with the
+names and time-series attributes of `x`.
 
 ## Normalisation
 
-This is the argument that most often changes an answer without anyone
-noticing, so it is explicit rather than implied.
+This argument can change an answer without anyone noticing, so it is
+explicit rather than implied.
 
 With `normalise = TRUE` the kernel weights sum to 1. A constant spend of
-\\c\\ adstocks to \\c\\, the series level is preserved, and a downstream
-regression coefficient reads as the effect of *one unit of media*,
-directly comparable to the coefficient on untransformed spend.
+\\c\\ adstocks to \\c\\ after the burn-in from a cold start, the series
+level is preserved, and a downstream regression coefficient reads as the
+effect of *one unit of media*, directly comparable to the coefficient on
+untransformed spend.
 
 With `normalise = FALSE` you get raw Koyck accumulation, \\a_t = x_t +
 \theta a\_{t-1}\\. A constant spend of \\c\\ accumulates to
@@ -112,27 +131,30 @@ fitting.
 ## Infinite versus truncated kernels
 
 `max_lag = Inf` runs the recursive filter, an infinite impulse response.
-Its entire memory is one number per series, which is what makes
-[`step_adstock()`](https://elkronos.github.io/mediamix/reference/step_adstock.md)
-able to warm-start across a train/test boundary without storing any
-training rows.
+Its entire memory is one number per series, the accumulator that
+[`adstock_state()`](https://elkronos.github.io/mediamix/reference/adstock_state.md)
+returns.
 
 A finite `max_lag` truncates to a finite impulse response, which needs
 the preceding `max_lag - 1` observations as state. Truncation is a
 modelling choice, not an approximation to be minimised: use
 [`effective_window()`](https://elkronos.github.io/mediamix/reference/decay_vocabulary.md)
-to see how much of the kernel a given `max_lag` retains.
+to find the `max_lag` that keeps a given share of the kernel. A
+`max_lag` longer than the series costs no more than one as long as the
+series: from a cold start only the lags the series can reach are
+computed, and the normalising total comes from the closed form of the
+geometric series.
 
-Note that `decay = 1` with `normalise = TRUE` and `max_lag = Inf` is an
-error, not an edge case: an undecaying infinite kernel has infinite mass
-and cannot be normalised.
+`decay = 1` with `normalise = TRUE` and `max_lag = Inf` is an error: an
+undecaying infinite kernel has infinite mass and cannot be normalised.
 
 ## Causality
 
-The filter is strictly causal. `adstock_geometric(x)[1:m]` is identical
-to `adstock_geometric(x[1:m])` for every `m`, so no future spend can
-leak into a past adstock value. This is what makes it safe to adstock a
-full series once and then slice it into cross-validation folds, as
+The filter is strictly causal. `adstock_geometric(x, decay)[1:m]` is
+identical to `adstock_geometric(x[1:m], decay)` for every `m`, so no
+future spend can leak into a past adstock value. This is what makes it
+safe to adstock a full series once and then slice it into
+cross-validation folds, as
 [`tune_carryover()`](https://elkronos.github.io/mediamix/reference/tune_carryover.md)
 does.
 
@@ -143,11 +165,13 @@ Market Research Society*, 21(3), 139–166.
 
 Jin, Y., Wang, Y., Sun, Y., Chan, D. and Koehler, J. (2017). Bayesian
 methods for media mix modeling with carryover and shape effects. Google
-Inc.
+Inc. <https://research.google/pubs/pub46001/>
 
 ## See also
 
 [`adstock_weibull()`](https://elkronos.github.io/mediamix/reference/adstock_weibull.md)
+and
+[`adstock_delayed()`](https://elkronos.github.io/mediamix/reference/adstock_delayed.md)
 for delayed peaks,
 [`adstock_state()`](https://elkronos.github.io/mediamix/reference/adstock_state.md)
 for chaining,

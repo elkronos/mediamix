@@ -1,9 +1,9 @@
 # Weibull adstock
 
-Adstock with a Weibull kernel, which can place its peak after the period
-of spend. See
+Adstock with a Weibull kernel, whose `"pdf"` form can place its peak
+after the period of spend. See
 [`adstock_weights_weibull()`](https://elkronos.github.io/mediamix/reference/adstock_weights_weibull.md)
-for the two parameterisations.
+for the two forms.
 
 ## Usage
 
@@ -17,7 +17,8 @@ adstock_weibull(
   normalise = TRUE,
   state = 0,
   by = NULL,
-  na_action = c("error", "zero", "keep")
+  na_action = c("error", "zero", "keep"),
+  missing_state = c("error", "cold")
 )
 ```
 
@@ -29,7 +30,9 @@ adstock_weibull(
   `x` must already be sorted by time and evenly spaced; the function has
   no index argument and cannot check this for you. Use
   [`step_adstock()`](https://elkronos.github.io/mediamix/reference/step_adstock.md)
-  if you want the time index validated.
+  if you want the time index validated. Infinite values are an error,
+  since the filter would carry them into later periods; missing values
+  are handled by `na_action`.
 
 - shape, scale:
 
@@ -42,22 +45,24 @@ adstock_weibull(
 
 - type:
 
-  Either `"cdf"` (monotone decay) or `"pdf"` (permits a delayed peak).
+  Either `"cdf"` (the default, monotone decay) or `"pdf"` (permits a
+  delayed peak).
 
 - normalise:
 
-  Should the kernel sum to 1? Defaults to `TRUE`. See the
-  *Normalisation* section.
+  Should the kernel sum to 1? Defaults to `TRUE`. When `FALSE` the
+  largest weight is 1, as in
+  [`adstock_weights_weibull()`](https://elkronos.github.io/mediamix/reference/adstock_weights_weibull.md).
 
 - state:
 
-  The preceding `max_lag - 1` values of `x`, oldest first, or `0` for a
-  cold start. When `by` is supplied, a named list with one entry per
-  group.
+  The `max_lag - 1` values that came before `x`, oldest first, or `0`
+  for a cold start. When `by` is supplied, a named list with one entry
+  per group.
   [`adstock_state()`](https://elkronos.github.io/mediamix/reference/adstock_state.md)
   produces one of the right shape when called with the same `max_lag`;
-  for a finite kernel the state is simply the tail of `x`, so
-  `utils::tail(x, max_lag - 1)` works too.
+  for a finite kernel the state is the tail of the earlier series, so
+  `utils::tail(x_previous, max_lag - 1)` works too.
 
 - by:
 
@@ -66,7 +71,8 @@ adstock_weibull(
   which is what geo-level and panel models need. Never rely on
   [`dplyr::group_by()`](https://dplyr.tidyverse.org/reference/group_by.html)
   for this: grouping metadata does not reliably survive into every
-  context where this function is called.
+  context where this function is called. Missing values are an error, in
+  a vector or in any column of a data frame.
 
 - na_action:
 
@@ -76,14 +82,26 @@ adstock_weibull(
   `NA` propagate through the filter, which for the recursive form
   poisons every subsequent value.
 
+- missing_state:
+
+  What to do when `state` is a per-group list with no entry for a group
+  in `by`. `"error"` (the default) refuses; `"cold"` cold-starts those
+  groups, as
+  [`step_adstock()`](https://elkronos.github.io/mediamix/reference/step_adstock.md)
+  does by default for groups it did not see at `prep()` time.
+
 ## Value
 
-A numeric vector the same length as `x`, in the same order.
+A numeric vector the same length as `x`, in the same order, with the
+names and time-series attributes of `x`.
 
 ## See also
 
 [`adstock_geometric()`](https://elkronos.github.io/mediamix/reference/adstock_geometric.md),
-[`adstock_weights_weibull()`](https://elkronos.github.io/mediamix/reference/adstock_weights_weibull.md)
+[`adstock_weights_weibull()`](https://elkronos.github.io/mediamix/reference/adstock_weights_weibull.md),
+and
+[`adstock_delayed()`](https://elkronos.github.io/mediamix/reference/adstock_delayed.md)
+for a delayed peak set directly in periods.
 
 ## Examples
 

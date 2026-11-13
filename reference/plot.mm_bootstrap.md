@@ -19,8 +19,8 @@ plot(x, reference = NULL, xlab = "Estimate", ...)
 
 - reference:
 
-  Optional value drawn as a muted vertical line – `1` for an ROI's
-  break-even point, `0` for a coefficient.
+  Optional value drawn as a muted vertical line, such as `1` for an
+  ROI's break-even point or `0` for a coefficient.
 
 - xlab:
 
@@ -28,7 +28,9 @@ plot(x, reference = NULL, xlab = "Estimate", ...)
 
 - ...:
 
-  Ignored.
+  Graphical arguments: `main` and `ylab` replace the defaults, and `col`
+  colours each term's interval and dot, recycled in the row order of
+  `x`. Others are ignored.
 
 ## Value
 

@@ -31,23 +31,34 @@ media_transform(
   [`adstock_weibull()`](https://elkronos.github.io/mediamix/reference/adstock_weibull.md)
   or
   [`adstock_delayed()`](https://elkronos.github.io/mediamix/reference/adstock_delayed.md).
+  The list may carry `by` in place of the `by` argument, but not both,
+  and it may not carry `x`.
+
+  The default applies geometric carryover at `decay = 0.5`, including
+  when only `saturation` is given. Pass `adstock = NULL`, or
+  `list(kernel = "none")`, for saturation alone.
 
 - saturation:
 
   A named list of arguments for the saturation step, including a `type`
   element of `"hill"`, `"exponential"`, `"michaelis_menten"`, `"power"`
-  or `"none"`. Remaining elements are passed to the corresponding
-  `saturate_*()` function – for `"hill"` that means `half_max`, which
-  has no default because a sensible value depends entirely on the scale
-  of your spend.
+  or `"none"`. A list without `type` uses the Hill curve, so
+  `list(half_max = 300)` is a Hill curve and
+  [`list()`](https://rdrr.io/r/base/list.html) is an error asking for
+  `half_max`. Remaining elements are passed to the corresponding
+  `saturate_*()` function: for `"hill"` that means `half_max`, which has
+  no default because a sensible value depends entirely on the scale of
+  your spend, and optionally `shape`.
 
-  Saturation defaults to `"none"`, so calling `media_transform()` with
-  only an `adstock` argument applies carryover alone.
+  The argument itself defaults to `list(type = "none")`, no saturation,
+  so calling `media_transform()` with only an `adstock` argument applies
+  carryover alone. `saturation = NULL` does the same.
 
 - by:
 
   Optional grouping vector, or data frame of grouping vectors, the same
-  length as `x`.
+  length as `x`. Carryover runs within each group, as in
+  [`adstock_geometric()`](https://elkronos.github.io/mediamix/reference/adstock_geometric.md).
 
 - order:
 
@@ -57,17 +68,21 @@ media_transform(
 
 ## Value
 
-A numeric vector the same length as `x`, in the same order.
+A numeric vector the same length as `x`, in the same order, with the
+names and time-series attributes of `x`.
 
 ## Details
 
 The order is not arbitrary. Saturation represents a ceiling on what a
-given weight of media can achieve in a period. Applying it before
-adstock caps each period's spend in isolation and then lets carryover
-accumulate those capped values past the cap, so the composed transform
-is no longer bounded by the ceiling you specified. Applying it after
-adstock caps the *total media pressure* in each period, which is what a
-saturation curve is meant to mean.
+given weight of media can achieve in a period. Applying it after adstock
+caps the *total media pressure* in each period, carryover included,
+which is what a saturation curve is meant to mean. Applying it before
+adstock puts each period's spend through the curve in isolation, so
+carryover from earlier periods never counts towards saturation. With the
+default normalised kernel the weights sum to one and the result stays
+under the ceiling; with `normalise = FALSE` they sum to more than one,
+and carryover also accumulates the saturated values past the ceiling you
+specified.
 
 This function will do it backwards if you insist, but it will not do it
 backwards quietly.
@@ -75,14 +90,17 @@ backwards quietly.
 ## See also
 
 [`adstock_geometric()`](https://elkronos.github.io/mediamix/reference/adstock_geometric.md),
-[`saturate()`](https://elkronos.github.io/mediamix/reference/saturation.md)
+[`saturate()`](https://elkronos.github.io/mediamix/reference/saturation.md),
+and
+[`transform_plan()`](https://elkronos.github.io/mediamix/reference/transform_plan.md)
+to transform every channel of a plan, each with its own parameters
 
 ## Examples
 
 ``` r
 spend <- c(0, 500, 800, 300, 0, 0, 1200, 400)
 
-# Carryover only -- saturation is off by default
+# Carryover only: saturation is off by default
 round(media_transform(spend, adstock = list(decay = 0.5)), 4)
 #> [1]   0.0000 250.0000 525.0000 412.5000 206.2500 103.1250 651.5625 525.7812
 
@@ -93,6 +111,11 @@ round(media_transform(
   saturation = list(half_max = 300)
 ), 4)
 #> [1] 0.0000 0.3280 0.5297 0.5214 0.4351 0.3526 0.6089 0.5986
+
+# Saturation alone needs the carryover switched off explicitly
+round(media_transform(spend, adstock = NULL,
+                      saturation = list(half_max = 300)), 4)
+#> [1] 0.0000 0.6250 0.7273 0.5000 0.0000 0.0000 0.8000 0.5714
 
 # A delayed-peak kernel with an S-shaped response
 round(media_transform(

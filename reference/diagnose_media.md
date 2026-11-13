@@ -16,7 +16,8 @@ diagnose_media(
   by = NULL,
   vif_threshold = 5,
   cv_threshold = 0.15,
-  decay = NULL
+  decay = NULL,
+  date = NULL
 )
 ```
 
@@ -24,11 +25,12 @@ diagnose_media(
 
 - data:
 
-  A data frame containing the media columns.
+  A data frame containing the media columns. A tibble or data.table is
+  read as a plain data frame.
 
 - media:
 
-  Character vector naming the media columns.
+  Character vector naming the media columns, each once.
 
 - spend, impressions:
 
@@ -43,7 +45,10 @@ diagnose_media(
   lowest coefficient of variation, the highest share of dark periods.
   Pooling geographies that differ mainly in scale would manufacture
   correlation that exists in no single series, so `by` is worth
-  supplying whenever the rows are a panel.
+  supplying whenever the rows are a panel. Groups set with
+  [`dplyr::group_by()`](https://dplyr.tidyverse.org/reference/group_by.html)
+  are not used in its place; a message says so and names the `by` to
+  pass.
 
 - vif_threshold:
 
@@ -56,13 +61,25 @@ diagnose_media(
 
 - decay:
 
-  Optional geometric decay for computing collinearity on *adstocked*
-  media: a single number for every channel, or a named vector with one
-  per channel (unnamed channels are left raw). Adstock smooths each
-  series, and smoothed series are usually more correlated than the raw
-  spend, so this is the collinearity the model will actually face. Rows
-  must be in time order within each group. Variation and flighting are
-  always reported on the raw spend.
+  Optional geometric decay in `[0, 1)` for computing collinearity on
+  *adstocked* media: a single number for every channel, or a named
+  vector with one per channel (unnamed channels are left raw). Adstock
+  smooths each series, and smoothed series are usually more correlated
+  than the raw spend, so this is the collinearity the model will face.
+  Rows must be in time order within each group; pass `date` to check
+  that they are. Missing spend is treated as zero for the adstock, and a
+  message counts the values affected. Variation and flighting are always
+  reported on the raw spend.
+
+- date:
+
+  Optional name of the time column, as a string. The column must be
+  numeric, `Date` or `POSIXct`, with no missing values. Each series
+  (each group of `by`) is checked for rows that come earlier than the
+  row above them, for periods that appear more than once, and for
+  missing periods, judged against the series' usual spacing. Adstock
+  treats adjacent rows as adjacent periods, so each of these changes
+  what a decay means. See *Time order* below.
 
 ## Value
 
@@ -77,8 +94,9 @@ An object of class `mm_diagnosis`: a named list with elements
 - `collinearity`:
 
   Per channel: the worst group `vif`, the `most_correlated_with` partner
-  and its `correlation`, and `identified` – `TRUE`, `FALSE`, or `NA`
-  where the factor could not be computed at all. `NA` is not `TRUE`.
+  and its `correlation`, and `identified`: `TRUE` when `vif` is at most
+  `vif_threshold`, `FALSE` above it, and `NA` where the factor could not
+  be computed at all. `NA` is not `TRUE`.
 
 - `correlations`:
 
@@ -87,11 +105,23 @@ An object of class `mm_diagnosis`: a named list with elements
 
 - `cpm`:
 
-  Implied cost per mille for each row of `data` (`row` is the row
-  number), with the series median and an outlier flag, when `spend` and
-  `impressions` are supplied; with `by`, the median and outlier rule are
-  computed within each series and a `group` column is added. `NULL`
-  otherwise.
+  One row per row of `data` and spend column when `spend` and
+  `impressions` are supplied, `NULL` otherwise: `channel` (the spend
+  column), `row` (the row number), the implied `cpm`, the series'
+  `median_cpm` and the `outlier` flag. With `by`, the median and outlier
+  rule are computed within each series and a `group` column is added.
+
+- `dates`:
+
+  One row per series when `date` is supplied, `NULL` otherwise: `group`
+  (with `by`), `rows`, the `start` and `end` of the series, its
+  `period`, and the counts `out_of_order` (rows that come earlier than
+  the row above them), `duplicated` (rows that repeat a period already
+  in the series), `missing` (whole periods absent between `start` and
+  `end`) and `irregular` (steps between consecutive time points that
+  differ from `period` by more than a quarter of it). `period` is the
+  median step between the series' distinct time points, in the units of
+  `date`: days for a `Date`, seconds for a `POSIXct`.
 
 - `flags`:
 
@@ -103,19 +133,22 @@ An object of class `mm_diagnosis`: a named list with elements
   Rows examined, series examined, whether `by` was supplied, and whether
   collinearity was measured on adstocked media.
 
+[`as.data.frame()`](https://rdrr.io/r/base/as.data.frame.html) and
+`tidy()` return the per-channel table: one row per channel, with the
+`variation` and `collinearity` columns side by side.
+
 ## Details
 
 Four things sink marketing mix projects, and all four are visible before
 a model is fitted.
 
-**Channel collinearity** is the biggest practical problem in the field.
-When two channels move together – because they were planned together,
-which is usually the case – the model cannot tell their effects apart.
-It will still produce coefficients, and those coefficients will flip
-sign on small changes to the specification or the sample. A variance
-inflation factor above 5 deserves attention and above 10 means the split
-between those channels is not identified, however tight the overall fit
-looks.
+**Channel collinearity** is common, because channels are usually planned
+together. When two channels move together the model cannot tell their
+effects apart. It will still produce coefficients, and those
+coefficients can flip sign on small changes to the specification or the
+sample. A variance inflation factor above 5 deserves attention and above
+10 means the split between those channels is not identified, however
+tight the overall fit looks.
 
 **Insufficient variation** is the quieter version of the same problem. A
 channel spending nearly the same amount every week carries almost no
@@ -128,13 +161,42 @@ most of the time has far less effective sample than its row count
 suggests, and because carryover across dark periods is where transform
 bugs hide.
 
-**Spend and impression inconsistency** – a wildly varying implied cost
-per mille – almost always means a data-join error upstream rather than a
-real change in media pricing. It is worth catching before it becomes a
-modelling puzzle.
+**Spend and impression inconsistency**, a wildly varying implied cost
+per mille, usually means a data-join error upstream rather than a real
+change in media pricing. It is worth catching before it becomes a
+modelling puzzle. A period is flagged when its CPM is more than five
+median absolute deviations from its series' median. When more than half
+of a series' CPMs are identical the median absolute deviation is zero,
+and a period is flagged instead when its CPM is at least twice or at
+most half the median.
+
+## Time order
+
+Adstock treats adjacent rows as adjacent periods.
+[`adstock_geometric()`](https://elkronos.github.io/mediamix/reference/adstock_geometric.md)
+and
+[`media_transform()`](https://elkronos.github.io/mediamix/reference/media_transform.md)
+have no time index, so they take each series' rows in the order given: a
+row out of order mixes later spend into earlier weeks, a period that
+appears twice is carried over twice, and a missing week lets the decay
+act once across what were two weeks. None of these raises an error. With
+`date`, each series is checked for all three, and the result is in
+`dates`.
+
+The usual spacing of a series is the median step between its distinct
+time points, as in
+[`step_adstock()`](https://elkronos.github.io/mediamix/reference/step_adstock.md);
+a series with a single time point takes the median of the other series'
+spacings. A step counts as irregular when it differs from that spacing
+by more than a quarter of it, so calendar months of 28 to 31 days are
+regular. A gap of about two periods counts one missing period, of about
+three periods two, and so on. Rows out of order are counted in the order
+of `data`, one for each row whose time point is earlier than that of the
+row above it in the same series.
 
 ## See also
 
+[`plot.mm_diagnosis()`](https://elkronos.github.io/mediamix/reference/plot.mm_diagnosis.md),
 [`adstock_geometric()`](https://elkronos.github.io/mediamix/reference/adstock_geometric.md),
 [`contributions()`](https://elkronos.github.io/mediamix/reference/contributions.md)
 
@@ -176,7 +238,7 @@ d$collinearity
 #> 4  search 1.052593                video  -0.2063315       TRUE
 #> 5 display 1.045907               social  -0.1879395       TRUE
 
-# Collinearity after adstocking is what the model actually sees
+# Collinearity after adstocking is what the model sees
 diagnose_media(mm_weekly, media = channels, by = "geo",
                decay = attr(mm_weekly, "truth")$decay)$collinearity
 #>   channel      vif most_correlated_with correlation identified
@@ -194,4 +256,23 @@ diagnose_media(fake, media = c("tv", "twin", "search"))$collinearity
 #> 1      tv      Inf                 twin  1.00000000      FALSE
 #> 2    twin      Inf                   tv  1.00000000      FALSE
 #> 3  search 1.000823                 twin  0.02868335       TRUE
+
+# Adstock treats adjacent rows as adjacent periods, so check the dates too.
+# Here one week of north is dropped and two others swap places.
+messy <- mm_weekly[-10, ]
+messy[2:3, ] <- messy[3:2, ]
+checked <- diagnose_media(messy, media = channels, by = "geo",
+                          date = "date")
+checked$dates
+#>     group rows      start        end period out_of_order duplicated missing
+#> 1   north  155 2023-01-02 2025-12-22      7            1          0       1
+#> 2 central  156 2023-01-02 2025-12-22      7            0          0       0
+#> 3   south  156 2023-01-02 2025-12-22      7            0          0       0
+#>   irregular
+#> 1         1
+#> 2         0
+#> 3         0
+checked$flags
+#> [1] "Out of time order: 1 row(s) in 1 series (north) come earlier than the row above them. Adstock treats adjacent rows as adjacent periods, so sort each series by date before transforming it."           
+#> [2] "Missing periods: 1 period(s) in 1 series (north) are absent, judged against each series' usual spacing. Carryover crosses each gap as if it were one period; fill the missing periods with zero spend."
 ```

@@ -23,7 +23,9 @@ top_paths(paths, n = 10, sep = " > ", converting_only = FALSE)
 
 - sep:
 
-  Separator between channels in the rendered path string.
+  Separator between channels in the rendered path string. A channel name
+  that contains `sep` is an error, since two different channel sequences
+  could then render as the same string.
 
 - converting_only:
 
@@ -35,7 +37,8 @@ top_paths(paths, n = 10, sep = " > ", converting_only = FALSE)
 
 A data frame with one row per distinct channel sequence: `path`,
 `journeys` (how many journeys followed it), `conversions` and
-`conversion_rate`. Ordered by descending frequency, then alphabetically.
+`conversion_rate`. Ordered by descending frequency, then alphabetically
+in the C locale, so ties fall the same way on every platform.
 
 ## See also
 
@@ -50,12 +53,12 @@ paths <- build_paths(mm_events, id = "customer_id", channel = "channel",
                      timestamp = "timestamp", conversion = "conversion")
 top_paths(paths, n = 8)
 #>                       path journeys conversions conversion_rate
-#> 1                   social      203          97       0.4778325
-#> 2                  display      201          79       0.3930348
-#> 3           organic_search      172          81       0.4709302
-#> 4    display > paid_search      164          74       0.4512195
+#> 1                  display      197          79       0.4010152
+#> 2                   social      195          98       0.5025641
+#> 3           organic_search      164          80       0.4878049
+#> 4    display > paid_search      162          72       0.4444444
 #> 5     social > paid_search      158          65       0.4113924
-#> 6              paid_search      155          81       0.5225806
+#> 6              paid_search      154          81       0.5259740
 #> 7 display > organic_search      102          48       0.4705882
-#> 8                    email      102          46       0.4509804
+#> 8                    email       99          46       0.4646465
 ```

@@ -1,10 +1,10 @@
 # Carryover and credit are the same idea
 
 mediamix does two things that look unrelated. It adstocks media spend,
-which is a marketing mix modelling concern. It assigns credit across
-customer journeys, which is a multi-touch attribution concern. These
-live in different teams, different literatures and usually different
-packages.
+which is a marketing mix modelling (MMM) concern. It assigns credit
+across customer journeys, which is a multi-touch attribution concern.
+These live in different teams, different literatures and usually
+different packages.
 
 They are the same operation run in opposite directions.
 
@@ -16,7 +16,8 @@ library(mediamix)
 ## Forward: one impulse of spend
 
 Adstock takes a single burst of media and spreads its effect forward
-through time with geometric decay:
+through time with geometric decay. With `normalise = FALSE` the weights
+are left unscaled, which makes the burst easy to follow:
 
 ``` r
 
@@ -25,13 +26,20 @@ round(adstock_geometric(burst, decay = 0.5, normalise = FALSE), 2)
 #> [1] 100.00  50.00  25.00  12.50   6.25   3.12
 ```
 
-100, 50, 25, 12.5 — each period retains half of the last. The kernel is
-$`\theta^i`$ at lag $`i`$.
+The period of spend keeps the whole burst and each later period keeps
+half of the one before. The kernel is $`\theta^i`$ at lag $`i`$, where
+$`\theta`$ is the `decay` argument.
 
 ## Backward: one conversion
 
 Time-decay attribution takes a single conversion and spreads its credit
-backward across the touchpoints that preceded it, with geometric decay:
+backward across the touchpoints that preceded it, with geometric decay.
+Here
+[`build_paths()`](https://elkronos.github.io/mediamix/reference/build_paths.md)
+turns four touches a day apart, the last of which converts, into a
+journey, and
+[`credit_time_decay()`](https://elkronos.github.io/mediamix/reference/credit.md)
+divides the conversion among them:
 
 ``` r
 
@@ -54,7 +62,8 @@ td[, c("channel", "time_to_conversion", "credit")]
 ```
 
 The touch at the moment of conversion gets the most, the one a day
-earlier half as much, and so on backward. Same kernel, opposite arrow.
+earlier half as much, and so on backward. It is the same kernel with the
+arrow reversed.
 
 ## The same numbers
 
@@ -74,8 +83,8 @@ all.equal(forward, backward)
 #> [1] TRUE
 ```
 
-Identical. Not analogous — identical. Drawn on one time axis, with the
-event at zero, the two are mirror images:
+The two are identical, not merely analogous. Drawn on one time axis,
+with the event at zero, they are mirror images:
 
 ``` r
 
@@ -116,12 +125,11 @@ becomes the other.
 \text{credit}: \quad w_i \propto \theta^{\,t_{\text{conv}} - t_i}
 ```
 
-## Why this is in the API rather than a footnote
+## Why the symmetry is in the API rather than a footnote
 
-Because it means there is one vocabulary rather than two, and
-practitioners already have that vocabulary: they say “television works
-for about three weeks”, not “television has a decay coefficient of
-0.79”.
+It means there is one vocabulary rather than two, and practitioners
+already have that vocabulary: they say “television has a half-life of
+about three weeks”, not “television has a decay coefficient of 0.79”.
 
 ``` r
 
@@ -138,6 +146,8 @@ round(credit_time_decay(paths, decay = theta)$credit, 4)
 #> [1] 0.1710 0.2155 0.2715 0.3420
 ```
 
+In both outputs each step away from the event multiplies the weight by
+`theta`: forward from the spend, backward from the conversion.
 [`decay_from_half_life()`](https://elkronos.github.io/mediamix/reference/decay_vocabulary.md),
 [`half_life()`](https://elkronos.github.io/mediamix/reference/decay_vocabulary.md)
 and
@@ -145,7 +155,7 @@ and
 serve both halves of the package because there is only one kernel to
 describe, so a half-life means the same thing wherever it appears, and
 [`effective_window()`](https://elkronos.github.io/mediamix/reference/decay_vocabulary.md)
-converts either kind into a window length.
+turns a decay from either half into a window length.
 
 Sharing the vocabulary is not the same as sharing the *value*, though. A
 three-week television half-life estimated from weekly sales describes
@@ -153,9 +163,13 @@ how aggregate demand responds to aggregate spend. A time-decay half-life
 on a journey describes how a convention weights one customer’s clicks
 against each other, usually over days. There is no reason for the two
 numbers to agree, and an MMM half-life is not by itself a defensible
-attribution lookback — read that off the journeys with
+attribution lookback; read that off the journeys with
 [`conversion_lag()`](https://elkronos.github.io/mediamix/reference/conversion_lag.md)
-instead.
+instead. The units differ too: an adstock `decay` applies per row of the
+series (a week, in `mm_weekly`), while
+[`credit_time_decay()`](https://elkronos.github.io/mediamix/reference/credit.md)
+applies its `decay` per `period` of elapsed time, which is one day by
+default.
 
 ## What the symmetry does not give you
 
@@ -163,11 +177,12 @@ It is a symmetry of *arithmetic*, not of evidence.
 
 Adstock is a claim about a causal mechanism: money spent in week one
 still moves sales in week three, and a regression on adstocked spend
-estimates how much. It can be wrong, and it is testable — the transform
-either improves out-of-sample prediction of the KPI or it does not,
-which is exactly what
+estimates how much. It can be wrong.
 [`tune_carryover()`](https://elkronos.github.io/mediamix/reference/tune_carryover.md)
-measures.
+checks whether the transform improves out-of-sample prediction of the
+KPI, which is evidence about its predictive value; whether the mechanism
+is causal is a separate question, answered by experiments rather than by
+forecasts.
 
 Time-decay credit is a claim about nothing. It is a convention for
 dividing an observed conversion among observed touchpoints. Recency is a
@@ -196,17 +211,17 @@ attribution side’s problem rather than the transform side’s:
   contain.
 - **Non-geometric kernels.**
   [`adstock_weibull()`](https://elkronos.github.io/mediamix/reference/adstock_weibull.md)
-  has no attribution counterpart in this package. It could have one —
-  [`credit_custom()`](https://elkronos.github.io/mediamix/reference/credit.md)
-  takes an arbitrary function of rank, journey length and recency — but
+  has no attribution counterpart in this package. It could have one
+  ([`credit_custom()`](https://elkronos.github.io/mediamix/reference/credit.md)
+  takes an arbitrary function of rank, journey length and recency), but
   a delayed-peak credit rule would be asserting that touches from a
   fortnight ago deserve more credit than yesterday’s, and that is a
   strange thing to assert without evidence.
 
 ``` r
 
-# A Weibull-shaped credit rule, if you wanted one. The peak falls two days
-# before the conversion, so the closing touch gets almost nothing.
+# A Weibull-shaped credit rule, if you wanted one. The peak falls about two
+# days before the conversion, so the closing touch gets almost nothing.
 weibull_credit <- credit_custom(paths, function(rank, n, recency) {
   dweibull(recency + 0.5, shape = 3, scale = 2.5)
 })
@@ -218,10 +233,10 @@ weibull_credit[, c("channel", "time_to_conversion", "credit")]
 #> 4 paid_search                  0 0.04818
 ```
 
-The hook is there, and it does what a delayed-peak kernel should: the
-touch two days out receives the most credit and the one at the moment of
-conversion receives 5%. Whether that number means anything is a separate
-question, and the honest answer is usually no — a rule asserting that a
-touch from two days ago deserves nine times the credit of the click that
-closed the sale is a claim about causation, made without evidence,
-dressed as a convention.
+[`credit_custom()`](https://elkronos.github.io/mediamix/reference/credit.md)
+does what a delayed-peak kernel should: the touch 2 days out receives
+the most credit and the one at the moment of conversion receives 5%.
+Whether that number means anything is a separate question, and the
+honest answer is usually no. A rule asserting that a touch from 2 days
+ago deserves 9 times the credit of the click that closed the sale is a
+claim about causation, made without evidence, dressed as a convention.

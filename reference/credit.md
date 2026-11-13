@@ -2,8 +2,8 @@
 
 Five rules for dividing one conversion among the touchpoints that
 preceded it, plus a hook for your own. Each returns the journey table
-with a `credit` column added, so they compose and can be compared side
-by side.
+with its own `credit` column, replacing any already there, so the
+results of different rules can be compared side by side.
 
 ## Usage
 
@@ -51,11 +51,13 @@ credit_custom(paths, fn, normalise = TRUE)
   For `credit_custom()`, a function of `(touch_rank, touch_n, recency)`
   returning a numeric vector of weights the same length as its inputs.
   `recency` is time from each touch to the conversion, in the journey
-  table's units – see the `units` argument of
-  [`build_paths()`](https://elkronos.github.io/mediamix/reference/build_paths.md),
-  which sets them. `fn` is called once per *converting* journey and
-  never for a non-converting one, so `recency` is always present and the
-  weights need no missing-value handling. Weights must be finite and
+  table's units, which the `units` argument of
+  [`build_paths()`](https://elkronos.github.io/mediamix/reference/build_paths.md)
+  sets. `fn` is called once per *converting* journey and never for a
+  non-converting one, so `recency` is always present and the weights
+  need no missing-value handling. The three vectors run in `touch_rank`
+  order, whatever the order of the rows, and the weights are matched
+  back to the rows in that order. Weights must be finite and
   non-negative; returning all zeros declines the journey.
 
 - normalise:
@@ -74,15 +76,14 @@ converting journey.
 
 The five built-in rules always assign positive weight somewhere, so for
 them total credit always equals the number of converting journeys.
-`credit_custom()` can decline a journey by returning all-zero weights –
-see its entry under *Custom rules*.
+`credit_custom()` can decline a journey by returning all-zero weights;
+see *Custom rules*.
 
 ## Details
 
-`credit_first()` and `credit_last()` are the two defaults most reporting
-systems ship with, and they disagree with each other by design:
-comparing them is the cheapest read on whether a channel opens journeys
-or closes them.
+`credit_first()` and `credit_last()` are the simplest rules, and they
+disagree with each other by design: comparing them is the cheapest read
+on whether a channel opens journeys or closes them.
 [`attribute()`](https://elkronos.github.io/mediamix/reference/attribute.md)
 runs several rules at once for exactly this reason.
 
@@ -98,8 +99,10 @@ under-counted.
 run backwards. Adstock takes one impulse of spend and spreads its effect
 forward in time with geometric decay; time-decay attribution takes one
 conversion and spreads its credit backward across prior touchpoints with
-the same geometric kernel. Same arithmetic, opposite arrow, and the same
-`decay` vocabulary in both directions.
+the same geometric kernel. The arithmetic is the same with the arrow
+reversed, and `decay` means the same thing in both directions. With
+`decay = 0` there is no carryover, and all the credit goes to the most
+recent touch, shared equally when several touches tie.
 
 ## Custom rules
 
@@ -108,14 +111,14 @@ and is called once per converting journey, with vectors as long as that
 journey. Non-converting journeys are never passed to it; they always get
 zero.
 
-A rule that qualifies only some touches – "credit only touches within a
-day of conversion", say – will meet journeys where *nothing* qualifies.
-When `fn` returns all zeros for a journey, that journey receives no
-credit at all and is counted in a message. Crediting its touches equally
-instead would invent an answer the rule never gave, and it is a
-surprisingly easy way to hand a channel thousands of conversions it was
-never eligible for. The cost is that total credit is then *below* the
-number of converting journeys, by exactly the number of declined
+A rule that qualifies only some touches, such as "credit only touches
+within a day of conversion", will meet journeys where *nothing*
+qualifies. When `fn` returns all zeros for a journey, that journey
+receives no credit at all and is counted in a message. Crediting its
+touches equally instead would invent an answer the rule never gave, and
+it is a surprisingly easy way to hand a channel thousands of conversions
+it was never eligible for. The cost is that total credit is then *below*
+the number of converting journeys, by exactly the number of declined
 journeys.
 
 ## What credit is not
@@ -165,12 +168,12 @@ td <- credit_time_decay(paths, decay = decay_from_half_life(3))
 recent_only <- credit_custom(paths, function(rank, n, recency) {
   as.numeric(recency <= 1)
 })
-#> 482 converting journeys received no credit: the rule assigned zero weight to
+#> 480 converting journeys received no credit: the rule assigned zero weight to
 #> every touch.
 #> ℹ Those conversions are not counted in any channel's total.
-#> ℹ Total credit is 2259, against 2741 converting journeys.
+#> ℹ Total credit is 2261, against 2741 converting journeys.
 c(credited = sum(recent_only$credit),
   converting = path_summary(paths)$converting_journeys)
 #>   credited converting 
-#>       2259       2741 
+#>       2261       2741 
 ```

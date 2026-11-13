@@ -1,12 +1,13 @@
 # Choosing carryover parameters
 
-Decay and lag have to come from somewhere. Priors and vendor benchmarks
-are one answer. Cross-validation is another, and it has the advantage of
+Decay and lag (how many periods carryover may span, the `max_lag`
+argument) have to come from somewhere. Priors and vendor benchmarks are
+one answer. Cross-validation is another, and it has the advantage of
 being checkable: if the procedure works, it should recover a decay you
 planted in simulated data.
 
-This vignette is about doing that correctly, because there is a tempting
-way to do it that does not work.
+This vignette is about cross-validating carryover correctly, because
+there is a tempting way to do it that does not work.
 
 ``` r
 
@@ -20,11 +21,10 @@ linear trend to the transformed series, extrapolate it one period ahead,
 and score it against the raw series. Grid-search decay and lag; take the
 best.
 
-It sounds reasonable and it is broken, for a reason that is easy to
-miss: **there is no dependent variable anywhere in that loop.** The
-criterion never sees the KPI. It scores how *smooth and trend-like* the
-transformed media series is, which is a property of the filter, not
-evidence about the media.
+It sounds reasonable, but there is no dependent variable anywhere in
+that loop. The criterion never sees the KPI. It scores how well a trend
+through the transformed media forecasts the raw media, which is a
+property of the filter, not evidence about the media.
 
 Watch what it does on data where the true decay is 0.7:
 
@@ -69,25 +69,30 @@ Two things are wrong here. The chosen decay is 0.1 against a truth of
 
 ``` r
 
-c(spread_across_whole_grid = max(g$error) / min(g$error) - 1,
-  spread_across_best_four = sort(g$error)[4] / min(g$error) - 1)
+spread <- c(spread_across_whole_grid = max(g$error) / min(g$error) - 1,
+            spread_across_best_four = sort(g$error)[4] / min(g$error) - 1)
+spread
 #> spread_across_whole_grid  spread_across_best_four 
 #>                3.944e-02                5.913e-05
 ```
 
-The four best cells differ in the fifth significant figure, and the
-whole grid spans under 4%. There is almost no signal to select on, and
-what signal there is runs in a single direction: error rises
-monotonically with decay, because a harder-smoothed series is a worse
-predictor of a noisy raw one. The criterion is ranking filters by how
-much they smooth. It never sees the KPI, so it cannot rank them by
-anything else.
+The four best cells are within 0.006% of one another, and the whole grid
+spans 3.9%. There is almost no signal to select on, and what signal
+there is runs in a single direction: error rises monotonically with
+decay, because a harder-smoothed series is a worse predictor of a noisy
+raw one. The criterion is ranking filters by how much they smooth. It
+never sees the KPI, so it cannot rank them by anything else.
 
 ## Putting the KPI in the loop
 
 [`tune_carryover()`](https://elkronos.github.io/mediamix/reference/tune_carryover.md)
 scores each candidate `(max_lag, decay)` by how well a model fitted on
-the adstocked media predicts *held-out KPI*:
+the adstocked media predicts *held-out KPI*. By default the model is
+[`fit_ols()`](https://elkronos.github.io/mediamix/reference/fit_ols.md),
+a least-squares regression of the KPI on the adstocked media, and the
+resampling is rolling-origin: fit on the first half of the series,
+forecast the next period, add that period to the training set and
+repeat.
 
 ``` r
 
@@ -101,12 +106,15 @@ tuned
 #> ── Carryover tuning
 #> rolling_origin resampling, 78 splits, 19 grid points
 #> Best: decay = 0.7 (half-life 1.94 periods), max_lag = infinite
-#> rmse (pooled) = 4.95364, std. error 0.357
+#> rmse (pooled) = 4.95364, std. error 0.411
 ```
 
-Recovered exactly. The profile shows how sharply the data identifies it
-— a clear valley here, which is what a well-identified carryover looks
-like:
+The printout gives the number of splits and grid points, the selected
+decay with its half-life, and the cross-validated error of the winner:
+the root mean squared error of all 78 one-period forecasts, with its
+standard error. The selected decay, 0.7, is the true one. The profile of
+that error across the decay grid shows how sharply the data identifies
+it:
 
 ``` r
 
@@ -115,7 +123,8 @@ plot(tuned, truth = truth)
 
 ![](carryover_files/figure-html/unnamed-chunk-5-1.png)
 
-And it is not a fluke of one decay value:
+A clear valley at the truth is what a well-identified carryover looks
+like. And it is not a fluke of one decay value:
 
 ``` r
 
@@ -138,8 +147,9 @@ round(t(vapply(c(0.2, 0.35, 0.5, 0.7, 0.85), recover, numeric(4))), 3)
 #> [5,] 0.85      0.85   4.265        4.265
 ```
 
-This recovery test lives in the package’s own test suite. It is the
-check that the objective is measuring what it claims to.
+A recovery test of this kind, on other simulated series, runs in the
+package’s own test suite. It is the check that the objective is
+measuring what it claims to.
 
 ## Why slicing a fully adstocked series is legitimate
 
@@ -158,177 +168,57 @@ all.equal(z[1:100], adstock_geometric(spend[1:100], decay = 0.7))
 ```
 
 The adstock value at time *t* depends only on media at times ≤ *t*. So
-an assessment period’s regressor draws on training-period *media* —
-information genuinely available at prediction time — and never on future
-media. No KPI information crosses the boundary at any point. The package
-tests this invariant explicitly, precisely because the shortcut depends
-on it.
-
-## A correct objective is not the same as an easy problem
-
-Everything above uses a single channel with no confounders. Real data is
-not like that, and it is worth seeing how much harder it gets before
-trusting a number.
-
-`mm_weekly` has five correlated, flighted channels, a price term, a
-trend and seasonality, and 156 weekly observations. Tune each channel’s
-decay one at a time against raw revenue, and:
-
-``` r
-
-data(mm_weekly)
-north <- mm_weekly[mm_weekly$geo == "north", ]
-truth_params <- attr(mm_weekly, "truth")
-grid <- seq(0.1, 0.9, by = 0.05)
-
-channels <- names(truth_params$decay)
-
-one_at_a_time <- vapply(channels, function(ch) {
-  suppressWarnings(tune_carryover(north[[ch]], north$revenue,
-                                  max_lags = Inf, decays = grid))$best$decay
-}, numeric(1))
-
-rbind(true = truth_params$decay[channels], recovered = one_at_a_time)
-#>             tv video search social display
-#> true      0.85  0.70   0.15   0.45    0.55
-#> recovered 0.80  0.25   0.35   0.10    0.45
-```
-
-Some are close, some are badly off. Nothing is wrong with the objective
-— it recovered five out of five true decays a moment ago. The problem is
-the *model* it is being evaluated against: a univariate regression of
-revenue on one adstocked channel, with no controls and no saturation.
-That model attributes the trend, the price effect, seasonality and the
-other four channels’ work to whichever channel it is currently looking
-at, and the carryover that best predicts under those conditions is not
-the true one.
-
-Residualising the KPI against the controls first helps, but not enough:
-
-``` r
-
-base <- lm(revenue ~ seq_len(nrow(north)) + price + seasonality + holiday,
-           data = north)
-
-residualised <- vapply(channels, function(ch) {
-  suppressWarnings(tune_carryover(north[[ch]], residuals(base),
-                                  max_lags = Inf, decays = grid))$best$decay
-}, numeric(1))
-
-rbind(true = truth_params$decay[channels],
-      raw_kpi = one_at_a_time,
-      residualised = residualised)
-#>                tv video search social display
-#> true         0.85  0.70   0.15   0.45    0.55
-#> raw_kpi      0.80  0.25   0.35   0.10    0.45
-#> residualised 0.85  0.40   0.30   0.10    0.45
-```
-
-The lesson is not that cross-validation fails. It is that **carryover is
-not separable from the rest of the specification**, so tuning it one
-channel at a time against a model you do not intend to fit answers a
-question you did not ask.
-
-## Tuning every channel at once
-
-[`tune_carryover_joint()`](https://elkronos.github.io/mediamix/reference/tune_carryover_joint.md)
-puts all five channels and the controls into one model and chooses each
-channel’s decay with the others’ effects accounted for. It searches by
-coordinate descent — one channel at a time, holding the rest, repeating
-until nothing moves — so it costs a few sweeps of the one-channel grid
-rather than the full five-dimensional grid:
-
-``` r
-
-controls <- data.frame(week = seq_len(nrow(north)), price = north$price,
-                       seasonality = north$seasonality,
-                       holiday = north$holiday)
-
-joint <- tune_carryover_joint(north[channels], north$revenue,
-                              controls = controls, decays = grid)
-joint
-#> 
-#> ── Joint carryover tuning
-#> 5 channels, rolling_origin resampling, 78 splits; 3 sweeps, converged
-#> rmse (pooled) = 971.083
-#>  channel max_lag decay half_life decay_1se
-#>       tv     Inf  0.80      3.11       0.5
-#>    video     Inf  0.50      1.00       0.4
-#>   search     Inf  0.65      1.61       0.1
-#>   social     Inf  0.55      1.16       0.1
-#>  display     Inf  0.60      1.36       0.1
-
-rbind(true = truth_params$decay[channels],
-      one_at_a_time = one_at_a_time,
-      residualised = residualised,
-      joint = joint$best$decay,
-      joint_1se = joint$best_1se$decay)
-#>                 tv video search social display
-#> true          0.85  0.70   0.15   0.45    0.55
-#> one_at_a_time 0.80  0.25   0.35   0.10    0.45
-#> residualised  0.85  0.40   0.30   0.10    0.45
-#> joint         0.80  0.50   0.65   0.55    0.60
-#> joint_1se     0.50  0.40   0.10   0.10    0.10
-```
-
-Much closer, and the profiles show where the remaining doubt lies:
-
-``` r
-
-plot(joint, truth = truth_params$decay)
-```
-
-![](carryover_files/figure-html/unnamed-chunk-11-1.png)
-
-Television, video and social have clear valleys. Search’s profile barely
-moves across the whole range: the data cannot tell a search half-life of
-a fraction of a week from one of several, and the one-standard-error
-choice falls back to the short end, near the truth. That flatness is
-itself the finding, and a point estimate without the profile would hide
-it.
-
-The model here is still linear in adstocked media, with no saturation,
-so it is not the model the data came from. For carryover tuned jointly
-with saturation and a model penalty, use the recipe steps in
-[`vignette("tidymodels")`](https://elkronos.github.io/mediamix/articles/tidymodels.md).
+an assessment period’s regressor draws on training-period *media*, which
+is information genuinely available at prediction time, and never on
+future media. No KPI information crosses the boundary at any point. The
+package tests this invariant explicitly, precisely because the shortcut
+depends on it.
 
 ## Reading the result
+
+`tuned$results` holds the whole grid, sorted from the best candidate
+down:
 
 ``` r
 
 head(tuned$results, 5)
 #>   max_lag decay half_life metric std_err n_splits
-#> 1     Inf  0.70     1.943  4.954  0.3569       78
-#> 2     Inf  0.65     1.609  6.246  0.4035       78
-#> 3     Inf  0.75     2.409  7.632  0.5700       78
-#> 4     Inf  0.60     1.357  9.007  0.5957       78
-#> 5     Inf  0.55     1.159 11.870  0.7785       78
+#> 1     Inf  0.70     1.943  4.954  0.4109       78
+#> 2     Inf  0.65     1.609  6.246  0.4486       78
+#> 3     Inf  0.75     2.409  7.632  0.6971       78
+#> 4     Inf  0.60     1.357  9.007  0.6415       78
+#> 5     Inf  0.55     1.159 11.870  0.8500       78
 ```
 
-The `results` grid is worth looking at rather than just taking `best`.
-If the metric is nearly flat across a wide band of decay, the data does
-not identify carryover tightly and a confident point estimate would be
-overstating things.
+The `results` grid is worth looking at rather than taking `best` on
+trust. If the metric is nearly flat across a wide band of decay, the
+data does not identify carryover tightly and a confident point estimate
+would be overstating things.
 
-Two things in the output help with that. `std_err` is the standard error
-of the per-split errors, which says how far apart two candidates need to
-be before the difference means anything. And `best_1se` applies the
+Two things in the output help with that. `std_err` is a jackknife
+standard error of each candidate’s metric over the splits, a measure of
+how noisy the forecasts are. And `best_1se` applies the
 one-standard-error rule (Breiman et al., 1984; Hastie, Tibshirani and
-Friedman, 2009): the *shortest* carryover whose error is within one
-standard error of the minimum.
+Friedman, 2009): the *shortest* carryover whose metric exceeds the
+best’s by no more than one standard error of the *paired difference*
+between the two. The comparison is paired because both candidates face
+the same hard-to-forecast weeks, so the difference between them is much
+less noisy than either metric on its own.
 
 ``` r
 
 rbind(best = tuned$best, one_se = tuned$best_1se)
 #>        max_lag decay half_life metric std_err n_splits
-#> best       Inf   0.7     1.943  4.954  0.3569       78
-#> one_se     Inf   0.7     1.943  4.954  0.3569       78
+#> best       Inf   0.7     1.943  4.954  0.4109       78
+#> one_se     Inf   0.7     1.943  4.954  0.4109       78
 ```
 
-When the two agree, the data has spoken clearly. When they do not, the
-data cannot tell them apart, and the shorter carryover is the more
-conservative claim to put in front of a client — a long carryover
-flatters a channel by crediting it with sales weeks after it ran.
+Here both pick a decay of 0.7. When the two agree, the data has spoken
+clearly. When they do not, the data cannot tell them apart. The shorter
+carryover is the more conservative claim when the question is how much
+credit a channel earns weeks after it ran, because a long carryover
+flatters a channel; it is not conservative for every decision, since a
+shorter carryover also lowers that channel’s marginal return.
 
 By default the metric is *pooled*: every out-of-sample forecast across
 all splits is collected and `metric_fn` is evaluated once, so `rmse` is
@@ -345,7 +235,7 @@ warns when the winner is pinned to the edge of the grid:
 narrow <- tune_carryover(spend, kpi, max_lags = Inf,
                          decays = seq(0.1, 0.5, by = 0.1))
 #> Warning: The chosen parameters sit on the edge of the grid.
-#> • The selected decay (0.5) is the largest value in `decays`.
+#> • The selected decay (0.5) is the largest value searched.
 #> ℹ Widen the grid and re-run. A parameter pinned to a boundary usually means the
 #>   optimum is outside it, or that the series is too short to identify carryover
 #>   this long.
@@ -374,15 +264,18 @@ rbind(cold = adstock_geometric(steady, decay = 0.85),
 #> warm  100 100.00 100.00 100.0 100.00 100.00 100.00 100.00
 ```
 
+The cold start climbs towards the true level of 100 and is still short
+of it after eight weeks; the warm start is there from the first week.
 [`adstock_steady_state()`](https://elkronos.github.io/mediamix/reference/adstock_steady_state.md)
 seeds the filter as though the early average spend had always been
 running, and `warm_start = TRUE` applies it to every candidate in
 [`tune_carryover()`](https://elkronos.github.io/mediamix/reference/tune_carryover.md)
 and
 [`tune_carryover_joint()`](https://elkronos.github.io/mediamix/reference/tune_carryover_joint.md).
-Real pre-period spend, passed through
-[`adstock_state()`](https://elkronos.github.io/mediamix/reference/adstock_state.md),
-is better still when you have it.
+Real pre-period spend is better still when you have it: pass
+[`adstock_state()`](https://elkronos.github.io/mediamix/reference/adstock_state.md)
+of it as the `state` argument of
+[`adstock_geometric()`](https://elkronos.github.io/mediamix/reference/adstock_geometric.md).
 
 ## Sanity-check the answer against the data you have
 
@@ -402,7 +295,11 @@ looks. Here 7 periods against 156 is comfortable.
 ## Resampling schemes
 
 Both schemes are forward-only; neither ever trains on data that follows
-what it assesses.
+what it assesses. `"rolling_origin"` grows the training window one
+period at a time and gives many splits; `"k_fold_forward"` uses a
+handful of contiguous forward blocks and is cheaper on long series.
+Bergmeir and Benítez (2012) compare evaluation on the last part of a
+series with cross-validation for time-series predictors.
 
 ``` r
 
@@ -417,22 +314,171 @@ c(rolling = rolling$best$decay, k_fold = kfold$best$decay)
 #>     0.7     0.7
 ```
 
-`"rolling_origin"` grows the training window one period at a time and
-gives many splits; `"k_fold_forward"` uses a handful of contiguous
-forward blocks and is cheaper on long series.
+Here the rolling-origin search picks 0.7 and the forward-block search
+0.7.
 
-For tuning carryover jointly with saturation and a model’s own penalty,
-see
+## A correct objective is not the same as an easy problem
+
+Everything above uses a single channel with no confounders. Real data is
+not like that, and it is worth seeing how much harder it gets before
+trusting a number.
+
+`mm_weekly` has five mildly correlated, flighted channels (bought in
+bursts, with weeks of no spend between them), a price term, a trend and
+seasonality, and three years of weekly observations per geography. Here
+is what tuning each channel’s decay one at a time against north’s raw
+revenue gives:
+
+``` r
+
+data(mm_weekly)
+north <- mm_weekly[mm_weekly$geo == "north", ]
+truth_params <- attr(mm_weekly, "truth")
+grid <- seq(0.1, 0.9, by = 0.05)
+
+channels <- names(truth_params$decay)
+
+one_at_a_time <- vapply(channels, function(ch) {
+  suppressWarnings(tune_carryover(north[[ch]], north$revenue,
+                                  max_lags = Inf, decays = grid))$best$decay
+}, numeric(1))
+
+rbind(true = truth_params$decay[channels], recovered = one_at_a_time)
+#>             tv video search social display
+#> true      0.85  0.70   0.15   0.45    0.55
+#> recovered 0.80  0.25   0.35   0.10    0.45
+```
+
+Some are close, some are badly off. Nothing is wrong with the objective,
+which recovered every planted decay earlier. The problem is the *model*
+it is being evaluated against: a univariate regression of revenue on one
+adstocked channel, with no controls and no saturation. That model
+attributes the trend, the price effect, seasonality and the other four
+channels’ work to whichever channel it is currently looking at, and the
+carryover that best predicts under those conditions is not the true one.
+
+Residualising the KPI against the controls first helps, but not enough:
+
+``` r
+
+base <- lm(revenue ~ seq_len(nrow(north)) + price + seasonality + holiday,
+           data = north)
+
+residualised <- vapply(channels, function(ch) {
+  suppressWarnings(tune_carryover(north[[ch]], residuals(base),
+                                  max_lags = Inf, decays = grid))$best$decay
+}, numeric(1))
+
+rbind(true = truth_params$decay[channels],
+      raw_kpi = one_at_a_time,
+      residualised = residualised)
+#>                tv video search social display
+#> true         0.85  0.70   0.15   0.45    0.55
+#> raw_kpi      0.80  0.25   0.35   0.10    0.45
+#> residualised 0.85  0.40   0.30   0.10    0.45
+```
+
+Residualising this way also lets future KPI values in, because the
+controls’ coefficients are estimated on the whole series, every split’s
+assessment period included; the `controls` argument of
+[`tune_carryover()`](https://elkronos.github.io/mediamix/reference/tune_carryover.md)
+fits them inside each training window instead. Either way, carryover is
+not separable from the rest of the specification, so tuning it one
+channel at a time against a model you do not intend to fit answers a
+question you did not ask.
+
+## Tuning every channel at once
+
+[`tune_carryover_joint()`](https://elkronos.github.io/mediamix/reference/tune_carryover_joint.md)
+puts all five channels and the controls into one model and chooses each
+channel’s decay with the others’ effects accounted for. It searches by
+coordinate descent, one channel at a time with the others held fixed,
+repeating until nothing moves, so it costs a few sweeps of the
+one-channel grid rather than the full five-dimensional grid:
+
+``` r
+
+controls <- data.frame(week = seq_len(nrow(north)), price = north$price,
+                       seasonality = north$seasonality,
+                       holiday = north$holiday)
+
+joint <- tune_carryover_joint(north[channels], north$revenue,
+                              controls = controls, decays = grid)
+joint
+#> 
+#> ── Joint carryover tuning
+#> 5 channels, rolling_origin resampling, 78 splits; 3 sweeps, converged
+#> rmse (pooled) = 971.083
+#> One-SE set, chosen channel by channel: rmse = 1021.32
+#>  channel max_lag decay half_life decay_1se
+#>       tv     Inf  0.80      3.11      0.60
+#>    video     Inf  0.50      1.00      0.35
+#>   search     Inf  0.65      1.61      0.10
+#>   social     Inf  0.55      1.16      0.10
+#>  display     Inf  0.60      1.36      0.10
+
+comparison <- rbind(true = truth_params$decay[channels],
+                    one_at_a_time = one_at_a_time,
+                    residualised = residualised,
+                    joint = joint$best$decay,
+                    joint_1se = joint$best_1se$decay)
+comparison
+#>                 tv video search social display
+#> true          0.85  0.70   0.15   0.45    0.55
+#> one_at_a_time 0.80  0.25   0.35   0.10    0.45
+#> residualised  0.85  0.40   0.30   0.10    0.45
+#> joint         0.80  0.50   0.65   0.55    0.60
+#> joint_1se     0.60  0.35   0.10   0.10    0.10
+
+# Mean absolute distance from the true decays
+miss <- rowMeans(abs(sweep(comparison[-1, ], 2, comparison["true", ])))
+round(miss, 2)
+#> one_at_a_time  residualised         joint     joint_1se 
+#>          0.23          0.18          0.18          0.29
+```
+
+The joint search lands closer to the truth than tuning one channel at a
+time (0.18 against 0.23 on average) and matches residualising (0.18),
+but it is not uniformly better: for search it picks 0.65 against a truth
+of 0.15. The profiles show where the doubt lies:
+
+``` r
+
+plot(joint, truth = truth_params$decay)
+```
+
+![](carryover_files/figure-html/unnamed-chunk-17-1.png)
+
+Search’s profile barely moves across most of the grid and rises only at
+the longest carryovers: the data cannot tell the selected search
+half-life of 1.6 weeks from one of a fraction of a week, and that
+flatness is itself the finding, which a point estimate without the
+profile would hide. The one-standard-error choices (`decay_1se`, made
+channel by channel with the rule from *Reading the result*) fall to the
+bottom of the grid for search, social and display. For search that is
+near the truth; for social and display, whose true decays are 0.45 and
+0.55, it is not. A one-SE choice at the edge of the grid says the data
+cannot rule out a short carryover, not that the carryover is short. The
+printed result also reports the cross-validated error of the one-SE set
+as a whole (1021 against 971), which is worse than the best set’s
+because each channel’s choice was made with the others held at their
+best.
+
+The model here is still linear in adstocked media, with no saturation,
+so it is not the model the data came from. For carryover tuned jointly
+with saturation and a model penalty, use the recipe steps in
 [`vignette("tidymodels")`](https://elkronos.github.io/mediamix/articles/tidymodels.md).
 
 ## References
 
 Bergmeir, C. and Benítez, J. M. (2012). On the use of cross-validation
 for time series predictor evaluation. *Information Sciences*, 191,
-192–213.
+192–213. <https://doi.org/10.1016/j.ins.2011.12.028>
 
 Breiman, L., Friedman, J., Olshen, R. and Stone, C. (1984).
 *Classification and Regression Trees*. Wadsworth.
+<https://doi.org/10.1201/9781315139470>
 
 Hastie, T., Tibshirani, R. and Friedman, J. (2009). *The Elements of
 Statistical Learning* (2nd ed.). Springer.
+<https://doi.org/10.1007/978-0-387-84858-7>

@@ -1,12 +1,11 @@
 # Delayed adstock
 
-The delayed-peak geometric kernel of Jin et al. (2017), \\w_l =
-\theta^{(l - \delta)^2}\\ for lags \\l = 0, \ldots, L-1\\, where
-\\\theta\\ is the retention rate and \\\delta\\ the lag at which the
-effect peaks. With `peak = 0` the weights fall off as \\\theta^{l^2}\\,
-faster than geometric; with `peak > 0` the response builds for `peak`
-periods before it decays, the shape television and out-of-home often
-show. It is the delayed form used in Google's Bayesian MMM work, and a
+The delayed-peak kernel of Jin et al. (2017), \\w_l = \theta^{(l -
+\delta)^2}\\ for lags \\l = 0, \ldots, L-1\\, where \\\theta\\ is the
+retention rate and \\\delta\\ the lag at which the effect peaks. With
+`peak = 0` the weights fall off as \\\theta^{l^2}\\, faster than
+geometric; with `peak > 0` the response builds for `peak` periods before
+it decays, the shape television and out-of-home often show. It is a
 one-parameter-per-idea alternative to the Weibull kernel: `peak` is read
 directly in periods.
 
@@ -23,7 +22,8 @@ adstock_delayed(
   normalise = TRUE,
   state = 0,
   by = NULL,
-  na_action = c("error", "zero", "keep")
+  na_action = c("error", "zero", "keep"),
+  missing_state = c("error", "cold")
 )
 ```
 
@@ -42,13 +42,13 @@ adstock_delayed(
 - peak:
 
   Lag of the peak effect, in periods, in `[0, max_lag - 1]`. Need not be
-  a whole number.
+  a whole number. Defaults to `0`, a peak in the period of spend.
 
 - normalise:
 
-  Should the weights sum to 1? When `FALSE` the weights are left as
-  \\\theta^{(l - \delta)^2}\\, whose largest value is 1 when the peak
-  falls on a whole period.
+  Should the weights sum to 1? Defaults to `TRUE`. When `FALSE` the
+  weights are left as \\\theta^{(l - \delta)^2}\\, whose largest value
+  is 1 when the peak falls on a whole period.
 
 - x:
 
@@ -56,12 +56,14 @@ adstock_delayed(
   `x` must already be sorted by time and evenly spaced; the function has
   no index argument and cannot check this for you. Use
   [`step_adstock()`](https://elkronos.github.io/mediamix/reference/step_adstock.md)
-  if you want the time index validated.
+  if you want the time index validated. Infinite values are an error,
+  since the filter would carry them into later periods; missing values
+  are handled by `na_action`.
 
 - state:
 
-  The preceding `max_lag - 1` values of `x`, oldest first, or `0` for a
-  cold start; a named list of them when `by` is supplied.
+  The `max_lag - 1` values that came before `x`, oldest first, or `0`
+  for a cold start; a named list of them when `by` is supplied.
 
 - by:
 
@@ -70,7 +72,8 @@ adstock_delayed(
   which is what geo-level and panel models need. Never rely on
   [`dplyr::group_by()`](https://dplyr.tidyverse.org/reference/group_by.html)
   for this: grouping metadata does not reliably survive into every
-  context where this function is called.
+  context where this function is called. Missing values are an error, in
+  a vector or in any column of a data frame.
 
 - na_action:
 
@@ -80,11 +83,20 @@ adstock_delayed(
   `NA` propagate through the filter, which for the recursive form
   poisons every subsequent value.
 
+- missing_state:
+
+  What to do when `state` is a per-group list with no entry for a group
+  in `by`. `"error"` (the default) refuses; `"cold"` cold-starts those
+  groups, as
+  [`step_adstock()`](https://elkronos.github.io/mediamix/reference/step_adstock.md)
+  does by default for groups it did not see at `prep()` time.
+
 ## Value
 
-`adstock_weights_delayed()` returns the kernel, ordered from the current
-period outward. `adstock_delayed()` returns a numeric vector the same
-length as `x`, in the same order.
+`adstock_weights_delayed()` returns the kernel, a numeric vector of
+length `max_lag` ordered from the current period outward.
+`adstock_delayed()` returns a numeric vector the same length as `x`, in
+the same order, with the names and time-series attributes of `x`.
 
 ## References
 
@@ -110,8 +122,7 @@ round(adstock_delayed(spend, decay = 0.6, peak = 2, max_lag = 8), 2)
 #> [1]  5.25 24.30 40.49 24.30  5.25  0.41  0.01  0.00
 
 # Through media_transform()
-media_transform(spend, adstock = list(kernel = "delayed", decay = 0.6,
-                                      peak = 2, max_lag = 8))
-#> [1] 5.247893e+00 2.429580e+01 4.049300e+01 2.429580e+01 5.247893e+00
-#> [6] 4.080761e-01 1.142352e-02 1.151228e-04
+round(media_transform(spend, adstock = list(kernel = "delayed", decay = 0.6,
+                                            peak = 2, max_lag = 8)), 2)
+#> [1]  5.25 24.30 40.49 24.30  5.25  0.41  0.01  0.00
 ```

@@ -1,10 +1,11 @@
 # Geometric adstock weights
 
 The finite geometric kernel \\w_i = \theta^i\\ for lags \\i = 0, 1,
-\ldots, L-1\\.
+\ldots, L-1\\, divided by its sum unless `normalise = FALSE`.
 [`adstock_geometric()`](https://elkronos.github.io/mediamix/reference/adstock_geometric.md)
-calls this internally when `max_lag` is finite; it is exported because
-the weights themselves are often what you want to plot or report.
+applies the same weights when `max_lag` is finite; this function is
+exported because the weights themselves are often what you want to plot
+or report.
 
 ## Usage
 
@@ -16,8 +17,8 @@ adstock_weights(max_lag, decay, normalise = TRUE)
 
 - max_lag:
 
-  Number of periods the kernel spans, including the current period.
-  `max_lag = 1` means no carryover.
+  Number of periods the kernel spans, including the current period. Must
+  be finite. `max_lag = 1` means no carryover.
 
 - decay:
 
@@ -26,7 +27,8 @@ adstock_weights(max_lag, decay, normalise = TRUE)
 
 - normalise:
 
-  Should the weights sum to 1? See the *Normalisation* section of
+  Should the weights sum to 1? Defaults to `TRUE`. See the
+  *Normalisation* section of
   [`adstock_geometric()`](https://elkronos.github.io/mediamix/reference/adstock_geometric.md)
   for what this does to the interpretation of a downstream coefficient.
 

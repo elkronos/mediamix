@@ -25,32 +25,37 @@ saturate(x, type = c("hill", "exponential", "michaelis_menten", "power"), ...)
 
   Numeric vector of media, normally already adstocked. Values must be
   non-negative: all four curves are defined for spend, not for arbitrary
-  reals.
+  reals. Missing values stay missing.
 
 - half_max:
 
-  The value of `x` at which the response reaches half its ceiling.
-  Interpretable in the units of `x`, which is why it is used here in
-  preference to the equivalent unnamed scale parameter.
+  The value of `x` at which the response reaches half its ceiling,
+  positive. Interpretable in the units of `x`, which is why it is used
+  here in preference to the equivalent unnamed scale parameter.
 
 - shape:
 
-  Hill exponent, positive. `shape = 1` gives a concave curve with
-  diminishing returns everywhere. `shape > 1` gives an S-shape with an
-  initial convex region, the usual representation of a threshold effect.
+  Hill exponent, positive. `shape = 1`, the default, gives a concave
+  curve with diminishing returns everywhere, as does any smaller value.
+  `shape > 1` gives an S-shape with an initial convex region, the usual
+  representation of a threshold effect.
 
 - rate:
 
-  Exponential rate parameter, positive. Larger values saturate sooner.
+  Exponential rate parameter, positive, per unit of `x`. Larger values
+  saturate sooner.
 
 - vmax:
 
   Michaelis–Menten asymptote: the response as `x` grows without bound.
+  Positive; defaults to 1.
 
 - km:
 
   Michaelis–Menten constant: the value of `x` at which the response
-  reaches half of `vmax`.
+  reaches half of `vmax`. Required and positive. It comes after `vmax`
+  in the argument list, so `saturate_michaelis_menten(x, 100)` sets
+  `vmax`; name it, as in `km = 100`.
 
 - exponent:
 
@@ -59,7 +64,8 @@ saturate(x, type = c("hill", "exponential", "michaelis_menten", "power"), ...)
 
 - type:
 
-  Which curve `saturate()` should dispatch to.
+  Which curve `saturate()` should dispatch to: `"hill"` (the default),
+  `"exponential"`, `"michaelis_menten"` or `"power"`.
 
 - ...:
 
@@ -67,18 +73,22 @@ saturate(x, type = c("hill", "exponential", "michaelis_menten", "power"), ...)
 
 ## Value
 
-A numeric vector the same length as `x`, in the same order.
+A numeric vector the same length as `x`, in the same order, with the
+names and time-series attributes of `x`.
 
 ## Details
 
-`saturate_hill()` and `saturate_exponential()` are bounded on `[0, 1)`,
-so the fitted coefficient carries the channel's ceiling.
-`saturate_michaelis_menten()` is bounded by `vmax`. All three approach
-their ceiling smoothly at arbitrarily large `x`, including `Inf`, rather
-than overflowing. `saturate_power()` is unbounded but concave: response
-keeps growing, just ever more slowly. Unboundedness is not automatically
-wrong, but it does mean the model will happily extrapolate a return on a
-spend level never observed.
+`saturate_hill()` and `saturate_exponential()` rise from 0 towards 1 and
+never exceed it, so the fitted coefficient carries the channel's
+ceiling. Mathematically they stay below 1; in floating point they reach
+exactly 1 once `x` is large enough, for example
+`saturate_exponential(40, rate = 1)`. `saturate_michaelis_menten()` is
+bounded by `vmax`. All three approach their ceiling smoothly at
+arbitrarily large `x`, including `Inf`, rather than overflowing.
+`saturate_power()` is unbounded but concave: response keeps growing,
+just ever more slowly. Unboundedness is not automatically wrong, but it
+does mean the model will happily extrapolate a return on a spend level
+never observed.
 
 `saturate_hill(x, half_max, shape = 1)` and
 `saturate_michaelis_menten(x, vmax = 1, km = half_max)` are the same
@@ -87,10 +97,12 @@ differently and practitioners arrive expecting one or the other.
 
 ## Transform order
 
-Saturation is applied *after* adstock, not before. Saturating first
-would cap each period's spend in isolation and then let carryover
-accumulate the capped values past the cap, which defeats the point of
-having a ceiling. Use
+Saturation is applied *after* adstock, not before. Saturating first puts
+each period's spend through the curve in isolation, so carryover from
+earlier periods never counts towards saturation. With an unnormalised
+kernel (`normalise = FALSE`) carryover then also accumulates the
+saturated values past the ceiling, which defeats the point of having
+one. Use
 [`media_transform()`](https://elkronos.github.io/mediamix/reference/media_transform.md)
 to get the order right without having to remember it.
 
@@ -99,11 +111,15 @@ to get the order right without having to remember it.
 Hill, A. V. (1910). The possible effects of the aggregation of the
 molecules of haemoglobin on its dissociation curves. *The Journal of
 Physiology*, 40(Suppl), iv–vii.
+[doi:10.1113/jphysiol.1910.sp001386](https://doi.org/10.1113/jphysiol.1910.sp001386)
 
 ## See also
 
 [`media_transform()`](https://elkronos.github.io/mediamix/reference/media_transform.md),
-[`response_curve()`](https://elkronos.github.io/mediamix/reference/response_curve.md)
+[`response_curve()`](https://elkronos.github.io/mediamix/reference/response_curve.md),
+and
+[`step_saturation()`](https://elkronos.github.io/mediamix/reference/step_saturation.md)
+for a recipes pipeline.
 
 ## Examples
 

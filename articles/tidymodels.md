@@ -1,15 +1,22 @@
 # Tuning with tidymodels
 
 Carryover decay, saturation shape and a model’s own penalty are not
-independent. A longer carryover shifts the media series’ scale, which
-changes which penalty is optimal, which changes which saturation point
-best fits the residual curvature. Choosing them one at a time — decay by
-cross-validation, saturation by eye, penalty by `glmnet`’s own path —
-finds a corner of the parameter space and calls it an optimum.
+independent. A longer carryover smooths the media series and lowers its
+peaks, which changes which penalty is optimal, which changes which
+saturation point best fits the residual curvature. Choosing them one at
+a time (decay by cross-validation, saturation by eye, penalty by
+`glmnet`’s own path) finds a corner of the parameter space and calls it
+an optimum.
 
-Tuning them jointly is what the recipes layer is for. It is the entire
-reason these transforms are recipe steps rather than functions you call
-beforehand.
+Tuning them jointly is what the recipe steps
+[`step_adstock()`](https://elkronos.github.io/mediamix/reference/step_adstock.md)
+and
+[`step_saturation()`](https://elkronos.github.io/mediamix/reference/step_saturation.md)
+are for. It is the entire reason these transforms are recipe steps
+rather than functions you call beforehand.
+
+The examples use `mm_weekly`, a simulated weekly panel of media spend
+and revenue by geography:
 
 ``` r
 
@@ -20,23 +27,20 @@ data(mm_weekly)
 channels <- c("tv", "video", "search", "social", "display")
 ```
 
-## The problem the step solves
+## The problem `step_adstock()` solves
 
-Adstock is a filter with memory. Prepare a recipe on the first two years
-and bake it on the third, and the first rows of the third year have no
-history.
+Adstock is a filter with memory. Prepare a recipe on the first two and a
+half years and bake it on the rest, and the first rows of the new data
+have no history.
 
+A lag built with
 [`recipes::step_lag()`](https://recipes.tidymodels.org/reference/step_lag.html)
-answers this by emitting `NA`, silently. Its documented remedy,
-[`step_naomit()`](https://recipes.tidymodels.org/reference/step_naomit.html),
-changes the row count — and a step that changes the row count breaks
-[`tune_grid()`](https://tune.tidymodels.org/reference/tune_grid.html)
-outright, because the resampling machinery needs assessment predictions
-to line up with assessment rows. That is not an escape hatch; it is a
-dead end.
-
+leaves `NA`, or the filler given as its `default`, in the first rows of
+new data at every prep/bake boundary, and dropping those rows with
+`step_naomit(skip = FALSE)` removes the boundary weeks from training and
+evaluation.
 [`step_adstock()`](https://elkronos.github.io/mediamix/reference/step_adstock.md)
-stores *filter state* instead of rows:
+carries the filter’s state across the boundary instead:
 
 ``` r
 
@@ -48,31 +52,40 @@ rec <- recipe(revenue ~ ., data = train) |>
   prep()
 
 tidy(rec, number = 1)
-#>      terms   group decay  state state_length            id
-#> 1       tv central   0.7 5755.3            1 adstock_SwlKL
-#> 2    video central   0.7  832.3            1 adstock_SwlKL
-#> 3   search central   0.7 1048.7            1 adstock_SwlKL
-#> 4   social central   0.7  843.6            1 adstock_SwlKL
-#> 5  display central   0.7  515.5            1 adstock_SwlKL
-#> 6       tv   north   0.7 7337.2            1 adstock_SwlKL
-#> 7    video   north   0.7 1051.8            1 adstock_SwlKL
-#> 8   search   north   0.7 1641.9            1 adstock_SwlKL
-#> 9   social   north   0.7  406.9            1 adstock_SwlKL
-#> 10 display   north   0.7  218.9            1 adstock_SwlKL
-#> 11      tv   south   0.7 8340.0            1 adstock_SwlKL
-#> 12   video   south   0.7 1320.2            1 adstock_SwlKL
-#> 13  search   south   0.7 1897.4            1 adstock_SwlKL
-#> 14  social   south   0.7  949.1            1 adstock_SwlKL
-#> 15 display   south   0.7  972.7            1 adstock_SwlKL
+#> # A tibble: 15 × 13
+#>    terms   group   kernel    decay max_lag shape scale type   peak start state
+#>    <chr>   <chr>   <chr>     <dbl>   <dbl> <dbl> <dbl> <chr> <dbl> <chr> <dbl>
+#>  1 tv      north   geometric   0.7     Inf    NA    NA NA       NA zero  7337.
+#>  2 video   north   geometric   0.7     Inf    NA    NA NA       NA zero  1052.
+#>  3 search  north   geometric   0.7     Inf    NA    NA NA       NA zero  1642.
+#>  4 social  north   geometric   0.7     Inf    NA    NA NA       NA zero   407.
+#>  5 display north   geometric   0.7     Inf    NA    NA NA       NA zero   219.
+#>  6 tv      central geometric   0.7     Inf    NA    NA NA       NA zero  5755.
+#>  7 video   central geometric   0.7     Inf    NA    NA NA       NA zero   832.
+#>  8 search  central geometric   0.7     Inf    NA    NA NA       NA zero  1049.
+#>  9 social  central geometric   0.7     Inf    NA    NA NA       NA zero   844.
+#> 10 display central geometric   0.7     Inf    NA    NA NA       NA zero   516.
+#> 11 tv      south   geometric   0.7     Inf    NA    NA NA       NA zero  8340.
+#> 12 video   south   geometric   0.7     Inf    NA    NA NA       NA zero  1320.
+#> 13 search  south   geometric   0.7     Inf    NA    NA NA       NA zero  1897.
+#> 14 social  south   geometric   0.7     Inf    NA    NA NA       NA zero   949.
+#> 15 display south   geometric   0.7     Inf    NA    NA NA       NA zero   973.
+#> # ℹ 2 more variables: state_length <int>, id <chr>
 ```
 
-One number per column per geography. Not lag-1 rows of data — one
-double. The geometric filter is an infinite impulse response whose
-entire memory is $`a_{t-1}`$, so that single number *is* the history. No
-training observations are retained, which sidesteps both the object-size
-objection and the privacy one.
+The `state` column is the filter’s memory at the end of training for
+each channel and geography. Geometric adstock is the recursion
+$`a_t = x_t + \theta a_{t-1}`$, with $`\theta`$ the `decay`, so that
+memory is one number per series: the last $`a_t`$, reported before the
+`normalise` scaling by $`1 - \theta`$.
+[`prep()`](https://recipes.tidymodels.org/reference/prep.html) also
+keeps each geography’s training time points and media values, so that
+new data repeating the last periods of training is filtered exactly too.
+For this training set they take up 23.4 kB, and they are media only,
+never the outcome.
 
-Baking on contiguous new data warm-starts from it:
+Baking new data that continues the training series warm-starts the
+filter from that state:
 
 ``` r
 
@@ -83,9 +96,9 @@ c(rows_in = nrow(test), rows_out = nrow(baked),
 #>       75       75        0
 ```
 
-Row count preserved, order preserved, no missing values at the boundary.
-And the result is exactly what you would have got by filtering the whole
-series at once:
+Every row comes back, in its original order, with no missing values at
+the boundary, and the values are exactly what filtering the whole series
+at once gives:
 
 ``` r
 
@@ -106,17 +119,31 @@ test suite.
 ## What happens when the data does not continue
 
 [`bake()`](https://recipes.tidymodels.org/reference/bake.html) compares
-the start of the new data against what
-[`prep()`](https://recipes.tidymodels.org/reference/prep.html) saw and
-acts accordingly. Four cases, all explicit:
+the start of the new data with the training time points
+[`prep()`](https://recipes.tidymodels.org/reference/prep.html) stored,
+and handles each case explicitly. New data that repeats training weeks
+continues from the weeks before them:
 
 ``` r
 
-# Overlapping the training period: cold start, so re-baking the training data
-# reproduces the prepared output rather than double-counting its carryover.
+# Repeating the last four training weeks, as rsample::rolling_origin(lag = 4)
+# assessment sets do: the repeated rows continue from the weeks before them.
+overlap <- mm_weekly[mm_weekly$date > max(train$date) - 4 * 7, ]
+baked_overlap <- bake(rec, new_data = overlap)
+check_overlap <- merge(baked_overlap[, c("date", "geo", "tv")],
+                       full[, c("date", "geo", "expected")],
+                       by = c("date", "geo"))
+all.equal(check_overlap$tv, check_overlap$expected)
+#> [1] TRUE
+
+# Repeating the whole training period has nothing before it, so re-baking the
+# training data reproduces the prepared output.
 all.equal(bake(rec, new_data = train)$tv, juice(rec)$tv)
 #> [1] TRUE
 ```
+
+New data that starts after a gap cannot continue the filter, so it
+cold-starts with a warning that names the gap:
 
 ``` r
 
@@ -124,25 +151,27 @@ all.equal(bake(rec, new_data = train)$tv, juice(rec)$tv)
 gapped <- test[test$date >= as.Date("2025-10-01"), ]
 invisible(tryCatch(bake(rec, new_data = gapped),
                    warning = function(w) message(conditionMessage(w))))
-#> Cold-starting adstock for 3 series with a gap after the training period.
+#> Cold-starting adstock for 3 series that start after a gap.
 #> ℹ Carryover from before the gap is discarded.
-#> ℹ Affected: "central (13 periods missing)", "north (13 periods missing)", and
+#> ℹ Affected: "north (13 periods missing)", "central (13 periods missing)", and
 #>   "south (13 periods missing)".
 ```
 
-An unseen group warns the same way. `carry_over = "warm"` turns those
-warnings into errors when you want the pipeline to insist on contiguity;
-`carry_over = "cold"` disables state entirely and reproduces lag-style
-behaviour.
+New data that starts less than one period after a training week, as when
+daily rows are baked into a weekly step or the reporting day moves, is
+misaligned; it cold-starts and warns the same way, as does an unseen
+group. That is the default, `carry_over = "auto"`. `carry_over = "warm"`
+turns those warnings into errors when you want the pipeline to insist on
+contiguity; `carry_over = "cold"` disables state entirely, so each bake
+filters the new data on its own, as a lag-based step does.
 
-Two things worth noting. The step is strictly causal, unlike
+The step is strictly causal, unlike
 [`recipes::step_window()`](https://recipes.tidymodels.org/reference/step_window.html)
 and
 [`recipes::step_impute_roll()`](https://recipes.tidymodels.org/reference/step_impute_roll.html),
-which are centred and fill a series’ leading edge using future values —
-applied to a media filter that leaks future spend into past adstock and
-inflates in-sample fit, which is the exact pathology marketing mix
-models are accused of. And the step sorts by `index` internally and
+which are centred and fill a series’ leading edge using future values.
+Used on media, they would leak future spend into past adstock and
+inflate in-sample fit. The step also sorts by `index` internally and
 restores the original row order before returning, so nothing downstream
 ever sees a reordered table.
 
@@ -151,22 +180,23 @@ ever sees a reordered table.
 `recipes` steps have no built-in notion of groups, and a `grouped_df`
 may not survive into
 [`bake()`](https://recipes.tidymodels.org/reference/bake.html). So
-grouping is named explicitly:
+[`step_adstock()`](https://elkronos.github.io/mediamix/reference/step_adstock.md)
+takes the grouping columns explicitly, in `by`:
 
 ``` r
 
 setequal(train$geo, as.character(baked$geo))
 #> [1] TRUE
 tidy(rec, number = 1)$group
-#>  [1] "central" "central" "central" "central" "central" "north"   "north"  
-#>  [8] "north"   "north"   "north"   "south"   "south"   "south"   "south"  
+#>  [1] "north"   "north"   "north"   "north"   "north"   "central" "central"
+#>  [8] "central" "central" "central" "south"   "south"   "south"   "south"  
 #> [15] "south"
 ```
 
 Each geography carries its own state and its own last-seen index.
 ([`prep()`](https://recipes.tidymodels.org/reference/prep.html) converts
-the character column to a factor along the way, so compare the values
-rather than the vectors.)
+the character `geo` column to a factor along the way, so compare the
+values rather than the vectors.)
 
 ## Saturation on a comparable scale
 
@@ -186,50 +216,38 @@ rec2 <- recipe(revenue ~ ., data = train) |>
   prep()
 
 tidy(rec2, number = 2)
-#>           terms type half_max shape reference               id
-#> tv           tv hill      0.4   1.5    3258.3 saturation_UUEdL
-#> video     video hill      0.4   1.5     879.8 saturation_UUEdL
-#> search   search hill      0.4   1.5     793.8 saturation_UUEdL
-#> social   social hill      0.4   1.5     487.1 saturation_UUEdL
-#> display display hill      0.4   1.5     431.5 saturation_UUEdL
+#> # A tibble: 5 × 6
+#>   terms   type  half_max shape reference id              
+#>   <chr>   <chr>    <dbl> <dbl>     <dbl> <chr>           
+#> 1 tv      hill       0.4   1.5     3258. saturation_UUEdL
+#> 2 video   hill       0.4   1.5      880. saturation_UUEdL
+#> 3 search  hill       0.4   1.5      794. saturation_UUEdL
+#> 4 social  hill       0.4   1.5      487. saturation_UUEdL
+#> 5 display hill       0.4   1.5      431. saturation_UUEdL
 ```
 
 `half_max = 0.4` reads the same way for every channel: half the ceiling
-is reached at 40% of that channel’s peak spend. One parameter now covers
-all five.
-
-## One carryover per channel
-
-A step applies one `decay` to every column it selects, and the joint
-search below tunes that single shared value for brevity. Channels rarely
-share a carryover — in `mm_weekly` the truth runs from 0.15 for search
-to 0.85 for television — so for a real model give each channel its own
-step. [`tune()`](https://hardhat.tidymodels.org/reference/tune.html)
-(from `hardhat`, re-exported by `tune`) takes an identifier, which keeps
-the parameters apart in the search:
-
-``` r
-
-per_channel <- recipe(revenue ~ ., data = train)
-for (ch in channels) {
-  per_channel <- step_adstock(per_channel, all_of(ch), index = "date",
-                              by = "geo",
-                              decay = hardhat::tune(paste0("decay_", ch)))
-}
-per_channel <- step_saturation(per_channel, all_of(channels),
-                               half_max = hardhat::tune(),
-                               shape = hardhat::tune())
-vapply(per_channel$steps[1:5], function(s) as.character(s$decay[[2]]),
-       character(1))
-#> [1] "decay_tv"      "decay_video"   "decay_search"  "decay_social" 
-#> [5] "decay_display"
-```
-
-Swap `per_channel` for `tune_rec` in the workflow below and the search
-covers five decays instead of one; give it a larger `initial` and `iter`
-to match.
+is reached at 40% of the largest adstocked value in that channel’s
+training data (the `reference` column, under the default `ref = "max"`),
+pooled over the geographies unless
+[`step_saturation()`](https://elkronos.github.io/mediamix/reference/step_saturation.md)
+is given `by`. One parameter now covers all five.
 
 ## The tuning parameters
+
+Each step tells `tune` which of its arguments can be searched, and
+mediamix supplies a `dials` parameter with a default range for each:
+[`carryover_decay()`](https://elkronos.github.io/mediamix/reference/mediamix_params.md)
+and
+[`carryover_max_lag()`](https://elkronos.github.io/mediamix/reference/mediamix_params.md)
+for
+[`step_adstock()`](https://elkronos.github.io/mediamix/reference/step_adstock.md),
+and
+[`saturation_half_max()`](https://elkronos.github.io/mediamix/reference/mediamix_params.md)
+and
+[`saturation_shape()`](https://elkronos.github.io/mediamix/reference/mediamix_params.md)
+for
+[`step_saturation()`](https://elkronos.github.io/mediamix/reference/step_saturation.md).
 
 ``` r
 
@@ -261,8 +279,14 @@ trade off against the intercept.
 
 ## Joint tuning
 
-Now the payoff. One search over carryover, saturation and penalty
-together, scored on rolling-origin resampling.
+One search covers carryover, saturation and the model’s penalty
+together, scored on rolling-origin resampling of the north geography:
+
+``` r
+
+north <- mm_weekly[mm_weekly$geo == "north", ]
+north <- north[order(north$date), ]
+```
 
 ``` r
 
@@ -272,9 +296,6 @@ library(workflows)
 library(tune)
 library(dials)
 #> Loading required package: scales
-
-north <- mm_weekly[mm_weekly$geo == "north", ]
-north <- north[order(north$date), ]
 
 folds <- rolling_origin(north, initial = 104, assess = 13, skip = 12,
                         cumulative = TRUE)
@@ -331,9 +352,67 @@ show_best(res, metric = "rmse", n = 5)
 #> # ℹ 1 more variable: .iter <int>
 ```
 
-Four parameters, one search, one resampling scheme, correct train/test
-boundaries throughout. Robyn reaches for `nevergrad` — and therefore a
-Python runtime — to do the equivalent.
+[`show_best()`](https://tune.tidymodels.org/reference/show_best.html)
+lists the five best candidates, each a combination of `decay`,
+`half_max`, `shape` and `penalty` with its RMSE averaged over the
+assessment sets. All four come out of one search, with one resampling
+scheme and correct train/test boundaries throughout. Robyn does the
+equivalent search with the Python library Nevergrad, so it needs a
+Python runtime as well as R; `robyn_mmm()` stops with an error when
+Nevergrad is not installed.
+
+## One carryover per channel
+
+`tune_rec` applies one `decay` to every column its
+[`step_adstock()`](https://elkronos.github.io/mediamix/reference/step_adstock.md)
+selects, so the search above tunes a single shared value, which keeps
+the example short. Channels rarely share a carryover: in `mm_weekly` the
+true decays, stored in `attr(mm_weekly, "truth")`, run from 0.15 for
+search to 0.85 for television, so for a real model give each channel its
+own step.
+[`step_adstock_channels()`](https://elkronos.github.io/mediamix/reference/step_adstock_channels.md)
+adds one
+[`step_adstock()`](https://elkronos.github.io/mediamix/reference/step_adstock.md)
+per channel, and with `decay = tune()` it gives each step a tuning
+parameter of its own, named after the channel:
+
+``` r
+
+per_channel <- recipe(revenue ~ ., data = north) |>
+  update_role(date, new_role = "index") |>
+  step_rm(geo) |>
+  # tune() is hardhat's; the tune package re-exports it.
+  step_adstock_channels(channels, index = "date", decay = hardhat::tune()) |>
+  step_saturation(all_of(channels), half_max = hardhat::tune(),
+                  shape = hardhat::tune()) |>
+  step_normalize(all_numeric_predictors())
+
+hardhat::extract_parameter_set_dials(per_channel)
+#> Collection of 7 parameters for tuning
+#> 
+#>     identifier     type    object
+#>       decay_tv    decay nparam[+]
+#>    decay_video    decay nparam[+]
+#>   decay_search    decay nparam[+]
+#>   decay_social    decay nparam[+]
+#>  decay_display    decay nparam[+]
+#>       half_max half_max nparam[+]
+#>          shape    shape nparam[+]
+#> 
+```
+
+The parameter set now holds five decays, `decay_tv` to `decay_display`,
+beside the shared `half_max` and `shape`. Each step selects its channel
+by name, fixed when the step is added; a loop of
+[`step_adstock()`](https://elkronos.github.io/mediamix/reference/step_adstock.md)
+calls with `all_of(ch)` would select the last channel in every step,
+because selectors are evaluated at
+[`prep()`](https://recipes.tidymodels.org/reference/prep.html), after
+the loop has finished. The rest of the recipe is `tune_rec`’s, so
+`update_recipe(wf, per_channel)` swaps it into the workflow and the
+search covers five decays instead of one; give
+[`tune_bayes()`](https://tune.tidymodels.org/reference/tune_bayes.html)
+a larger `initial` and `iter` to match.
 
 ## Leakage, since a reviewer will ask
 
@@ -342,14 +421,14 @@ Under rolling-origin resampling,
 on each split’s analysis set. The stored state is therefore re-learned
 from that split’s training rows alone and describes only media that
 precedes the assessment set. Nothing carries across splits, and no
-outcome information crosses any boundary — the state is a function of
+outcome information crosses any boundary: the state is a function of
 past *spend*, which is genuinely known at prediction time.
 
 The same argument covers
 [`step_saturation()`](https://elkronos.github.io/mediamix/reference/step_saturation.md):
 each column’s reference level is a training-set statistic, re-learned
-per split, and a test-set spend above it is not clipped — it simply
-lands further up the curve.
+per split, and a test-set value above it is not clipped but lands
+further up the curve.
 
 ## If you skip the tuning, skip the step
 

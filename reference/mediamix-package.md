@@ -7,15 +7,17 @@ regressors, and raw event logs into attributed customer journeys.
 
 ## Details
 
-It is a preprocessing and reporting package. It does not fit models –
+It is a preprocessing and reporting package and does not fit models;
 [`lm()`](https://rdrr.io/r/stats/lm.html), `glmnet` and `brms` do that
 better than a marketing package would. It computes order-1 Markov
 removal effects natively; for higher-order chains
 [`as_channel_paths()`](https://elkronos.github.io/mediamix/reference/as_channel_paths.md)
 hands your journeys to ChannelAttribution.
 
-Full documentation, an end-to-end walkthrough and the methods behind
-each function are at <https://elkronos.github.io/mediamix/>.
+Full documentation is at <https://elkronos.github.io/mediamix/>,
+including an end-to-end budget walkthrough, an index from tasks to
+functions, answers to common questions, a guide to moving a Robyn model
+across, and the methods behind each function.
 
 ## Where to start
 
@@ -56,9 +58,10 @@ Five vignettes, in the order most people need them:
   when the response peaks after the spend,
   [`adstock_filter()`](https://elkronos.github.io/mediamix/reference/adstock_filter.md)
   for a kernel of your own.
-  [`adstock_weights()`](https://elkronos.github.io/mediamix/reference/adstock_weights.md)
-  and
+  [`adstock_weights()`](https://elkronos.github.io/mediamix/reference/adstock_weights.md),
   [`adstock_weights_weibull()`](https://elkronos.github.io/mediamix/reference/adstock_weights_weibull.md)
+  and
+  [`adstock_weights_delayed()`](https://elkronos.github.io/mediamix/reference/adstock_delayed.md)
   expose the kernels themselves, and
   [`adstock_state()`](https://elkronos.github.io/mediamix/reference/adstock_state.md)
   carries a filter across a boundary.
@@ -78,6 +81,11 @@ Five vignettes, in the order most people need them:
   [`media_transform()`](https://elkronos.github.io/mediamix/reference/media_transform.md)
   applies carryover then saturation, in that order, and will not do it
   backwards quietly.
+  [`transform_plan()`](https://elkronos.github.io/mediamix/reference/transform_plan.md)
+  does the same for every channel of a plan, each with its own
+  parameters, and
+  [`from_robyn()`](https://elkronos.github.io/mediamix/reference/from_robyn.md)
+  converts Robyn's hyperparameters to these arguments.
 
 - Choosing parameters:
 
@@ -93,13 +101,23 @@ Five vignettes, in the order most people need them:
   [`adstock_steady_state()`](https://elkronos.github.io/mediamix/reference/adstock_steady_state.md)
   removes start-up bias.
 
+- Controls:
+
+  [`fourier_terms()`](https://elkronos.github.io/mediamix/reference/seasonality.md)
+  and
+  [`holiday_flags()`](https://elkronos.github.io/mediamix/reference/seasonality.md)
+  build seasonality terms for the model and for the tuners' `controls`.
+
 ## The attribution half
 
 - Journeys:
 
   [`build_paths()`](https://elkronos.github.io/mediamix/reference/build_paths.md)
   turns an event log into journeys, handling the seven things that go
-  wrong on the way.
+  wrong on the way, and can carry other event columns such as device or
+  campaign.
+  [`bind_paths()`](https://elkronos.github.io/mediamix/reference/bind_paths.md)
+  combines journey tables.
 
 - Credit:
 
@@ -113,9 +131,10 @@ Five vignettes, in the order most people need them:
   and the data-driven
   [`markov_removal()`](https://elkronos.github.io/mediamix/reference/markov_removal.md).
   [`attribute()`](https://elkronos.github.io/mediamix/reference/attribute.md)
-  runs several at once and
+  runs several at once, by segment and with resampled intervals if
+  asked, and
   [`attribution_spread()`](https://elkronos.github.io/mediamix/reference/attribution_spread.md)
-  reports how much the answer depends on which you picked.
+  reports how much the answer depends on which rule you picked.
 
 - Diagnostics:
 
@@ -135,10 +154,10 @@ Five vignettes, in the order most people need them:
   [`as_channel_paths()`](https://elkronos.github.io/mediamix/reference/as_channel_paths.md)
   exports to ChannelAttribution's format.
 
-## Reporting, diagnostics and tidymodels
+## Reporting, planning and tidymodels
 
 [`diagnose_media()`](https://elkronos.github.io/mediamix/reference/diagnose_media.md)
-checks whether the data can support a model at all – run it first.
+checks whether the data can support a model at all, so run it first.
 [`contributions()`](https://elkronos.github.io/mediamix/reference/contributions.md),
 [`roi()`](https://elkronos.github.io/mediamix/reference/roi.md),
 [`marginal_roi()`](https://elkronos.github.io/mediamix/reference/marginal_roi.md),
@@ -148,11 +167,19 @@ and
 [`spend_for()`](https://elkronos.github.io/mediamix/reference/response_curve.md)
 turn a fitted model into a deliverable, and
 [`block_bootstrap()`](https://elkronos.github.io/mediamix/reference/block_bootstrap.md)
-puts intervals on it. Each result has a
+puts intervals on it.
+[`simulate_plan()`](https://elkronos.github.io/mediamix/reference/simulate_plan.md),
+[`reallocate()`](https://elkronos.github.io/mediamix/reference/reallocate.md)
+and
+[`allocate_budget()`](https://elkronos.github.io/mediamix/reference/allocate_budget.md)
+compare and split budgets through the same transforms. Contributions,
+response curves, bootstrap intervals, tuning results, attribution
+shares, budget allocations and diagnostics each have a
 [`plot()`](https://rdrr.io/r/graphics/plot.default.html) method;
 [`mm_palette()`](https://elkronos.github.io/mediamix/reference/mm_palette.md)
 exposes their colours.
-[`step_adstock()`](https://elkronos.github.io/mediamix/reference/step_adstock.md)
+[`step_adstock()`](https://elkronos.github.io/mediamix/reference/step_adstock.md),
+[`step_adstock_channels()`](https://elkronos.github.io/mediamix/reference/step_adstock_channels.md)
 and
 [`step_saturation()`](https://elkronos.github.io/mediamix/reference/step_saturation.md)
 are recipes steps that carry filter state across the train/test
@@ -171,11 +198,11 @@ breaks a naive journey pipeline.
 
 ## Dependencies
 
-The core transforms need only base R, `stats`, and `cli` for error
-messages. `data.table` is used by the attribution half, where event logs
-are large. recipes, dials and the rest of tidymodels are optional and
-registered conditionally, so the transforms work equally well from a
-Stan or brms workflow that will never touch them.
+The core transforms need only base R and `stats`, plus `cli` and `rlang`
+for error messages. `data.table` is used by the attribution half, where
+event logs are large. recipes, dials and the rest of tidymodels are
+optional and registered conditionally, so the transforms work equally
+well from a Stan or brms workflow that will never touch them.
 
 ## See also
 
@@ -210,9 +237,9 @@ paths <- build_paths(mm_events, id = "customer_id", channel = "channel",
                      timestamp = "timestamp", conversion = "conversion")
 path_summary(paths)
 #>   events_in events_out journeys converting_journeys mean_length median_length
-#> 1     20799      17306     6137                2741    2.819945             3
+#> 1     20799      17282     6105                2741    2.830794             3
 #>   max_length direct_events conversion_events conversions_observed
 #> 1          9          1597              2741                 2741
-#>   conversions_unattributable
-#> 1                          0
+#>   conversions_unattributable journeys_before_filtering duplicate_events
+#> 1                          0                      6105              117
 ```

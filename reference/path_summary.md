@@ -51,8 +51,21 @@ A one-row data frame with the columns
 - `conversions_unattributable`:
 
   Converting journeys that lost every touchpoint to a direct-traffic
-  rule, and so cannot be credited to any channel. That number should be
-  reported, not absorbed.
+  rule or to `conversion_touch = "drop"`, and so cannot be credited to
+  any channel. That number should be reported, not absorbed.
+
+- `journeys_before_filtering`:
+
+  Journeys found before post-conversion touches, direct traffic,
+  conversion events under `conversion_touch = "drop"`, the lookback and
+  null paths were removed.
+
+- `duplicate_events`:
+
+  Exact duplicate events dropped before journeys were built (see the
+  `dedupe` argument of
+  [`build_paths()`](https://elkronos.github.io/mediamix/reference/build_paths.md)).
+  `direct_events` and `conversion_events` count what remained.
 
 On a subset of a journey table the construction counts no longer apply,
 and the columns describing the input are `NA` rather than the parent's
@@ -71,9 +84,9 @@ paths <- build_paths(mm_events, id = "customer_id", channel = "channel",
                      timestamp = "timestamp", conversion = "conversion")
 path_summary(paths)
 #>   events_in events_out journeys converting_journeys mean_length median_length
-#> 1     20799      17306     6137                2741    2.819945             3
+#> 1     20799      17282     6105                2741    2.830794             3
 #>   max_length direct_events conversion_events conversions_observed
 #> 1          9          1597              2741                 2741
-#>   conversions_unattributable
-#> 1                          0
+#>   conversions_unattributable journeys_before_filtering duplicate_events
+#> 1                          0                      6105              117
 ```

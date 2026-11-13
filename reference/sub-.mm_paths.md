@@ -1,11 +1,14 @@
 # Subset a journey table
 
-Behaves exactly like subsetting a data frame, with one addition: if the
+Behaves like subsetting a data frame, with three additions. If the
 result no longer carries the columns that make a journey table a journey
 table, the `mm_paths` class is dropped and a plain data frame is
-returned. This stops a column subset from producing an object that
-claims to be an `mm_paths` but cannot answer any question about
-journeys.
+returned, so a column subset cannot produce an object that claims to be
+an `mm_paths` but cannot answer any question about journeys. Rows
+selected by a missing (`NA`) row index are dropped with a message, as
+[`subset()`](https://rdrr.io/r/base/subset.html) drops them. And
+`touch_rank` and `touch_n` are recomputed whenever they no longer match
+the rows present.
 
 ## Usage
 
@@ -31,18 +34,33 @@ plain data frame.
 
 ## Details
 
-When a row subset removes part of a journey – dropping one channel, say
-– `touch_rank` and `touch_n` are recomputed from the touches that
-remain, so the result is a valid journey table in its own right and
-every credit rule sums to 1 per converting journey. The first remaining
-touch becomes rank 1. Convert with
-[`as.data.frame()`](https://rdrr.io/r/base/as.data.frame.html) first if
-you want to inspect the original ranks of a partial selection.
+When a row subset removes part of a journey, dropping one channel say,
+the first remaining touch becomes rank 1 and the result is a valid
+journey table in its own right, so every credit rule sums to 1 per
+converting journey. A row selected twice counts as two touches.
+Construction counts describe the table
+[`build_paths()`](https://elkronos.github.io/mediamix/reference/build_paths.md)
+returned, so they are dropped once rows change. Convert with
+[`as.data.frame()`](https://rdrr.io/r/base/as.data.frame.html) first to
+inspect the original ranks of a partial selection.
+
+The dplyr verbs follow the same rules:
+[`filter()`](https://dplyr.tidyverse.org/reference/filter.html),
+[`slice()`](https://dplyr.tidyverse.org/reference/slice.html),
+[`arrange()`](https://dplyr.tidyverse.org/reference/arrange.html) and
+[`distinct()`](https://dplyr.tidyverse.org/reference/distinct.html)
+subset rows as `[` does, and
+[`mutate()`](https://dplyr.tidyverse.org/reference/mutate.html) and the
+joins recompute ranks the same way. Journey tables built by separate
+[`build_paths()`](https://elkronos.github.io/mediamix/reference/build_paths.md)
+calls share journey ids; combine them with
+[`bind_paths()`](https://elkronos.github.io/mediamix/reference/bind_paths.md).
 
 ## See also
 
 [`build_paths()`](https://elkronos.github.io/mediamix/reference/build_paths.md),
-[`path_summary()`](https://elkronos.github.io/mediamix/reference/path_summary.md)
+[`path_summary()`](https://elkronos.github.io/mediamix/reference/path_summary.md),
+[`bind_paths()`](https://elkronos.github.io/mediamix/reference/bind_paths.md)
 
 ## Examples
 

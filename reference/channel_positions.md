@@ -50,14 +50,14 @@ paths <- build_paths(mm_events, id = "customer_id", channel = "channel",
                      timestamp = "timestamp", conversion = "conversion")
 channel_positions(paths)
 #>           channel only first middle last touches first_last_ratio
-#> 9     paid_search   81   171    503  666    1421        0.2567568
-#> 6         display   79   720    437  118    1354        6.1016949
-#> 10         social   97   504    449  222    1272        2.2702703
-#> 8  organic_search   81   270    461  409    1221        0.6601467
-#> 7           email   46   109    364  456     975        0.2390351
-#> 4       affiliate   40   279    276  181     776        1.5414365
-#> 1         (blank)   27    53     80   59     219        0.8983051
-#> 3          (none)   19    57     72   56     204        1.0178571
-#> 5          direct   13    50     59   48     170        1.0416667
-#> 2       (missing)    9    36     32   34     111        1.0588235
+#> 1     paid_search   81   170    503  666    1420        0.2552553
+#> 2         display   79   719    437  118    1353        6.0932203
+#> 3          social   98   507    450  221    1276        2.2941176
+#> 4  organic_search   80   266    467  410    1223        0.6487805
+#> 5           email   46   109    363  456     974        0.2390351
+#> 6       affiliate   40   281    277  181     779        1.5524862
+#> 7         (blank)   27    54     79   59     219        0.9152542
+#> 8          (none)   19    57     73   56     205        1.0178571
+#> 9          direct   13    51     58   48     170        1.0625000
+#> 10      (missing)    9    35     34   34     112        1.0294118
 ```

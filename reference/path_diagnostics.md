@@ -1,8 +1,9 @@
 # Run every journey diagnostic at once
 
 A convenience wrapper returning the diagnostics an analyst normally
-presents together. Each element is exactly what the corresponding
-function returns.
+presents together. Each element is what the corresponding function
+returns with its defaults, except `assists`, which is
+`assisted_conversions(paths, normalise = TRUE)`.
 
 ## Usage
 
@@ -47,9 +48,9 @@ names(diag)
 #> [5] "top_paths"      "conversion_lag"
 diag$summary
 #>   events_in events_out journeys converting_journeys mean_length median_length
-#> 1     20799      17306     6137                2741    2.819945             3
+#> 1     20799      17282     6105                2741    2.830794             3
 #>   max_length direct_events conversion_events conversions_observed
 #> 1          9          1597              2741                 2741
-#>   conversions_unattributable
-#> 1                          0
+#>   conversions_unattributable journeys_before_filtering duplicate_events
+#> 1                          0                      6105              117
 ```
