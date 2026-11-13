@@ -44,7 +44,9 @@ The default \code{NULL} uses every row. Used only to convert \code{gamma}.}
 
 \item{inflexion}{How the Robyn version that fitted the model placed the
 Hill inflexion point: \code{"max"} (the default) for Robyn 3.12.0 and later,
-\code{"range"} for Robyn 3.7.0 to 3.11.1. Used only to convert \code{gamma}.}
+\code{"range"} for Robyn 3.7.0 to 3.11.1. Robyn 3.0.0 to 3.6.3 also used the
+range point, rounded to four decimal places, so \code{"range"} matches those
+versions up to that rounding. Used only to convert \code{gamma}.}
 }
 \value{
 A list with two elements, \code{adstock} and \code{saturation}, to pass to

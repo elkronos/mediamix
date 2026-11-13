@@ -28,7 +28,9 @@
 #'   The default `NULL` uses every row. Used only to convert `gamma`.
 #' @param inflexion How the Robyn version that fitted the model placed the
 #'   Hill inflexion point: `"max"` (the default) for Robyn 3.12.0 and later,
-#'   `"range"` for Robyn 3.7.0 to 3.11.1. Used only to convert `gamma`.
+#'   `"range"` for Robyn 3.7.0 to 3.11.1. Robyn 3.0.0 to 3.6.3 also used the
+#'   range point, rounded to four decimal places, so `"range"` matches those
+#'   versions up to that rounding. Used only to convert `gamma`.
 #'
 #' @return A list with two elements, `adstock` and `saturation`, to pass to
 #'   the arguments of the same names in [media_transform()]:

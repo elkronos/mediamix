@@ -12,7 +12,9 @@
 #'   `` `TV Spend` ``. Numeric columns that match no coefficient are left out,
 #'   with a message.
 #' @param model A fitted model, or a named numeric vector of coefficients.
-#'   Anything [stats::coef()] works on will do. For a mixed model from
+#'   Any model for which [stats::coef()] returns a named numeric vector will
+#'   do, such as an `lm()` or `glm()` fit. For \pkg{glmnet}, \pkg{brms} or
+#'   Stan, pass the point estimates as a named vector. For a mixed model from
 #'   \pkg{nlme} or \pkg{lme4}, the fixed effects are used, and group-level
 #'   deviations from them are part of the baseline.
 #' @param intercept Model intercept, used when the baseline is the intercept:

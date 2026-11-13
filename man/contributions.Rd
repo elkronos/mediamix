@@ -22,7 +22,9 @@ ignored, so a column named \verb{TV Spend} matches the coefficient
 with a message.}
 
 \item{model}{A fitted model, or a named numeric vector of coefficients.
-Anything \code{\link[stats:coef]{stats::coef()}} works on will do. For a mixed model from
+Any model for which \code{\link[stats:coef]{stats::coef()}} returns a named numeric vector will
+do, such as an \code{lm()} or \code{glm()} fit. For \pkg{glmnet}, \pkg{brms} or
+Stan, pass the point estimates as a named vector. For a mixed model from
 \pkg{nlme} or \pkg{lme4}, the fixed effects are used, and group-level
 deviations from them are part of the baseline.}
 
