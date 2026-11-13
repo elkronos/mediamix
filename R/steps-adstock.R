@@ -56,7 +56,10 @@
 #'   periods.
 #' @param kernel The carryover kernel: `"geometric"` (the default),
 #'   `"weibull"` or `"delayed"`, applied by [adstock_geometric()],
-#'   [adstock_weibull()] or [adstock_delayed()]. See "Kernels" below.
+#'   [adstock_weibull()] or [adstock_delayed()]. See "Kernels" below. An
+#'   argument the kernel ignores must still be a valid value of its kind,
+#'   such as a `decay` in `[0, 1]` or a non-negative `peak`, so that a typo is
+#'   caught rather than kept in the step.
 #' @param shape,scale Weibull shape and scale, both positive; `scale` is in
 #'   periods. Required when `kernel = "weibull"` and ignored otherwise.
 #'   Tunable.

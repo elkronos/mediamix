@@ -97,7 +97,10 @@ periods.}
 
 \item{kernel}{The carryover kernel: \code{"geometric"} (the default),
 \code{"weibull"} or \code{"delayed"}, applied by \code{\link[=adstock_geometric]{adstock_geometric()}},
-\code{\link[=adstock_weibull]{adstock_weibull()}} or \code{\link[=adstock_delayed]{adstock_delayed()}}. See "Kernels" below.}
+\code{\link[=adstock_weibull]{adstock_weibull()}} or \code{\link[=adstock_delayed]{adstock_delayed()}}. See "Kernels" below. An
+argument the kernel ignores must still be a valid value of its kind,
+such as a \code{decay} in \verb{[0, 1]} or a non-negative \code{peak}, so that a typo is
+caught rather than kept in the step.}
 
 \item{shape, scale}{Weibull shape and scale, both positive; \code{scale} is in
 periods. Required when \code{kernel = "weibull"} and ignored otherwise.
