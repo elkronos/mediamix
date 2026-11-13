@@ -8,7 +8,8 @@
 #' @inheritParams simulate_plan
 #' @param total Total spend to allocate across the channels in `spec`.
 #'   Defaults to their total in `plan`, which asks how the current budget
-#'   would best be split.
+#'   would best be split. It must lie between the sum of `lower` and the sum
+#'   of `upper`.
 #' @param lower,upper Bounds on each channel's total spend: a numeric vector
 #'   named by channel, or one number for every channel. A channel not named
 #'   gets `0` and `Inf`.
@@ -32,8 +33,8 @@
 #'     \item{`total`, `step`, `steps`}{The budget allocated, the size of one
 #'       increment and the number of increments.}
 #'   }
-#'   It has `print()` and `as.data.frame()` methods, and a
-#'   [plot()][plot.mm_allocation] method.
+#'   It has a `print()` method, `as.data.frame()` and `tidy()` methods that
+#'   return `allocation`, and a [plot()][plot.mm_allocation] method.
 #'
 #' @details
 #' Each channel's response is computed at its lower bound and at every
@@ -63,8 +64,9 @@
 #' a large move before making it (see [marginal_roi()]).
 #'
 #' A channel with no spend in `plan` has no flighting to rescale, so it stays
-#' at zero, with a message. To consider it, give it small weights in the
-#' periods it should run, for example `plan$video <- 1e-6` for an even spread.
+#' at zero, with a message, and a lower bound above zero for it is an error.
+#' To consider it, give it small weights in the periods it should run, for
+#' example `plan$video <- 1e-6` for an even spread.
 #'
 #' @seealso [plot.mm_allocation()], [simulate_plan()], [reallocate()],
 #'   [marginal_roi()]

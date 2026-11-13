@@ -34,7 +34,8 @@ one; other names, such as the intercept and the controls, are ignored.}
 
 \item{total}{Total spend to allocate across the channels in \code{spec}.
 Defaults to their total in \code{plan}, which asks how the current budget
-would best be split.}
+would best be split. It must lie between the sum of \code{lower} and the sum
+of \code{upper}.}
 
 \item{lower, upper}{Bounds on each channel's total spend: a numeric vector
 named by channel, or one number for every channel. A channel not named
@@ -71,8 +72,8 @@ rescaled to its recommended total.}
 \item{\code{total}, \code{step}, \code{steps}}{The budget allocated, the size of one
 increment and the number of increments.}
 }
-It has \code{print()} and \code{as.data.frame()} methods, and a
-\link[=plot.mm_allocation]{plot()} method.
+It has a \code{print()} method, \code{as.data.frame()} and \code{tidy()} methods that
+return \code{allocation}, and a \link[=plot.mm_allocation]{plot()} method.
 }
 \description{
 Splits a total budget across the channels of a plan so that the media
@@ -108,8 +109,9 @@ takes a channel far beyond the spend it has run at is extrapolation; test
 a large move before making it (see \code{\link[=marginal_roi]{marginal_roi()}}).
 
 A channel with no spend in \code{plan} has no flighting to rescale, so it stays
-at zero, with a message. To consider it, give it small weights in the
-periods it should run, for example \code{plan$video <- 1e-6} for an even spread.
+at zero, with a message, and a lower bound above zero for it is an error.
+To consider it, give it small weights in the periods it should run, for
+example \code{plan$video <- 1e-6} for an even spread.
 }
 \examples{
 data(mm_weekly)
