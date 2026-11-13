@@ -1,5 +1,5 @@
 # Helpers for the optional recipes / dials layers. These packages live in
-# Suggests so that the core transforms stay dependency-free; every entry point
+# Suggests so that the core transforms do not depend on them; every entry point
 # that needs them says so plainly rather than failing on a missing object.
 
 #' @keywords internal
