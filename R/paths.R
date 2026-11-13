@@ -1,9 +1,9 @@
 #' Build customer journeys from a raw event log
 #'
 #' Turns a table of individual touchpoint events into the journeys that
-#' attribution models consume. This is the step most attribution packages assume
-#' you have already done, and the step where most attribution numbers are
-#' quietly decided.
+#' attribution models consume. This is the step that attribution packages such
+#' as \pkg{ChannelAttribution} leave to you, and the step where most
+#' attribution numbers are quietly decided.
 #'
 #' @param events A data frame of touchpoint events, one row per event.
 #' @param id Name of the column identifying the customer or device, as a string.
@@ -79,14 +79,15 @@
 #'   a name with a column of the result, or with `credit` and `credit_value`,
 #'   which the credit rules add.
 #' @param conversion_touch Does the channel recorded on a conversion event
-#'   count as a touch? `"keep"` (the default) makes each conversion event the
-#'   last touch of its journey, so a sale logged on `"email"` gives email a
-#'   touch. `"drop"` removes conversion events from the touches once the
-#'   journey's conversion time and value have been read from them; use it when
-#'   the conversion row records where the sale happened, such as a checkout
-#'   page, rather than a marketing touch. A touch sharing the conversion's
-#'   timestamp stays. A journey whose only event was its conversion is left
-#'   with no touches, and its conversion is reported as unattributable.
+#'   count as a touch? `"keep"` (the default) counts each conversion event as
+#'   a touch, the last of its journey under the default `split_on`, so a sale
+#'   logged on `"email"` gives email a touch. `"drop"` removes conversion
+#'   events from the touches once the journey's conversion time and value have
+#'   been read from them; use it when the conversion row records where the
+#'   sale happened, such as a checkout page, rather than a marketing touch. A
+#'   touch sharing the conversion's timestamp stays. A journey whose only event
+#'   was its conversion is left with no touches, and its conversion is reported
+#'   as unattributable.
 #'
 #' @return An object of class `mm_paths`, a data frame with one row per retained
 #'   touchpoint and the columns
@@ -106,8 +107,9 @@
 #'   counts are attached as attributes and reported by [path_summary()].
 #'
 #' @details
-#' Seven things go wrong between an event log and a set of journeys. All seven
-#' are arguments here rather than assumptions.
+#' Seven things go wrong between an event log and a set of journeys. The first
+#' five are arguments here rather than assumptions, and the last two, ordering
+#' and accounting, are handled the same way every time.
 #'
 #' **Journey splitting.** A customer who converts in March and again in
 #' September is two journeys, not one nine-month journey with two conversions.
@@ -154,10 +156,9 @@
 #' so can `conversion_touch = "drop"`, alone or with a lookback. (A lookback
 #' alone cannot do this while the conversion event is a touch, since it is
 #' always inside its own window.) Those conversions are counted and reported by
-#' [path_summary()] as
-#' `conversions_unattributable` rather than disappearing -- including in the
-#' degenerate case where filtering removes every row and the returned table is
-#' empty.
+#' [path_summary()] as `conversions_unattributable` rather than disappearing,
+#' including in the degenerate case where filtering removes every row and the
+#' returned table is empty.
 #'
 #' @section What is dropped, and when:
 #' Two things are removed that no argument controls, because they are not
@@ -168,7 +169,7 @@
 #' at its conversion by construction. Under `split_on = "none"` or `"gap"` it is
 #' not: a customer's events after their last conversion are discarded, because a
 #' touch that happened after the sale cannot have caused it. If you want those
-#' events, they belong to the next journey -- split on conversion.
+#' events, split on conversion: they belong to the next journey.
 #'
 #' Journeys with no remaining touchpoints are dropped entirely, and any
 #' conversion they carried is reported as unattributable rather than as absent.
@@ -200,9 +201,10 @@
 #' well-built journey table makes the bookkeeping honest and comparable across
 #' rules, which is worth a great deal, and it is not incrementality.
 #'
-#' @seealso [credit_linear()] and friends for assigning credit,
-#'   [attribute()] to compare rules, [conversion_lag()] to choose a lookback,
-#'   [as_channel_paths()] to hand off to \pkg{ChannelAttribution}.
+#' @seealso [path_summary()] for what was dropped, [credit_linear()] and
+#'   friends for assigning credit, [attribute()] to compare rules,
+#'   [conversion_lag()] to choose a lookback, [as_channel_paths()] to hand off
+#'   to \pkg{ChannelAttribution}.
 #'
 #' @examples
 #' data(mm_events)
@@ -413,7 +415,7 @@ build_paths <- function(events,
   if (direct == "label") {
     ch[is_direct] <- "(direct)"
   } else {
-    # Under "keep", labels are preserved as they are -- except that an absent
+    # Under "keep", labels are preserved as they are, except that an absent
     # label is given a name so it can be referred to at all. A channel called
     # "" cannot be indexed by name in a table or a matrix, so leaving it
     # nameless would make the diagnostics unable to talk about it.

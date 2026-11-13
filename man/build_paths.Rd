@@ -119,14 +119,15 @@ a name with a column of the result, or with \code{credit} and \code{credit_value
 which the credit rules add.}
 
 \item{conversion_touch}{Does the channel recorded on a conversion event
-count as a touch? \code{"keep"} (the default) makes each conversion event the
-last touch of its journey, so a sale logged on \code{"email"} gives email a
-touch. \code{"drop"} removes conversion events from the touches once the
-journey's conversion time and value have been read from them; use it when
-the conversion row records where the sale happened, such as a checkout
-page, rather than a marketing touch. A touch sharing the conversion's
-timestamp stays. A journey whose only event was its conversion is left
-with no touches, and its conversion is reported as unattributable.}
+count as a touch? \code{"keep"} (the default) counts each conversion event as
+a touch, the last of its journey under the default \code{split_on}, so a sale
+logged on \code{"email"} gives email a touch. \code{"drop"} removes conversion
+events from the touches once the journey's conversion time and value have
+been read from them; use it when the conversion row records where the
+sale happened, such as a checkout page, rather than a marketing touch. A
+touch sharing the conversion's timestamp stays. A journey whose only event
+was its conversion is left with no touches, and its conversion is reported
+as unattributable.}
 }
 \value{
 An object of class \code{mm_paths}, a data frame with one row per retained
@@ -148,13 +149,14 @@ counts are attached as attributes and reported by \code{\link[=path_summary]{pat
 }
 \description{
 Turns a table of individual touchpoint events into the journeys that
-attribution models consume. This is the step most attribution packages assume
-you have already done, and the step where most attribution numbers are
-quietly decided.
+attribution models consume. This is the step that attribution packages such
+as \pkg{ChannelAttribution} leave to you, and the step where most
+attribution numbers are quietly decided.
 }
 \details{
-Seven things go wrong between an event log and a set of journeys. All seven
-are arguments here rather than assumptions.
+Seven things go wrong between an event log and a set of journeys. The first
+five are arguments here rather than assumptions, and the last two, ordering
+and accounting, are handled the same way every time.
 
 \strong{Journey splitting.} A customer who converts in March and again in
 September is two journeys, not one nine-month journey with two conversions.
@@ -201,10 +203,9 @@ touchpoint, leaving a conversion that no channel can be credited with, and
 so can \code{conversion_touch = "drop"}, alone or with a lookback. (A lookback
 alone cannot do this while the conversion event is a touch, since it is
 always inside its own window.) Those conversions are counted and reported by
-\code{\link[=path_summary]{path_summary()}} as
-\code{conversions_unattributable} rather than disappearing -- including in the
-degenerate case where filtering removes every row and the returned table is
-empty.
+\code{\link[=path_summary]{path_summary()}} as \code{conversions_unattributable} rather than disappearing,
+including in the degenerate case where filtering removes every row and the
+returned table is empty.
 }
 \section{What is dropped, and when}{
 
@@ -216,7 +217,7 @@ default \code{split_on = "conversion"} this is invisible, since every journey en
 at its conversion by construction. Under \code{split_on = "none"} or \code{"gap"} it is
 not: a customer's events after their last conversion are discarded, because a
 touch that happened after the sale cannot have caused it. If you want those
-events, they belong to the next journey -- split on conversion.
+events, split on conversion: they belong to the next journey.
 
 Journeys with no remaining touchpoints are dropped entirely, and any
 conversion they carried is reported as unattributable rather than as absent.
@@ -288,7 +289,8 @@ build_paths(ev, id = "id", channel = "ch", timestamp = "ts",
             conversion_touch = "drop")
 }
 \seealso{
-\code{\link[=credit_linear]{credit_linear()}} and friends for assigning credit,
-\code{\link[=attribute]{attribute()}} to compare rules, \code{\link[=conversion_lag]{conversion_lag()}} to choose a lookback,
-\code{\link[=as_channel_paths]{as_channel_paths()}} to hand off to \pkg{ChannelAttribution}.
+\code{\link[=path_summary]{path_summary()}} for what was dropped, \code{\link[=credit_linear]{credit_linear()}} and
+friends for assigning credit, \code{\link[=attribute]{attribute()}} to compare rules,
+\code{\link[=conversion_lag]{conversion_lag()}} to choose a lookback, \code{\link[=as_channel_paths]{as_channel_paths()}} to hand off
+to \pkg{ChannelAttribution}.
 }
