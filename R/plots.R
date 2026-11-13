@@ -496,8 +496,8 @@ plot.mm_carryover_joint <- function(x, truth = NULL, ...) {
 #' percentile interval as a line, ordered by estimate.
 #'
 #' @param x An `mm_bootstrap` object from [block_bootstrap()].
-#' @param reference Optional value drawn as a muted vertical line -- `1` for
-#'   an ROI's break-even point, `0` for a coefficient.
+#' @param reference Optional value drawn as a muted vertical line, such as `1`
+#'   for an ROI's break-even point or `0` for a coefficient.
 #' @param xlab Axis label.
 #' @param ... Graphical arguments: `main` and `ylab` replace the defaults, and
 #'   `col` colours each term's interval and dot, recycled in the row order of
@@ -575,16 +575,18 @@ plot.mm_bootstrap <- function(x, reference = NULL, xlab = "Estimate", ...) {
 #' numbers at their values, and text labels in sort order, so pass a factor
 #' to set the order of text labels. With more than eight channels the time
 #' chart keeps the seven largest and draws the rest together as "Other", with
-#' a message. A missing contribution is counted as zero, with a warning.
+#' a message. A missing or infinite contribution is counted as zero, and a row
+#' with a missing period is left out of the time chart, each with a warning.
 #'
 #' @examples
 #' data(mm_weekly)
 #' north <- mm_weekly[mm_weekly$geo == "north", ]
 #' ch <- c("tv", "search")
 #' tr <- attr(mm_weekly, "truth")
-#' media <- as.data.frame(Map(function(x, d, h, s) media_transform(
-#'   x, adstock = list(decay = d), saturation = list(half_max = h, shape = s)),
-#'   north[ch], tr$decay[ch], tr$half_max[ch], tr$shape[ch]))
+#' spec <- lapply(stats::setNames(ch, ch), function(k) list(
+#'   adstock = list(decay = tr$decay[[k]]),
+#'   saturation = list(half_max = tr$half_max[[k]], shape = tr$shape[[k]])))
+#' media <- transform_plan(north[ch], spec)
 #' fit <- lm(north$revenue ~ ., data = media)
 #' contrib <- contributions(media, fit, index = north$date)
 #' plot(contrib)
@@ -734,14 +736,16 @@ plot.mm_contributions <- function(x, type = c("time", "total"), ...) {
 
 #' Plot a response curve
 #'
-#' Two stacked panels on a shared spend axis: the response and its marginal
-#' return. Spend outside the observed range, below or above it, is shaded,
+#' Two stacked panels on a shared axis of adstocked spend, the saturation
+#' curve's input (see [response_curve()]): the response and its marginal
+#' return. With `observed`, levels below or above its range are shaded,
 #' because there the curve is extrapolation. The point where the marginal
-#' return is largest in size is marked as the steepest.
+#' return is largest in size is marked as the steepest, unless it is the first
+#' or last point.
 #'
 #' @param x A data frame from [response_curve()].
-#' @param observed Optional numeric vector of the spend levels seen in the
-#'   data (for example the adstocked series); its range is left unshaded.
+#' @param observed Optional numeric vector of the levels seen in the data,
+#'   normally the channel's adstocked series; its range is left unshaded.
 #' @param ... Graphical arguments: `main` and `ylab` replace the upper panel's
 #'   title and axis label, `xlab` the spend axis label, and `col` the line
 #'   colour. Others are ignored.
@@ -749,9 +753,13 @@ plot.mm_contributions <- function(x, type = c("time", "total"), ...) {
 #' @return `x`, invisibly.
 #'
 #' @examples
+#' data(mm_weekly)
+#' north <- mm_weekly[mm_weekly$geo == "north", ]
 #' rc <- response_curve(seq(0, 6000, by = 100), coefficient = 6000,
 #'                      half_max = 2250, shape = 1.6)
-#' plot(rc, observed = c(0, 3450))
+#'
+#' # Shade the levels outside the range of television's adstocked series
+#' plot(rc, observed = adstock_geometric(north$tv, decay = 0.85))
 #' @export
 plot.mm_response_curve <- function(x, observed = NULL, ...) {
   d <- as.data.frame(x)
@@ -798,8 +806,8 @@ plot.mm_response_curve <- function(x, observed = NULL, ...) {
   graphics::abline(h = pretty(y1), col = ink[["grid"]], lwd = 0.8)
   graphics::lines(d$spend, d$response, col = col, lwd = 2)
   graphics::par(mar = c(4, 5.2, 2.2, 1))
-  .mm_frame(xl, y2, main = "Marginal return per unit of spend",
-            xlab = .mm_arg(dots, "xlab", "Spend"), ylab = "Marginal")
+  .mm_frame(xl, y2, main = "Marginal return per unit of adstocked spend",
+            xlab = .mm_arg(dots, "xlab", "Adstocked spend"), ylab = "Marginal")
   shade(y2)
   graphics::abline(h = pretty(y2), col = ink[["grid"]], lwd = 0.8)
   graphics::lines(d$spend, d$marginal, col = col, lwd = 2)

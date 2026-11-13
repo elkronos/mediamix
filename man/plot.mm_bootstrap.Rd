@@ -9,8 +9,8 @@
 \arguments{
 \item{x}{An \code{mm_bootstrap} object from \code{\link[=block_bootstrap]{block_bootstrap()}}.}
 
-\item{reference}{Optional value drawn as a muted vertical line -- \code{1} for
-an ROI's break-even point, \code{0} for a coefficient.}
+\item{reference}{Optional value drawn as a muted vertical line, such as \code{1}
+for an ROI's break-even point or \code{0} for a coefficient.}
 
 \item{xlab}{Axis label.}
 
