@@ -437,8 +437,12 @@ attribution_spread <- function(attribution) {
            argument of {.fn build_paths}."
     ), call = call)
   }
+  # Names of the columns attribute() and attribution_spread() produce, which
+  # a segment column of the same name would overwrite.
   taken <- intersect(by, c("rule", "channel", "conversions", "share", "lower",
-                           "upper", "value", "touches"))
+                           "upper", "value", "touches", "spread",
+                           "min_share", "max_share", "mean_share",
+                           "first_last_ratio"))
   if (length(taken) > 0L) {
     cli::cli_abort(c(
       "{.val {taken}} cannot define segments: the result has a column of \\

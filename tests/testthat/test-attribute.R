@@ -580,3 +580,12 @@ test_that("times, level and seed are validated", {
                       conversion = "conv")
   expect_error(suppressWarnings(attribute(wide, times = 1e6)), "too many")
 })
+
+test_that("a segment column may not share a name with an output column", {
+  ev <- data.frame(id = c("a", "a", "b", "b"), ch = c("tv", "search",
+                   "search", "tv"), ts = c(1, 2, 1, 2), conv = c(0, 1, 0, 1),
+                   spread = rep(c("wide", "narrow"), each = 2))
+  p <- build_paths(ev, "id", "ch", "ts", conversion = "conv", keep = "spread")
+  expect_error(attribute(p, rules = c("first", "last"), by = "spread"),
+               "cannot define segments")
+})
