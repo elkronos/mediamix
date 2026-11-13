@@ -87,13 +87,13 @@ carryover off, and the conversion returns \code{kernel = "none"}.
 
 \strong{Weibull PDF.} Robyn rescales the Weibull density over its \code{n} lags so
 that the smallest weight is 0 and the largest is 1. \code{\link[=adstock_weibull]{adstock_weibull()}}
-divides by the largest weight and keeps the smallest above 0, so no
-\code{adstock_weibull()} arguments reproduce Robyn's series, and \code{from_robyn()}
-refuses rather than return an approximation. The gap grows with the ratio
-of the smallest density value to the largest: it is negligible when the
-density dies out well inside the series, and not when the tail is heavy
-(\code{shape} below 1) or \code{scale} is long. \code{\link[=adstock_filter]{adstock_filter()}} applies any kernel
-given as weights, Robyn's included.
+divides by the largest weight, or by the sum of the weights, and keeps the
+smallest above 0, so no \code{adstock_weibull()} arguments reproduce Robyn's
+series, and \code{from_robyn()} refuses rather than return an approximation.
+The gap grows with the ratio of the smallest density value to the largest:
+it is negligible when the density dies out well inside the series, and not
+when the tail is heavy (\code{shape} below 1) or \code{scale} is long.
+\code{\link[=adstock_filter]{adstock_filter()}} applies any kernel given as weights, Robyn's included.
 
 \strong{Hill.} Robyn's curve is \eqn{a^\alpha / (a^\alpha + g^\alpha)}, which is
 \code{\link[=saturate_hill]{saturate_hill()}} with \code{shape = alpha} and \code{half_max = g}. Robyn computes
