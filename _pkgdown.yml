@@ -20,11 +20,13 @@ navbar:
 
 articles:
 - title: Start here
-  desc: The package in one pass, then one budget question worked end to end.
+  desc: The package in one pass, one budget question worked end to end, an index from tasks to functions, and answers to common questions.
   navbar: ~
   contents:
   - mediamix
   - articles/budget-walkthrough
+  - articles/which-function
+  - articles/faq
 - title: Media mix modelling
   desc: Choosing carryover by cross-validation, and tuning the transforms with tidymodels.
   navbar: Media mix modelling
@@ -38,10 +40,11 @@ articles:
   - journeys
   - spine
 - title: Background
-  desc: How mediamix relates to other tools, and the method and source behind each function.
+  desc: How mediamix relates to other tools, how to move a Robyn model across, and the method and source behind each function.
   navbar: Background
   contents:
   - articles/comparison
+  - articles/migrating-from-robyn
   - articles/methodology
 
 reference:
