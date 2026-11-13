@@ -144,7 +144,9 @@ values taken together.}
 \item{\code{profiles}}{Each channel's cross-validation profile from the
 final sweep, with the other channels held at their selected values:
 \code{channel}, \code{max_lag}, \code{decay}, \code{half_life}, \code{metric}, \code{std_err}.}
-\item{\code{metric}}{The cross-validated metric at the selected values.}
+\item{\code{metric}}{The cross-validated metric at the selected values,
+scored on the \code{n_ok} splits that the \code{best} and \code{best_1se} sets both
+completed.}
 \item{\code{metric_name}}{Name of the metric function used.}
 \item{\code{iterations}, \code{converged}}{Sweeps run, and whether the last
 sweep changed nothing.}
@@ -158,7 +160,10 @@ for each channel, \code{observed} and \code{predicted}. When the two sets are
 the same, the \code{best_1se} rows repeat the \code{best} rows.}
 }
 plus \code{scheme}, \code{aggregate}, \code{n_splits}, \code{n_ok}, \code{n_series} and
-\code{normalise}, as in \code{\link[=tune_carryover]{tune_carryover()}}. \code{as.data.frame()} and \code{tidy()}
+\code{normalise}, as in \code{\link[=tune_carryover]{tune_carryover()}}, except that \code{n_ok} counts the
+splits the two selected sets completed rather than every grid point.
+Each channel's profile is compared on the splits its own grid completed,
+which can be fewer. \code{as.data.frame()} and \code{tidy()}
 return \code{profiles} with logical columns \code{best} and \code{best_1se} marking each
 channel's selections.
 }

@@ -65,7 +65,9 @@
 #'     \item{`profiles`}{Each channel's cross-validation profile from the
 #'       final sweep, with the other channels held at their selected values:
 #'       `channel`, `max_lag`, `decay`, `half_life`, `metric`, `std_err`.}
-#'     \item{`metric`}{The cross-validated metric at the selected values.}
+#'     \item{`metric`}{The cross-validated metric at the selected values,
+#'       scored on the `n_ok` splits that the `best` and `best_1se` sets both
+#'       completed.}
 #'     \item{`metric_name`}{Name of the metric function used.}
 #'     \item{`iterations`, `converged`}{Sweeps run, and whether the last
 #'       sweep changed nothing.}
@@ -79,7 +81,10 @@
 #'       the same, the `best_1se` rows repeat the `best` rows.}
 #'   }
 #'   plus `scheme`, `aggregate`, `n_splits`, `n_ok`, `n_series` and
-#'   `normalise`, as in [tune_carryover()]. `as.data.frame()` and `tidy()`
+#'   `normalise`, as in [tune_carryover()], except that `n_ok` counts the
+#'   splits the two selected sets completed rather than every grid point.
+#'   Each channel's profile is compared on the splits its own grid completed,
+#'   which can be fewer. `as.data.frame()` and `tidy()`
 #'   return `profiles` with logical columns `best` and `best_1se` marking each
 #'   channel's selections.
 #'
@@ -288,11 +293,21 @@ tune_carryover_joint <- function(media, y,
                     metric = sc$metric, std_err = sc$std_err)
     one_se[[ch]] <- .mm_one_se_pick(r, sc$jack, anchor = cur[[ch]])
     prof[[ch]] <- data.frame(channel = ch, r, stringsAsFactors = FALSE)
-    metric <- sc$metric[cur[[ch]]]
-    n_ok <- sc$n_ok
   }
   prof <- do.call(rbind, prof)
   rownames(prof) <- NULL
+
+  # The selected values are scored once more, as a set, on the splits that
+  # they and the one-SE set both completed. Each profile was scored on the
+  # splits its own grid completed, so taking the metric from one of them would
+  # make it depend on the order of the channels when fits fail.
+  differ <- !identical(one_se, cur)
+  best_sets <- run(cur)
+  one_sets <- if (differ) run(one_se) else best_sets
+  both <- compare(list(best_sets, one_sets))
+  metric <- both$metric[1L]
+  n_ok <- both$n_ok
+  best_1se_metric <- both$metric[2L]
   if (lost > 0L) {
     cli::cli_warn(c(
       "Up to {lost} split{?s} {?was/were} left out of a step of the search \\
@@ -301,17 +316,6 @@ tune_carryover_joint <- function(media, y,
            them completed; the selected values are scored on {n_ok}.",
       i = "First failure: {first_error}"
     ))
-  }
-
-  # The per-channel choices taken together were never part of the search, so
-  # score them as a set.
-  best_1se_metric <- metric
-  differ <- !identical(one_se, cur)
-  if (differ || save_pred) {
-    best_sets <- run(cur)
-    one_sets <- if (differ) run(one_se) else best_sets
-    both <- compare(list(best_sets, one_sets))
-    if (differ) best_1se_metric <- both$metric[2L]
   }
 
   pick <- function(sel) {

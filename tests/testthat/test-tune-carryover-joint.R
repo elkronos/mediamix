@@ -201,9 +201,11 @@ test_that("a fit that fails for some grid points is compared on common splits", 
                               decays = c(0.1, 0.2, 0.5, 0.7, 0.8)),
     "too many rows"
   )
-  # Training windows of 75 to 120 rows survive: 46 of the 75 splits.
+  # b's profile is compared on the 46 splits with training windows of 75 to
+  # 120 rows, the ones every grid point completed. The selected values never
+  # put b at 0.5, so they complete all 75 splits and are scored on them.
   expect_equal(j$n_splits, 75)
-  expect_equal(j$n_ok, 46)
+  expect_equal(j$n_ok, 75)
   expect_equal(j$best$decay, c(0.7, 0.2))
 })
 
@@ -373,4 +375,29 @@ test_that("cores = 2 keeps the same joint predictions", {
                             decays = seq(0.1, 0.9, by = 0.2), skip = 4,
                             save_pred = TRUE, cores = 2)
   expect_identical(b$predictions, a$predictions)
+})
+
+test_that("the selection is scored on one split set whatever the channel order", {
+  data(mm_weekly, package = "mediamix", envir = environment())
+  north <- mm_weekly[mm_weekly$geo == "north", ]
+  # Fails on some splits for some grid points, so profiles differ in the
+  # splits they complete.
+  ff <- function(X, y) {
+    if (nrow(X) %% 4 == 0 && X$search[2] < 200) stop("singular")
+    stats::lm(y ~ ., data = cbind(y = y, X))
+  }
+  tune <- function(cols) {
+    suppressWarnings(tune_carryover_joint(
+      north[cols], north$revenue, decays = c(0.1, 0.5, 0.9), initial = 120,
+      save_pred = TRUE, fit_fn = ff,
+      predict_fn = function(m, X) stats::predict(m, X)
+    ))
+  }
+  a <- tune(c("tv", "search"))
+  b <- tune(c("search", "tv"))
+  expect_equal(a$metric, b$metric)
+  expect_identical(a$n_ok, b$n_ok)
+  expect_equal(a$best_1se_metric, b$best_1se_metric)
+  p <- a$predictions[a$predictions$selection == "best", ]
+  expect_equal(rmse(p$observed, p$predicted), a$metric)
 })
